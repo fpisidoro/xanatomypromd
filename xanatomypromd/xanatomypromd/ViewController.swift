@@ -11,7 +11,12 @@ class ViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        DICOMTestManager.runQuickTests()  // Test the fix!
+        
+        // Test the simple cache
+        MetalTestManager.runMetalTests()
+        
+        // Visual test should work without breakpoints
+        MetalTestManager.createVisualTest(in: self)
     }
 }
 
