@@ -369,36 +369,69 @@ struct MetalDICOMImageView: UIViewRepresentable {
         private var currentTexture: MTLTexture?
         private var currentWindowing: CTWindowPresets.WindowLevel = CTWindowPresets.softTissue
         
+        // Metal pipeline for texture display
+        private var displayPipelineState: MTLRenderPipelineState?
+        private var vertexBuffer: MTLBuffer?
+        
         init(viewModel: DICOMViewerViewModel) {
             self.viewModel = viewModel
             super.init()
             
-            // Initialize your existing MetalRenderer
+            // Initialize MetalRenderer
             do {
                 self.metalRenderer = try MetalRenderer()
+                setupDisplayPipeline()
                 print("✅ MetalRenderer initialized for SwiftUI")
             } catch {
                 print("❌ Failed to initialize MetalRenderer: \(error)")
             }
         }
         
+        private func setupDisplayPipeline() {
+            guard let device = MTLCreateSystemDefaultDevice(),
+                  let library = device.makeDefaultLibrary() else {
+                print("❌ Failed to create Metal device or library")
+                return
+            }
+            
+            // Create render pipeline for displaying textures
+            let pipelineDescriptor = MTLRenderPipelineDescriptor()
+            pipelineDescriptor.vertexFunction = library.makeFunction(name: "vertex_main")
+            pipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragment_display_texture")
+            pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm // Match drawable format
+            
+            do {
+                displayPipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+                print("✅ Display pipeline created successfully")
+            } catch {
+                print("❌ Failed to create display pipeline: \(error)")
+            }
+            
+            // Create vertex buffer for full-screen quad
+            let vertices: [Float] = [
+                // Position (x,y)  TexCoord (u,v)
+                -1.0, -1.0,        0.0, 1.0,  // Bottom-left
+                 1.0, -1.0,        1.0, 1.0,  // Bottom-right
+                -1.0,  1.0,        0.0, 0.0,  // Top-left
+                 1.0,  1.0,        1.0, 0.0   // Top-right
+            ]
+            
+            vertexBuffer = device.makeBuffer(bytes: vertices,
+                                            length: vertices.count * MemoryLayout<Float>.size,
+                                            options: [])
+        }
+        
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-            // Handle view size changes
             print("📱 MTKView size changed to: \(size)")
         }
         
         func draw(in view: MTKView) {
-            print("🎨 Draw called - texture: \(currentTexture != nil ? "✅" : "❌")")
-            
-            guard let renderer = metalRenderer,
-                  let texture = currentTexture else {
-                print("⚫ Clearing view - no texture")
+            guard let texture = currentTexture else {
                 clearView(view)
                 return
             }
             
-            print("🖼️ Rendering with texture")
-            renderWithExistingRenderer(renderer: renderer, texture: texture, view: view)
+            renderTextureWithPipeline(texture: texture, view: view)
         }
         
         func updateSlice(_ slice: Int, windowing: CTWindowPresets.WindowLevel) {
@@ -408,95 +441,54 @@ struct MetalDICOMImageView: UIViewRepresentable {
             }
             
             print("🔍 Loading slice \(slice) with \(windowing.name) windowing")
-            
-            // Store current windowing
             self.currentWindowing = windowing
             
-            // Get pixel data for this slice from view model
             Task { @MainActor in
                 if let pixelData = await viewModel.getPixelData(for: slice) {
                     print("✅ Got pixel data: \(pixelData.columns)×\(pixelData.rows)")
                     
                     do {
-                        let texture = try renderer.createTexture(from: pixelData)
-                        print("✅ Created texture: \(texture.width)×\(texture.height)")
+                        let inputTexture = try renderer.createTexture(from: pixelData)
+                        print("✅ Created input texture")
                         
-                        await MainActor.run {
-                            self.currentTexture = texture
-                            print("✅ Set currentTexture, triggering redraw")
-                            self.setNeedsDisplay()
+                        // Apply windowing
+                        let config = MetalRenderer.RenderConfig(
+                            windowCenter: Float(windowing.center),
+                            windowWidth: Float(windowing.width)
+                        )
+                        
+                        renderer.renderCTImage(
+                            inputTexture: inputTexture,
+                            config: config
+                        ) { [weak self] windowedTexture in
+                            guard let self = self, let windowedTexture = windowedTexture else {
+                                print("❌ Windowing failed")
+                                return
+                            }
+                            
+                            DispatchQueue.main.async {
+                                self.currentTexture = windowedTexture
+                                print("✅ Set windowed texture for display")
+                            }
                         }
                     } catch {
-                        print("❌ Failed to create texture: \(error)")
+                        print("❌ Failed to process slice: \(error)")
                     }
-                } else {
-                    print("❌ No pixel data for slice \(slice)")
                 }
             }
         }
         
-        private func renderWithExistingRenderer(renderer: MetalRenderer, texture: MTLTexture, view: MTKView) {
-            // Create render config
-            let config = MetalRenderer.RenderConfig(
-                windowCenter: Float(currentWindowing.center),
-                windowWidth: Float(currentWindowing.width)
-            )
-            
-            print("🎨 Rendering with MetalRenderer")
-            
-            // Use your existing MetalRenderer
-            renderer.renderCTImage(
-                inputTexture: texture,
-                config: config
-            ) { windowedTexture in
-                guard let windowedTexture = windowedTexture else {
-                    print("❌ Windowing failed")
-                    return
-                }
-                
-                print("✅ Got windowed texture, converting to UIImage and back")
-                
-                // Convert to UIImage (this works from your logs)
-                if let uiImage = renderer.textureToUIImage(windowedTexture) {
-                    print("✅ UIImage created: \(uiImage.size)")
-                    
-                    // Now convert UIImage back to a Metal texture that matches the drawable
-                    DispatchQueue.main.async {
-                        self.displayImageSafely(uiImage, in: view)
-                    }
-                } else {
-                    print("❌ UIImage conversion failed")
-                }
-            }
-        }
-
-        // Instead of direct copy, use a render pass to display the image
-        private func displayImageSafely(_ image: UIImage, in view: MTKView) {
+        private func renderTextureWithPipeline(texture: MTLTexture, view: MTKView) {
             guard let drawable = view.currentDrawable,
-                  let device = view.device,
-                  let commandBuffer = device.makeCommandQueue()?.makeCommandBuffer(),
-                  let cgImage = image.cgImage else {
+                  let pipelineState = displayPipelineState,
+                  let vertexBuffer = vertexBuffer,
+                  let commandBuffer = view.device?.makeCommandQueue()?.makeCommandBuffer() else {
+                print("❌ Missing Metal components for pipeline rendering")
+                clearView(view)
                 return
             }
             
-            // Create texture from UIImage using MTKTextureLoader (this part works)
-            let textureLoader = MTKTextureLoader(device: device)
-            
-            do {
-                let sourceTexture = try textureLoader.newTexture(cgImage: cgImage)
-                print("✅ Created source texture: \(sourceTexture.width)×\(sourceTexture.height)")
-                
-                // Use a simple fragment shader to display the texture
-                renderTextureToDrawable(sourceTexture: sourceTexture, drawable: drawable, commandBuffer: commandBuffer)
-                
-            } catch {
-                print("❌ MTKTextureLoader failed: \(error)")
-                // Fallback to gray screen
-                clearToGray(drawable: drawable, commandBuffer: commandBuffer)
-            }
-        }
-
-        private func renderTextureToDrawable(sourceTexture: MTLTexture, drawable: CAMetalDrawable, commandBuffer: MTLCommandBuffer) {
+            // Create render pass
             let renderPassDescriptor = MTLRenderPassDescriptor()
             renderPassDescriptor.colorAttachments[0].texture = drawable.texture
             renderPassDescriptor.colorAttachments[0].loadAction = .clear
@@ -504,62 +496,24 @@ struct MetalDICOMImageView: UIViewRepresentable {
             renderPassDescriptor.colorAttachments[0].storeAction = .store
             
             guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
+                print("❌ Failed to create render encoder")
                 return
             }
             
-            // For now, let's just clear to a different color to confirm this path works
-            // We'll add the actual texture rendering after we confirm this works
+            // Setup render pipeline
+            renderEncoder.setRenderPipelineState(pipelineState)
+            renderEncoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+            renderEncoder.setFragmentTexture(texture, index: 0)
+            
+            // Draw full-screen quad
+            renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
             renderEncoder.endEncoding()
             
+            // Present drawable
             commandBuffer.present(drawable)
             commandBuffer.commit()
             
-            print("🎯 Render pipeline approach - should show black screen")
-        }
-
-        private func clearToGray(drawable: CAMetalDrawable, commandBuffer: MTLCommandBuffer) {
-            let renderPassDescriptor = MTLRenderPassDescriptor()
-            renderPassDescriptor.colorAttachments[0].texture = drawable.texture
-            renderPassDescriptor.colorAttachments[0].loadAction = .clear
-            renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1)
-            renderPassDescriptor.colorAttachments[0].storeAction = .store
-            
-            if let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
-                renderEncoder.endEncoding()
-            }
-            
-            commandBuffer.present(drawable)
-            commandBuffer.commit()
-        }
-        
-        private func displayImage(_ image: UIImage, in view: MTKView) {
-            // Convert UIImage back to texture and display it properly
-            guard let drawable = view.currentDrawable,
-                  let commandBuffer = view.device?.makeCommandQueue()?.makeCommandBuffer() else {
-                return
-            }
-            
-            // For now, let's create a simple texture from the UIImage
-            guard let cgImage = image.cgImage else { return }
-            
-            // Create a texture from the UIImage
-            let textureLoader = MTKTextureLoader(device: view.device!)
-            do {
-                let texture = try textureLoader.newTexture(cgImage: cgImage)
-                
-                // Simple blit to drawable
-                let blitEncoder = commandBuffer.makeBlitCommandEncoder()
-                blitEncoder?.copy(from: texture, to: drawable.texture)
-                blitEncoder?.endEncoding()
-                
-                commandBuffer.present(drawable)
-                commandBuffer.commit()
-                
-            } catch {
-                print("❌ Failed to create texture from UIImage: \(error)")
-                // Fallback: just clear the view
-                clearView(view)
-            }
+            print("🎨 Rendered texture using pipeline approach")
         }
         
         private func clearView(_ view: MTKView) {
@@ -580,11 +534,6 @@ struct MetalDICOMImageView: UIViewRepresentable {
             
             commandBuffer.present(drawable)
             commandBuffer.commit()
-        }
-        
-        private func setNeedsDisplay() {
-            // Trigger a redraw
-            // The MTKView will call draw(in:) automatically
         }
     }
 }

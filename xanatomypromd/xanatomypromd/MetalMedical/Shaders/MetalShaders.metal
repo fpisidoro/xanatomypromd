@@ -273,3 +273,13 @@ kernel void ctWindowing(
     
     outputTexture.write(outputColor, gid);
 }
+
+fragment float4 fragment_display_texture(VertexOut in [[stage_in]],
+                                         texture2d<float> inputTexture [[texture(0)]]) {
+    constexpr sampler textureSampler(coord::normalized,
+                                     filter::linear,
+                                     address::clamp_to_edge);
+    
+    // Sample and return the texture color directly
+    return inputTexture.sample(textureSampler, in.texCoord);
+}
