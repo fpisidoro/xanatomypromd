@@ -86,7 +86,10 @@ public class MetalRenderer {
     public func createTexture(from pixelData: PixelData) throws -> MTLTexture {
         let width = pixelData.columns
         let height = pixelData.rows
-        
+        guard pixelData.columns > 0 && pixelData.rows > 0 else {
+            print("❌ Invalid texture dimensions: \(pixelData.columns)×\(pixelData.rows)")
+            throw MetalError.textureCreationFailed
+        }
         // Create texture descriptor for 16-bit signed integer data
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .r16Sint,  // 16-bit signed integer format for signed CT data

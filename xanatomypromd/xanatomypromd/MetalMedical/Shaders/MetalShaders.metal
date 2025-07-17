@@ -1,16 +1,250 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// MARK: - CT Windowing Shader Parameters
+// MARK: - Vertex and Fragment Structures
+
+struct VertexIn {
+    float2 position;
+    float2 texCoord;
+};
+
+struct VertexOut {
+    float4 position [[position]];
+    float2 texCoord;
+};
+
+struct WindowingData {
+    float windowCenter;
+    float windowWidth;
+};
+
+// MARK: - Vertex Shader
+
+vertex VertexOut vertex_main(const device float4* vertices [[buffer(0)]],
+                             uint vid [[vertex_id]]) {
+    VertexOut out;
+    out.position = float4(vertices[vid].xy, 0.0, 1.0);
+    out.texCoord = vertices[vid].zw;
+    return out;
+}
+
+// MARK: - Fragment Shader for CT Windowing
+
+fragment float4 fragment_windowing(VertexOut in [[stage_in]],
+                                   texture2d<short> inputTexture [[texture(0)]],
+                                   constant WindowingData& windowing [[buffer(0)]]) {
+    
+    constexpr sampler textureSampler(coord::normalized,
+                                     filter::linear,
+                                     address::clamp_to_edge);
+    
+    // Sample the signed 16-bit texture
+    short pixelValue = inputTexture.sample(textureSampler, in.texCoord).r;
+    
+    // Convert to float for windowing calculation
+    float value = float(pixelValue);
+    
+    // Apply CT windowing transformation
+    float minValue = windowing.windowCenter - windowing.windowWidth / 2.0;
+    float maxValue = windowing.windowCenter + windowing.windowWidth / 2.0;
+    
+    // Clamp and normalize to 0-1 range
+    float normalizedValue = clamp((value - minValue) / (maxValue - minValue), 0.0, 1.0);
+    
+    // Return as grayscale with proper medical imaging appearance
+    return float4(normalizedValue, normalizedValue, normalizedValue, 1.0);
+}
+
+// MARK: - Enhanced Fragment Shader with Better Contrast
+
+fragment float4 fragment_windowing_enhanced(VertexOut in [[stage_in]],
+                                            texture2d<short> inputTexture [[texture(0)]],
+                                            constant WindowingData& windowing [[buffer(0)]]) {
+    
+    constexpr sampler textureSampler(coord::normalized,
+                                     filter::linear,
+                                     address::clamp_to_edge);
+    
+    // Sample the signed 16-bit texture
+    short pixelValue = inputTexture.sample(textureSampler, in.texCoord).r;
+    float value = float(pixelValue);
+    
+    // Apply CT windowing with enhanced contrast
+    float minValue = windowing.windowCenter - windowing.windowWidth / 2.0;
+    float maxValue = windowing.windowCenter + windowing.windowWidth / 2.0;
+    
+    // Normalize to 0-1 range
+    float normalizedValue = (value - minValue) / (maxValue - minValue);
+    
+    // Apply sigmoid curve for better contrast
+    float enhanced = 1.0 / (1.0 + exp(-6.0 * (normalizedValue - 0.5)));
+    
+    // Clamp to valid range
+    enhanced = clamp(enhanced, 0.0, 1.0);
+    
+    // Return as grayscale
+    return float4(enhanced, enhanced, enhanced, 1.0);
+}
+
+// MARK: - Fragment Shader with Inverted Colors (for X-ray appearance)
+
+fragment float4 fragment_windowing_inverted(VertexOut in [[stage_in]],
+                                            texture2d<short> inputTexture [[texture(0)]],
+                                            constant WindowingData& windowing [[buffer(0)]]) {
+    
+    constexpr sampler textureSampler(coord::normalized,
+                                     filter::linear,
+                                     address::clamp_to_edge);
+    
+    // Sample the signed 16-bit texture
+    short pixelValue = inputTexture.sample(textureSampler, in.texCoord).r;
+    float value = float(pixelValue);
+    
+    // Apply CT windowing
+    float minValue = windowing.windowCenter - windowing.windowWidth / 2.0;
+    float maxValue = windowing.windowCenter + windowing.windowWidth / 2.0;
+    
+    // Normalize and invert
+    float normalizedValue = clamp((value - minValue) / (maxValue - minValue), 0.0, 1.0);
+    float inverted = 1.0 - normalizedValue;
+    
+    // Return inverted grayscale
+    return float4(inverted, inverted, inverted, 1.0);
+}
+
+// MARK: - Fragment Shader with Color Mapping
+
+fragment float4 fragment_windowing_color(VertexOut in [[stage_in]],
+                                         texture2d<short> inputTexture [[texture(0)]],
+                                         constant WindowingData& windowing [[buffer(0)]]) {
+    
+    constexpr sampler textureSampler(coord::normalized,
+                                     filter::linear,
+                                     address::clamp_to_edge);
+    
+    // Sample the signed 16-bit texture
+    short pixelValue = inputTexture.sample(textureSampler, in.texCoord).r;
+    float value = float(pixelValue);
+    
+    // Apply CT windowing
+    float minValue = windowing.windowCenter - windowing.windowWidth / 2.0;
+    float maxValue = windowing.windowCenter + windowing.windowWidth / 2.0;
+    
+    // Normalize to 0-1 range
+    float normalizedValue = clamp((value - minValue) / (maxValue - minValue), 0.0, 1.0);
+    
+    // Create color mapping for different tissue types
+    float3 color;
+    
+    if (normalizedValue < 0.2) {
+        // Low density - dark blue to blue
+        color = mix(float3(0.0, 0.0, 0.2), float3(0.0, 0.0, 0.8), normalizedValue * 5.0);
+    } else if (normalizedValue < 0.4) {
+        // Medium low density - blue to green
+        color = mix(float3(0.0, 0.0, 0.8), float3(0.0, 0.8, 0.0), (normalizedValue - 0.2) * 5.0);
+    } else if (normalizedValue < 0.6) {
+        // Medium density - green to yellow
+        color = mix(float3(0.0, 0.8, 0.0), float3(0.8, 0.8, 0.0), (normalizedValue - 0.4) * 5.0);
+    } else if (normalizedValue < 0.8) {
+        // Medium high density - yellow to red
+        color = mix(float3(0.8, 0.8, 0.0), float3(0.8, 0.0, 0.0), (normalizedValue - 0.6) * 5.0);
+    } else {
+        // High density - red to white
+        color = mix(float3(0.8, 0.0, 0.0), float3(1.0, 1.0, 1.0), (normalizedValue - 0.8) * 5.0);
+    }
+    
+    return float4(color, 1.0);
+}
+
+// MARK: - Fragment Shader with Zoom and Pan Support
+
+struct ViewTransform {
+    float2 offset;
+    float scale;
+    float2 viewportSize;
+};
+
+fragment float4 fragment_windowing_transform(VertexOut in [[stage_in]],
+                                            texture2d<short> inputTexture [[texture(0)]],
+                                            constant WindowingData& windowing [[buffer(0)]],
+                                            constant ViewTransform& transform [[buffer(1)]]) {
+    
+    constexpr sampler textureSampler(coord::normalized,
+                                     filter::linear,
+                                     address::clamp_to_edge);
+    
+    // Apply view transformation
+    float2 transformedCoord = (in.texCoord - 0.5) * transform.scale + 0.5 + transform.offset;
+    
+    // Check if we're outside the texture bounds
+    if (transformedCoord.x < 0.0 || transformedCoord.x > 1.0 ||
+        transformedCoord.y < 0.0 || transformedCoord.y > 1.0) {
+        return float4(0.0, 0.0, 0.0, 1.0);  // Black for outside bounds
+    }
+    
+    // Sample the signed 16-bit texture
+    short pixelValue = inputTexture.sample(textureSampler, transformedCoord).r;
+    float value = float(pixelValue);
+    
+    // Apply CT windowing
+    float minValue = windowing.windowCenter - windowing.windowWidth / 2.0;
+    float maxValue = windowing.windowCenter + windowing.windowWidth / 2.0;
+    
+    // Normalize to 0-1 range
+    float normalizedValue = clamp((value - minValue) / (maxValue - minValue), 0.0, 1.0);
+    
+    // Return as grayscale
+    return float4(normalizedValue, normalizedValue, normalizedValue, 1.0);
+}
+
+// MARK: - Compute Shader for Histogram Generation
+
+kernel void compute_histogram(texture2d<short, access::read> inputTexture [[texture(0)]],
+                              device atomic_uint* histogram [[buffer(0)]],
+                              uint2 gid [[thread_position_in_grid]]) {
+    
+    // Check bounds
+    if (gid.x >= inputTexture.get_width() || gid.y >= inputTexture.get_height()) {
+        return;
+    }
+    
+    // Read pixel value
+    short pixelValue = inputTexture.read(gid).r;
+    
+    // Convert to histogram bin (assuming 4096 bins for 12-bit range)
+    int binIndex = clamp(int(pixelValue + 2048), 0, 4095);  // Shift signed range to 0-4095
+    
+    // Atomically increment histogram bin
+    atomic_fetch_add_explicit(&histogram[binIndex], 1, memory_order_relaxed);
+}
+
+// MARK: - Compute Shader for Statistics
+
+struct ImageStatistics {
+    float mean;
+    float stdDev;
+    short minValue;
+    short maxValue;
+};
+
+kernel void compute_statistics(texture2d<short, access::read> inputTexture [[texture(0)]],
+                              device ImageStatistics* stats [[buffer(0)]],
+                              uint2 gid [[thread_position_in_grid]]) {
+    
+    // This would need to be implemented with multiple passes
+    // First pass: calculate mean and find min/max
+    // Second pass: calculate standard deviation
+    
+    // For now, this is a placeholder that would need proper implementation
+    // using threadgroup memory and multiple kernel passes
+}
+
+// MARK: - CT Windowing Compute Shader (missing from your file)
 
 struct WindowingParams {
     float windowCenter;
     float windowWidth;
 };
-
-// MARK: - CT Windowing Compute Shader
-// Converts raw 16-bit CT pixel values to windowed 8-bit display values
-// Executes in parallel across thousands of GPU cores for real-time performance
 
 kernel void ctWindowing(
     texture2d<int, access::read> inputTexture [[texture(0)]],
@@ -23,12 +257,11 @@ kernel void ctWindowing(
         return;
     }
     
-    // Read signed 16-bit CT pixel value (already in Hounsfield Units range)
+    // Read signed 16-bit CT pixel value
     int rawPixel = inputTexture.read(gid).r;
     float ctValue = float(rawPixel);
     
     // Apply CT windowing formula
-    // Standard radiology windowing: map [center - width/2, center + width/2] to [0, 1]
     float windowMin = params.windowCenter - (params.windowWidth * 0.5);
     
     // Clamp and normalize to [0, 1] range
@@ -38,184 +271,5 @@ kernel void ctWindowing(
     // Output as RGBA with grayscale value
     float4 outputColor = float4(normalizedValue, normalizedValue, normalizedValue, 1.0);
     
-    outputTexture.write(outputColor, gid);
-}
-
-// MARK: - Advanced CT Windowing with LUT
-// More sophisticated windowing with lookup table support for complex mappings
-
-kernel void ctWindowingLUT(
-    texture2d<uint, access::read> inputTexture [[texture(0)]],
-    texture2d<float, access::write> outputTexture [[texture(1)]],
-    constant WindowingParams& params [[buffer(0)]],
-    constant float* lookupTable [[buffer(1)]],
-    constant uint& lutSize [[buffer(2)]],
-    uint2 gid [[thread_position_in_grid]]
-) {
-    if (gid.x >= inputTexture.get_width() || gid.y >= inputTexture.get_height()) {
-        return;
-    }
-    
-    uint rawPixel = inputTexture.read(gid).r;
-    
-    // Use lookup table for more complex windowing curves
-    uint lutIndex = min(rawPixel, lutSize - 1);
-    float windowedValue = lookupTable[lutIndex];
-    
-    // Apply additional windowing parameters
-    float windowMin = params.windowCenter - (params.windowWidth * 0.5);
-    
-    // Secondary windowing on LUT result
-    float finalValue = (windowedValue - windowMin) / params.windowWidth;
-    finalValue = clamp(finalValue, 0.0, 1.0);
-    
-    float4 outputColor = float4(finalValue, finalValue, finalValue, 1.0);
-    outputTexture.write(outputColor, gid);
-}
-
-// MARK: - Pseudocolor CT Windowing
-// Apply false color mapping for enhanced visualization
-
-kernel void ctWindowingPseudocolor(
-    texture2d<uint, access::read> inputTexture [[texture(0)]],
-    texture2d<float, access::write> outputTexture [[texture(1)]],
-    constant WindowingParams& params [[buffer(0)]],
-    uint2 gid [[thread_position_in_grid]]
-) {
-    if (gid.x >= inputTexture.get_width() || gid.y >= inputTexture.get_height()) {
-        return;
-    }
-    
-    uint rawPixel = inputTexture.read(gid).r;
-    float ctValue = float(rawPixel) - 32768.0;
-    
-    // Apply windowing
-    float windowMin = params.windowCenter - (params.windowWidth * 0.5);
-    float normalizedValue = (ctValue - windowMin) / params.windowWidth;
-    normalizedValue = clamp(normalizedValue, 0.0, 1.0);
-    
-    // Apply pseudocolor mapping (hot colormap)
-    float4 outputColor;
-    if (normalizedValue < 0.33) {
-        // Black to red
-        outputColor = float4(normalizedValue * 3.0, 0.0, 0.0, 1.0);
-    } else if (normalizedValue < 0.66) {
-        // Red to yellow
-        float t = (normalizedValue - 0.33) * 3.0;
-        outputColor = float4(1.0, t, 0.0, 1.0);
-    } else {
-        // Yellow to white
-        float t = (normalizedValue - 0.66) * 3.0;
-        outputColor = float4(1.0, 1.0, t, 1.0);
-    }
-    
-    outputTexture.write(outputColor, gid);
-}
-
-// MARK: - Multi-Planar Reconstruction Helper
-// Trilinear interpolation for MPR slice generation
-
-float trilinearInterpolation(
-    texture3d<float, access::read> volumeTexture,
-    float3 position
-) {
-    // Get texture dimensions
-    uint width = volumeTexture.get_width();
-    uint height = volumeTexture.get_height();
-    uint depth = volumeTexture.get_depth();
-    
-    // Convert normalized position to texture coordinates
-    float3 texCoord = position * float3(width - 1, height - 1, depth - 1);
-    
-    // Get integer and fractional parts
-    uint3 coord0 = uint3(floor(texCoord));
-    uint3 coord1 = min(coord0 + 1, uint3(width - 1, height - 1, depth - 1));
-    float3 frac = texCoord - float3(coord0);
-    
-    // Sample 8 neighboring voxels
-    float v000 = volumeTexture.read(uint3(coord0.x, coord0.y, coord0.z)).r;
-    float v001 = volumeTexture.read(uint3(coord0.x, coord0.y, coord1.z)).r;
-    float v010 = volumeTexture.read(uint3(coord0.x, coord1.y, coord0.z)).r;
-    float v011 = volumeTexture.read(uint3(coord0.x, coord1.y, coord1.z)).r;
-    float v100 = volumeTexture.read(uint3(coord1.x, coord0.y, coord0.z)).r;
-    float v101 = volumeTexture.read(uint3(coord1.x, coord0.y, coord1.z)).r;
-    float v110 = volumeTexture.read(uint3(coord1.x, coord1.y, coord0.z)).r;
-    float v111 = volumeTexture.read(uint3(coord1.x, coord1.y, coord1.z)).r;
-    
-    // Trilinear interpolation
-    float v00 = mix(v000, v100, frac.x);
-    float v01 = mix(v001, v101, frac.x);
-    float v10 = mix(v010, v110, frac.x);
-    float v11 = mix(v011, v111, frac.x);
-    
-    float v0 = mix(v00, v10, frac.y);
-    float v1 = mix(v01, v11, frac.y);
-    
-    return mix(v0, v1, frac.z);
-}
-
-// MARK: - MPR Slice Generation
-// Generate arbitrary slice through 3D volume for multi-planar reconstruction
-
-kernel void generateMPRSlice(
-    texture3d<float, access::read> volumeTexture [[texture(0)]],
-    texture2d<float, access::write> outputSlice [[texture(1)]],
-    constant float4x4& transformMatrix [[buffer(0)]],
-    constant WindowingParams& params [[buffer(1)]],
-    uint2 gid [[thread_position_in_grid]]
-) {
-    if (gid.x >= outputSlice.get_width() || gid.y >= outputSlice.get_height()) {
-        return;
-    }
-    
-    // Convert pixel coordinates to normalized slice coordinates
-    float2 sliceCoord = (float2(gid) + 0.5) / float2(outputSlice.get_width(), outputSlice.get_height());
-    
-    // Transform slice coordinates to volume space
-    float4 volumePos = transformMatrix * float4(sliceCoord.x, sliceCoord.y, 0.0, 1.0);
-    float3 volumeCoord = volumePos.xyz / volumePos.w;
-    
-    // Check bounds
-    if (any(volumeCoord < 0.0) || any(volumeCoord > 1.0)) {
-        outputSlice.write(float4(0.0, 0.0, 0.0, 1.0), gid);
-        return;
-    }
-    
-    // Sample volume with trilinear interpolation
-    float sampledValue = trilinearInterpolation(volumeTexture, volumeCoord);
-    
-    // Apply windowing
-    float windowMin = params.windowCenter - (params.windowWidth * 0.5);
-    float normalizedValue = (sampledValue - windowMin) / params.windowWidth;
-    normalizedValue = clamp(normalizedValue, 0.0, 1.0);
-    
-    float4 outputColor = float4(normalizedValue, normalizedValue, normalizedValue, 1.0);
-    outputSlice.write(outputColor, gid);
-}
-
-// MARK: - Performance Optimized Windowing
-// Single-pass windowing optimized for real-time interaction
-
-kernel void fastCTWindowing(
-    texture2d<uint, access::read> inputTexture [[texture(0)]],
-    texture2d<float, access::write> outputTexture [[texture(1)]],
-    constant WindowingParams& params [[buffer(0)]],
-    uint2 gid [[thread_position_in_grid]]
-) {
-    if (gid.x >= inputTexture.get_width() || gid.y >= inputTexture.get_height()) {
-        return;
-    }
-    
-    // Read and convert in single operation
-    uint rawPixel = inputTexture.read(gid).r;
-    float ctValue = float(rawPixel) - 32768.0;
-    
-    // Fast windowing without intermediate floating point
-    float windowMin = params.windowCenter - (params.windowWidth * 0.5);
-    float normalizedValue = (ctValue - windowMin) / params.windowWidth;
-    normalizedValue = clamp(normalizedValue, 0.0, 1.0);
-    
-    // Output as grayscale RGBA
-    float4 outputColor = float4(normalizedValue, normalizedValue, normalizedValue, 1.0);
     outputTexture.write(outputColor, gid);
 }

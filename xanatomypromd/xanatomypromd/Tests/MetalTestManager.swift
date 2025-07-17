@@ -23,7 +23,7 @@ class MetalTestManager {
         testRendererInitialization()
         testTextureCreation()
         testCTWindowing()
-        testTextureCache()
+        //testTextureCache()
         testWindowingPresets()
         testUIImageConversion()
         testPerformanceBenchmark()
@@ -167,59 +167,59 @@ class MetalTestManager {
         print("")
     }
     
-    static func testTextureCache() {
-        print("💾 TEST: Simple Texture Cache")
-        
-        guard let renderer = metalRenderer,
-              let device = MTLCreateSystemDefaultDevice() else {
-            print("   ❌ Metal components not available")
-            return
-        }
-        
-        let cache = SimpleTextureCache(device: device, maxCachedTextures: 5)
-        
-        print("   ✅ SimpleTextureCache initialized")
-        
-        // Test caching with multiple files
-        let dicomFiles = DICOMTestManager.getDICOMFiles()
-        let testFiles = Array(dicomFiles.prefix(3))
-        
-        var completedTests = 0
-        let totalTests = testFiles.count
-        
-        for (index, file) in testFiles.enumerated() {
-            cache.getTexture(
-                for: index,
-                pixelDataProvider: {
-                    do {
-                        let data = try Data(contentsOf: file)
-                        let dataset = try DICOMParser.parse(data)
-                        return DICOMParser.extractPixelData(from: dataset)
-                    } catch {
-                        print("   ❌ Error loading slice \(index): \(error)")
-                        return nil
-                    }
-                },
-                metalRenderer: renderer
-            ) { texture in
-                if texture != nil {
-                    print("   ✅ Cached texture \(index)")
-                } else {
-                    print("   ❌ Failed to cache texture \(index)")
-                }
-                
-                completedTests += 1
-                if completedTests == totalTests {
-                    // Print cache stats after all tests
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        print("   \(cache.getStats())")
-                    }
-                }
-            }
-        }
-        
-        print("")
-    }
+//    static func testTextureCache() {
+//        print("💾 TEST: Simple Texture Cache")
+//        
+//        guard let renderer = metalRenderer,
+//              let device = MTLCreateSystemDefaultDevice() else {
+//            print("   ❌ Metal components not available")
+//            return
+//        }
+//        
+//        // Comment out or delete the SimpleTextureCache test since we deleted that class
+//        // let cache = SimpleTextureCache(device: device, maxCachedTextures: 5)
+//        print("   ⚠️  SimpleTextureCache test skipped - using main TextureCache instead")
+//        
+//        // Test caching with multiple files
+//        let dicomFiles = DICOMTestManager.getDICOMFiles()
+//        let testFiles = Array(dicomFiles.prefix(3))
+//        
+//        var completedTests = 0
+//        let totalTests = testFiles.count
+//        
+//        for (index, file) in testFiles.enumerated() {
+//            cache.getTexture(
+//                for: index,
+//                pixelDataProvider: {
+//                    do {
+//                        let data = try Data(contentsOf: file)
+//                        let dataset = try DICOMParser.parse(data)
+//                        return DICOMParser.extractPixelData(from: dataset)
+//                    } catch {
+//                        print("   ❌ Error loading slice \(index): \(error)")
+//                        return nil
+//                    }
+//                },
+//                metalRenderer: renderer
+//            ) { texture in
+//                if texture != nil {
+//                    print("   ✅ Cached texture \(index)")
+//                } else {
+//                    print("   ❌ Failed to cache texture \(index)")
+//                }
+//                
+//                completedTests += 1
+//                if completedTests == totalTests {
+//                    // Print cache stats after all tests
+//                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+//                        print("   \(cache.getStats())")
+//                    }
+//                }
+//            }
+//        }
+//        
+//        print("")
+//    }
     
     static func testWindowingPresets() {
         print("🎛️  TEST: Standard CT Windowing Presets")
