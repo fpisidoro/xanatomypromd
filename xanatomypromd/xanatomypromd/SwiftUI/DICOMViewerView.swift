@@ -1,6 +1,12 @@
 @preconcurrency import SwiftUI
 @preconcurrency import MetalKit
 
+struct DICOMSliceInfo {
+    let fileURL: URL
+    let sliceLocation: Double
+    let instanceNumber: Int
+}
+
 // MARK: - Aspect Ratio Support
 struct AspectRatioUniforms {
     let scaleX: Float
@@ -350,6 +356,7 @@ struct DICOMViewerView: View {
         // TODO: Show DICOM metadata info sheet
         print("Show DICOM info")
     }
+    
 }
 
 // MARK: - Metal-based DICOM Image View
@@ -657,11 +664,15 @@ class DICOMViewerViewModel: ObservableObject {
     func loadDICOMSeries() async {
         isLoading = true
         
-        // Get DICOM files from bundle
-        dicomFiles = getDICOMFiles()
+        // Get DICOM files from bundle (original filename order)
+        let originalFiles = getDICOMFiles()
+        print("📁 Found \(originalFiles.count) DICOM files")
+        
+        // NEW: Sort by anatomical position instead of filename
+        dicomFiles = await sortDICOMFilesByAnatomicalPosition(originalFiles)
         totalSlices = dicomFiles.count
         
-        // Parse first file for series info
+        // Parse first file for series info (rest of method unchanged)
         if let firstFile = dicomFiles.first {
             do {
                 let data = try Data(contentsOf: firstFile)
@@ -674,7 +685,7 @@ class DICOMViewerViewModel: ObservableObject {
                     modality: dataset.getString(tag: .modality)
                 )
                 
-                // Pre-load first few slices
+                // Pre-load first few slices in correct order
                 await preloadSlices(0..<min(5, dicomFiles.count))
                 
             } catch {
@@ -685,7 +696,8 @@ class DICOMViewerViewModel: ObservableObject {
         // Initialize Metal renderer
         if let device = MTLCreateSystemDefaultDevice() {
             do {
-                metalRenderer = try MetalRenderer()  // ✅ Add try since it can throw
+                metalRenderer = try MetalRenderer()
+                print("✅ DICOM series loaded with proper anatomical ordering")
             } catch {
                 print("Failed to initialize MetalRenderer: \(error)")
             }
@@ -782,7 +794,56 @@ class DICOMViewerViewModel: ObservableObject {
             return []
         }
     }
-}
+    
+    private func sortDICOMFilesByAnatomicalPosition(_ files: [URL]) async -> [URL] {
+          print("📊 Sorting \(files.count) DICOM files by anatomical position...")
+          
+          var sliceInfos: [DICOMSliceInfo] = []
+          
+          for (index, file) in files.enumerated() {
+              do {
+                  let data = try Data(contentsOf: file)
+                  let dataset = try DICOMParser.parse(data)
+                  
+                  let sliceLocation = dataset.getDouble(tag: .sliceLocation) ?? Double(index)
+                  let instanceNumber = Int(dataset.getUInt16(tag: .instanceNumber) ?? UInt16(index))
+                  
+                  let sliceInfo = DICOMSliceInfo(
+                      fileURL: file,
+                      sliceLocation: sliceLocation,
+                      instanceNumber: instanceNumber
+                  )
+                  
+                  sliceInfos.append(sliceInfo)
+                  
+              } catch {
+                  print("⚠️  Could not parse slice info from \(file.lastPathComponent): \(error)")
+                  let fallbackInfo = DICOMSliceInfo(
+                      fileURL: file,
+                      sliceLocation: Double(index),
+                      instanceNumber: index
+                  )
+                  sliceInfos.append(fallbackInfo)
+              }
+          }
+          
+          // Sort by anatomical position: Superior (top) to Inferior (bottom)
+          let sortedInfos = sliceInfos.sorted { slice1, slice2 in
+              // Higher Z = slice 1 (top of head)
+              return slice1.sliceLocation > slice2.sliceLocation
+          }
+          
+          // Debug output
+          print("📋 First 5 slices after sorting:")
+          for (index, info) in sortedInfos.prefix(5).enumerated() {
+              let shortName = String(info.fileURL.lastPathComponent.suffix(15))
+              print("   \(index + 1): \(shortName) | Loc: \(String(format: "%.1f", info.sliceLocation))")
+          }
+          
+          return sortedInfos.map { $0.fileURL }
+      }
+  }
+
 
 // MARK: - Preview
 
