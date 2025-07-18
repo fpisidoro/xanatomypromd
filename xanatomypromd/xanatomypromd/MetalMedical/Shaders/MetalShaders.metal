@@ -20,11 +20,29 @@ struct WindowingData {
 
 // MARK: - Vertex Shader
 
+// NEW: Aspect ratio correction uniforms
+struct AspectRatioUniforms {
+    float scaleX;
+    float scaleY;
+    float2 offset;  // For future centering adjustments
+};
+
+// MARK: - Updated Vertex Shader with Aspect Ratio Correction
+
 vertex VertexOut vertex_main(const device float4* vertices [[buffer(0)]],
+                             constant AspectRatioUniforms& aspectRatio [[buffer(1)]],
                              uint vid [[vertex_id]]) {
     VertexOut out;
-    out.position = float4(vertices[vid].xy, 0.0, 1.0);
+    
+    // Get original vertex position
+    float2 originalPos = vertices[vid].xy;
+    
+    // Apply aspect ratio correction to maintain 1:1 pixel ratio
+    float2 correctedPos = originalPos * float2(aspectRatio.scaleX, aspectRatio.scaleY);
+    
+    out.position = float4(correctedPos, 0.0, 1.0);
     out.texCoord = vertices[vid].zw;
+    
     return out;
 }
 

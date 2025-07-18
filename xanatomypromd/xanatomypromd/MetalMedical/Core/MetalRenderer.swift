@@ -87,7 +87,7 @@ public class MetalRenderer {
         let width = pixelData.columns
         let height = pixelData.rows
         guard pixelData.columns > 0 && pixelData.rows > 0 else {
-            print("❌ Invalid texture dimensions: \(pixelData.columns)×\(pixelData.rows)")
+//            print("❌ Invalid texture dimensions: \(pixelData.columns)×\(pixelData.rows)")
             throw MetalError.textureCreationFailed
         }
         // Create texture descriptor for 16-bit signed integer data

@@ -1,6 +1,19 @@
 @preconcurrency import SwiftUI
 @preconcurrency import MetalKit
 
+// MARK: - Aspect Ratio Support
+struct AspectRatioUniforms {
+    let scaleX: Float
+    let scaleY: Float
+    let offset: SIMD2<Float>
+    
+    init(scaleX: Float, scaleY: Float, offset: SIMD2<Float> = SIMD2<Float>(0, 0)) {
+        self.scaleX = scaleX
+        self.scaleY = scaleY
+        self.offset = offset
+    }
+}
+
 // MARK: - Main DICOM Viewer Interface
 
 struct DICOMViewerView: View {
@@ -363,15 +376,25 @@ struct MetalDICOMImageView: UIViewRepresentable {
         Coordinator(viewModel: viewModel)
     }
     
+    // MARK: - Cleaned Up Coordinator Class for DICOMViewerView.swift
+    // Replace the existing Coordinator class with this version
+
     class Coordinator: NSObject, MTKViewDelegate {
         let viewModel: DICOMViewerViewModel
         private var metalRenderer: MetalRenderer?
         private var currentTexture: MTLTexture?
         private var currentWindowing: CTWindowPresets.WindowLevel = CTWindowPresets.softTissue
         
+        // NEW: Add these properties
+         private var aspectRatioBuffer: MTLBuffer?
+         private var lastViewportSize: CGSize = .zero
+        
         // Metal pipeline for texture display
         private var displayPipelineState: MTLRenderPipelineState?
         private var vertexBuffer: MTLBuffer?
+        
+        // Debug flag - set to true only when debugging
+        private let DEBUG_LOGGING = false
         
         init(viewModel: DICOMViewerViewModel) {
             self.viewModel = viewModel
@@ -422,7 +445,11 @@ struct MetalDICOMImageView: UIViewRepresentable {
         }
         
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-            print("📱 MTKView size changed to: \(size)")
+            if DEBUG_LOGGING {
+                print("📱 MTKView size changed to: \(size)")
+            }
+            
+            updateAspectRatio(for: size)  // ADD this line
         }
         
         func draw(in view: MTKView) {
@@ -436,20 +463,28 @@ struct MetalDICOMImageView: UIViewRepresentable {
         
         func updateSlice(_ slice: Int, windowing: CTWindowPresets.WindowLevel) {
             guard let renderer = metalRenderer else {
-                print("❌ No MetalRenderer")
+                print("❌ No MetalRenderer available")
                 return
             }
             
-            print("🔍 Loading slice \(slice) with \(windowing.name) windowing")
+            if DEBUG_LOGGING {
+                print("🔍 Loading slice \(slice) with \(windowing.name) windowing")
+            }
+            
             self.currentWindowing = windowing
             
             Task { @MainActor in
                 if let pixelData = await viewModel.getPixelData(for: slice) {
-                    print("✅ Got pixel data: \(pixelData.columns)×\(pixelData.rows)")
+                    if DEBUG_LOGGING {
+                        print("✅ Got pixel data: \(pixelData.columns)×\(pixelData.rows)")
+                    }
                     
                     do {
                         let inputTexture = try renderer.createTexture(from: pixelData)
-                        print("✅ Created input texture")
+                        
+                        if DEBUG_LOGGING {
+                            print("✅ Created input texture")
+                        }
                         
                         // Apply windowing
                         let config = MetalRenderer.RenderConfig(
@@ -462,18 +497,23 @@ struct MetalDICOMImageView: UIViewRepresentable {
                             config: config
                         ) { [weak self] windowedTexture in
                             guard let self = self, let windowedTexture = windowedTexture else {
-                                print("❌ Windowing failed")
+                                print("❌ Windowing failed for slice \(slice)")
                                 return
                             }
                             
                             DispatchQueue.main.async {
                                 self.currentTexture = windowedTexture
-                                print("✅ Set windowed texture for display")
+                                
+                                if self.DEBUG_LOGGING {
+                                    print("✅ Set windowed texture for display")
+                                }
                             }
                         }
                     } catch {
-                        print("❌ Failed to process slice: \(error)")
+                        print("❌ Failed to process slice \(slice): \(error)")
                     }
+                } else {
+                    print("❌ No pixel data available for slice \(slice)")
                 }
             }
         }
@@ -484,6 +524,18 @@ struct MetalDICOMImageView: UIViewRepresentable {
                   let vertexBuffer = vertexBuffer,
                   let commandBuffer = view.device?.makeCommandQueue()?.makeCommandBuffer() else {
                 print("❌ Missing Metal components for pipeline rendering")
+                clearView(view)
+                return
+            }
+            
+            // Ensure aspect ratio is updated for current view size
+            let currentSize = view.drawableSize
+            if currentSize != lastViewportSize {
+                updateAspectRatio(for: currentSize)
+            }
+            
+            guard let aspectBuffer = aspectRatioBuffer else {
+                print("❌ No aspect ratio buffer")
                 clearView(view)
                 return
             }
@@ -500,12 +552,13 @@ struct MetalDICOMImageView: UIViewRepresentable {
                 return
             }
             
-            // Setup render pipeline
+            // Setup render pipeline with aspect ratio correction
             renderEncoder.setRenderPipelineState(pipelineState)
             renderEncoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+            renderEncoder.setVertexBuffer(aspectBuffer, offset: 0, index: 1)  // NEW: Aspect ratio uniforms
             renderEncoder.setFragmentTexture(texture, index: 0)
             
-            // Draw full-screen quad
+            // Draw full-screen quad with corrected aspect ratio
             renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
             renderEncoder.endEncoding()
             
@@ -513,7 +566,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
             commandBuffer.present(drawable)
             commandBuffer.commit()
             
-            print("🎨 Rendered texture using pipeline approach")
+//            print("🎨 Rendered texture with aspect ratio correction")
         }
         
         private func clearView(_ view: MTKView) {
@@ -535,6 +588,49 @@ struct MetalDICOMImageView: UIViewRepresentable {
             commandBuffer.present(drawable)
             commandBuffer.commit()
         }
+        
+        
+        private func updateAspectRatio(for viewSize: CGSize) {
+            guard let device = MTLCreateSystemDefaultDevice(),
+                  viewSize.width > 0 && viewSize.height > 0 else { return }
+            
+            // Calculate viewport aspect ratio
+            let viewportAspect = Float(viewSize.width / viewSize.height)
+            let imageAspect: Float = 1.0  // DICOM images are 512×512 (square)
+            
+            // Calculate scaling factors for 1:1 pixel aspect ratio
+            let scaleX: Float
+            let scaleY: Float
+            
+            if viewportAspect > imageAspect {
+                // Viewport is wider than image (landscape-ish)
+                scaleX = imageAspect / viewportAspect
+                scaleY = 1.0
+            } else {
+                // Viewport is taller than image (portrait-ish)
+                scaleX = 1.0
+                scaleY = viewportAspect / imageAspect
+            }
+            
+            // Create aspect ratio uniforms
+            var aspectUniforms = AspectRatioUniforms(
+                scaleX: scaleX,
+                scaleY: scaleY,
+                offset: SIMD2<Float>(0, 0)
+            )
+            
+            // Update or create buffer
+            aspectRatioBuffer = device.makeBuffer(
+                bytes: &aspectUniforms,
+                length: MemoryLayout<AspectRatioUniforms>.size,
+                options: []
+            )
+            
+            lastViewportSize = viewSize
+            
+            print("📐 Aspect ratio updated: Scale X=\(scaleX), Y=\(scaleY)")
+        }
+
     }
 }
 // MARK: - View Model
