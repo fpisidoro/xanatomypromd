@@ -262,6 +262,8 @@ kernel void compute_statistics(texture2d<short, access::read> inputTexture [[tex
 struct WindowingParams {
     float windowCenter;
     float windowWidth;
+    float rescaleSlope;
+    float rescaleIntercept;
 };
 
 kernel void ctWindowing(
@@ -277,16 +279,19 @@ kernel void ctWindowing(
     
     // Read signed 16-bit CT pixel value
     int rawPixel = inputTexture.read(gid).r;
-    float ctValue = float(rawPixel);
     
-    // Apply CT windowing formula
+    // Convert raw pixel to Hounsfield Units (HU)
+    float housefieldValue = float(rawPixel) * params.rescaleSlope + params.rescaleIntercept;
+    
+    // Apply CT windowing to Hounsfield Units
     float windowMin = params.windowCenter - (params.windowWidth * 0.5);
+    float windowMax = params.windowCenter + (params.windowWidth * 0.5);
     
-    // Clamp and normalize to [0, 1] range
-    float normalizedValue = (ctValue - windowMin) / params.windowWidth;
+    // Clamp and normalize HU values to [0, 1] range
+    float normalizedValue = (housefieldValue - windowMin) / (windowMax - windowMin);
     normalizedValue = clamp(normalizedValue, 0.0, 1.0);
     
-    // Output as RGBA with grayscale value
+    // Output as RGBA with proper medical grayscale
     float4 outputColor = float4(normalizedValue, normalizedValue, normalizedValue, 1.0);
     
     outputTexture.write(outputColor, gid);

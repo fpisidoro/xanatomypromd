@@ -140,11 +140,15 @@ public struct CTWindowPresets {
         }
     }
     
-    public static let bone = WindowLevel(center: 500, width: 2000, name: "Bone")
-    public static let lung = WindowLevel(center: -600, width: 1600, name: "Lung")
-    public static let softTissue = WindowLevel(center: 50, width: 350, name: "Soft Tissue")
-    public static let brain = WindowLevel(center: 40, width: 80, name: "Brain")
+    public static let bone = WindowLevel(center: 400, width: 1500, name: "Bone")
+    public static let lung = WindowLevel(center: -500, width: 1500, name: "Lung")
+    public static let softTissue = WindowLevel(center: 40, width: 350, name: "Soft Tissue")
+    public static let brain = WindowLevel(center: 35, width: 80, name: "Brain")
     public static let liver = WindowLevel(center: 60, width: 160, name: "Liver")
+
+     
+     // Update the all array:
+     public static let all: [WindowLevel] = [bone, lung, softTissue, brain, liver]
     
-    public static let all: [WindowLevel] = [bone, lung, softTissue, brain, liver]
+   // public static let all: [WindowLevel] = [bone, lung, softTissue, brain, liver]
 }

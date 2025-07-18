@@ -20,11 +20,21 @@ public class MetalRenderer {
     public struct RenderConfig {
         let windowCenter: Float
         let windowWidth: Float
+        let rescaleSlope: Float
+        let rescaleIntercept: Float
         let outputFormat: MTLPixelFormat
         
-        public init(windowCenter: Float, windowWidth: Float, outputFormat: MTLPixelFormat = .rgba8Unorm) {
+        public init(
+            windowCenter: Float,
+            windowWidth: Float,
+            rescaleSlope: Float = 1.0,
+            rescaleIntercept: Float = 0.0,
+            outputFormat: MTLPixelFormat = .rgba8Unorm
+        ) {
             self.windowCenter = windowCenter
             self.windowWidth = windowWidth
+            self.rescaleSlope = rescaleSlope
+            self.rescaleIntercept = rescaleIntercept
             self.outputFormat = outputFormat
         }
     }
@@ -196,7 +206,9 @@ public class MetalRenderer {
         // Pass windowing parameters to shader
         var windowingParams = WindowingParams(
             windowCenter: config.windowCenter,
-            windowWidth: config.windowWidth
+            windowWidth: config.windowWidth,
+            rescaleSlope: config.rescaleSlope,
+            rescaleIntercept: config.rescaleIntercept
         )
         encoder.setBytes(&windowingParams, length: MemoryLayout<WindowingParams>.size, index: 0)
         
@@ -302,6 +314,8 @@ public class MetalRenderer {
 private struct WindowingParams {
     let windowCenter: Float
     let windowWidth: Float
+    let rescaleSlope: Float
+    let rescaleIntercept: Float
 }
 
 // MARK: - Performance Monitoring Extension

@@ -1,6 +1,16 @@
 @preconcurrency import SwiftUI
 @preconcurrency import MetalKit
 
+struct RescaleParameters {
+    let slope: Float
+    let intercept: Float
+    
+    init(slope: Float = 1.0, intercept: Float = 0.0) {
+        self.slope = slope
+        self.intercept = intercept
+    }
+}
+
 struct DICOMSliceInfo {
     let fileURL: URL
     let sliceLocation: Double
@@ -41,9 +51,11 @@ struct DICOMViewerView: View {
                     
                     // MARK: - Main Image Display
                     imageDisplayView(geometry: geometry)
+                        .frame(height: geometry.size.height * 0.75)
                     
                     // MARK: - Controls Section
                     controlsView
+                        .frame(height: geometry.size.height * 0.25)
                 }
                 .background(Color.black)
                 .navigationBarHidden(true)
@@ -196,6 +208,7 @@ struct DICOMViewerView: View {
             actionButtonsView
         }
         .padding()
+       // .background(Color.red.opacity(0.3))
         .background(Color.gray.opacity(0.1))
     }
     
@@ -206,17 +219,20 @@ struct DICOMViewerView: View {
                 .font(.headline)
                 .foregroundColor(.white)
             
-            ScrollView(.horizontal, showsIndicators: false) {
+           ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(CTWindowPresets.all, id: \.name) { preset in
+
                         Button(action: {
+                            print("🪟 Windowing preset tapped: \(preset.name)")
                             selectedWindowingPreset = preset
                         }) {
                             VStack(spacing: 4) {
                                 Text(preset.name)
                                     .font(.caption)
                                     .fontWeight(.medium)
-                                
+                                    .foregroundColor(.white)
+
                                 Text("C:\(Int(preset.center)) W:\(Int(preset.width))")
                                     .font(.caption2)
                                     .foregroundColor(.gray)
@@ -228,14 +244,16 @@ struct DICOMViewerView: View {
                                     ? Color.blue
                                     : Color.gray.opacity(0.3)
                             )
-                            .foregroundColor(.white)
+                            
                             .cornerRadius(8)
                         }
                     }
-                }
+               }
                 .padding(.horizontal)
             }
         }
+        .background(Color.green.opacity(0.5))  // Add this to see if the view exists
+        .border(Color.yellow, width: 2)
     }
     
     // MARK: - Slice Slider
@@ -493,10 +511,15 @@ struct MetalDICOMImageView: UIViewRepresentable {
                             print("✅ Created input texture")
                         }
                         
-                        // Apply windowing
+                        // Get rescale parameters from DICOM dataset
+                        let rescaleParams = await viewModel.getRescaleParameters(for: slice)
+
+                        // Apply windowing with proper rescale parameters
                         let config = MetalRenderer.RenderConfig(
                             windowCenter: Float(windowing.center),
-                            windowWidth: Float(windowing.width)
+                            windowWidth: Float(windowing.width),
+                            rescaleSlope: rescaleParams.slope,
+                            rescaleIntercept: rescaleParams.intercept
                         )
                         
                         renderer.renderCTImage(
@@ -678,6 +701,22 @@ class DICOMViewerViewModel: ObservableObject {
                 let data = try Data(contentsOf: firstFile)
                 let dataset = try DICOMParser.parse(data)
                 
+                if let rescaleSlope = dataset.getDouble(tag: .rescaleSlope) {
+                    print("🔍 Rescale Slope: \(rescaleSlope)")
+                }
+                if let rescaleIntercept = dataset.getDouble(tag: .rescaleIntercept) {
+                    print("🔍 Rescale Intercept: \(rescaleIntercept)")
+                }
+                if let windowCenter = dataset.windowCenter {
+                    print("🔍 DICOM Window Center: \(windowCenter)")
+                }
+                if let windowWidth = dataset.windowWidth {
+                    print("🔍 DICOM Window Width: \(windowWidth)")
+                }
+                
+                
+                
+                
                 seriesInfo = DICOMSeriesInfo(
                     patientName: dataset.patientName,
                     studyDate: dataset.studyDate,
@@ -842,6 +881,30 @@ class DICOMViewerViewModel: ObservableObject {
           
           return sortedInfos.map { $0.fileURL }
       }
+    
+    
+    /// Extract rescale parameters from DICOM dataset
+    func getRescaleParameters(for sliceIndex: Int) async -> RescaleParameters {
+        guard sliceIndex >= 0 && sliceIndex < dicomFiles.count else {
+            return RescaleParameters() // Default values
+        }
+        
+        do {
+            let data = try Data(contentsOf: dicomFiles[sliceIndex])
+            let dataset = try DICOMParser.parse(data)
+            
+            let slope = Float(dataset.getDouble(tag: .rescaleSlope) ?? 1.0)
+            let intercept = Float(dataset.getDouble(tag: .rescaleIntercept) ?? 0.0)
+            
+            print("🔍 Rescale parameters for slice \(sliceIndex): slope=\(slope), intercept=\(intercept)")
+            
+            return RescaleParameters(slope: slope, intercept: intercept)
+            
+        } catch {
+            print("❌ Error extracting rescale parameters: \(error)")
+            return RescaleParameters() // Default values
+        }
+    }
   }
 
 
