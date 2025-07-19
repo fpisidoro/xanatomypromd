@@ -1,6 +1,8 @@
 @preconcurrency import SwiftUI
 @preconcurrency import MetalKit
 
+
+
 struct RescaleParameters {
     let slope: Float
     let intercept: Float
@@ -671,6 +673,10 @@ class DICOMViewerViewModel: ObservableObject {
     @Published var totalSlices: Int = 0
     @Published var currentSlice: Int = 0
     @Published var isLoading: Bool = true
+    @Published var volumeRenderer: MetalVolumeRenderer?
+    @Published var currentPlane: MPRPlane = .axial
+    @Published var isVolumeLoaded: Bool = false
+    @Published var volumeLoadingProgress: Double = 0.0
     
     private var dicomFiles: [URL] = []
     private var parsedDatasets: [DICOMDataset] = []
@@ -733,7 +739,7 @@ class DICOMViewerViewModel: ObservableObject {
         }
         
         // Initialize Metal renderer
-        if let device = MTLCreateSystemDefaultDevice() {
+        if let _ = MTLCreateSystemDefaultDevice() {
             do {
                 metalRenderer = try MetalRenderer()
                 print("✅ DICOM series loaded with proper anatomical ordering")
@@ -743,6 +749,8 @@ class DICOMViewerViewModel: ObservableObject {
         }
         
         isLoading = false
+        // Add this line at the very end of your loadDICOMSeries() method
+        await loadVolumeForMPR()
     }
     
     func navigateToSlice(_ slice: Int) {
@@ -905,7 +913,51 @@ class DICOMViewerViewModel: ObservableObject {
             return RescaleParameters() // Default values
         }
     }
-  }
+    
+    func loadVolumeForMPR() async {
+        print("🧊 Loading 3D volume for MPR...")
+        
+        await MainActor.run {
+            isLoading = true
+            volumeLoadingProgress = 0.0
+        }
+        
+        do {
+            // Initialize volume renderer
+            let renderer = try MetalVolumeRenderer()
+            
+            await MainActor.run {
+                volumeRenderer = renderer
+                volumeLoadingProgress = 0.2
+            }
+            
+            // Get all DICOM files and load volume
+            let allFiles = getDICOMFiles()
+            let volumeData = try await MetalVolumeRenderer.loadVolumeFromDICOMFiles(allFiles)
+            
+            await MainActor.run {
+                volumeLoadingProgress = 0.8
+            }
+            
+            // Upload to GPU
+            try renderer.loadVolume(volumeData)
+            
+            await MainActor.run {
+                isVolumeLoaded = true
+                volumeLoadingProgress = 1.0
+                isLoading = false
+            }
+            
+            print("✅ 3D volume loaded successfully")
+            
+        } catch {
+            print("❌ Volume loading failed: \(error)")
+            await MainActor.run {
+                isLoading = false
+                volumeLoadingProgress = 0.0
+            }
+        }
+    }  }
 
 
 // MARK: - Preview

@@ -162,7 +162,7 @@ public struct DICOMParser {
         // Safety check for reasonable length values
         if length == 0xFFFFFFFF {
             // Undefined length - this is a sequence or item
-            print("🔄 Found undefined length element at tag \(tag) - skipping sequence parsing for now")
+//            print("🔄 Found undefined length element at tag \(tag) - skipping sequence parsing for now")
             
             // For now, skip undefined length elements by finding the sequence delimiter
             // In a full implementation, we'd parse the sequence structure

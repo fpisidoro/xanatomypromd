@@ -89,37 +89,15 @@ class ViewController: UIViewController {
     
     #if DEBUG
     private func runDevelopmentTests() {
-        // Run quick tests in background to avoid blocking UI
         DispatchQueue.global(qos: .background).async {
-            print("\n🧪 Running development tests...")
+            // Existing tests...
             
-            // Test DICOM file discovery
-            let dicomFiles = self.getDICOMFiles()
-            print("📁 Found \(dicomFiles.count) DICOM files")
+            // Add 3D volume tests
+            VolumeTestManager.runVolumeTests()
             
-            // Test first file parsing
-            if let firstFile = dicomFiles.first {
-                do {
-                    let data = try Data(contentsOf: firstFile)
-                    let dataset = try DICOMParser.parse(data)
-                    print("✅ DICOM parsing successful")
-                    
-                    if let pixelData = DICOMParser.extractPixelData(from: dataset) {
-                        print("✅ Pixel data extraction successful: \(pixelData.columns)×\(pixelData.rows)")
-                    }
-                } catch {
-                    print("❌ DICOM parsing failed: \(error)")
-                }
-            }
-            
-            // Test Metal device
-            if let device = MTLCreateSystemDefaultDevice() {
-                print("✅ Metal device available: \(device.name)")
-            } else {
-                print("❌ Metal device not available")
-            }
-            
-            print("🧪 Development tests complete\n")
+            // Test specific planes
+            VolumeTestManager.testSpecificPlane(.sagittal, position: 0.5)
+            VolumeTestManager.testSpecificPlane(.coronal, position: 0.5)
         }
     }
     
