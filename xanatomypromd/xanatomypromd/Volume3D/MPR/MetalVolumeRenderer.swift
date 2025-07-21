@@ -4,7 +4,7 @@ import simd
 
 // MARK: - Metal Volume Renderer
 // GPU-accelerated Multi-Planar Reconstruction (MPR)
-// Handles 3D texture creation and arbitrary plane sampling
+// WORKING VERSION: Integer textures with manual interpolation
 
 public class MetalVolumeRenderer {
     
@@ -75,16 +75,16 @@ public class MetalVolumeRenderer {
         print("   🧠 3D texture support: \(device.supportsFamily(.apple4) ? "Yes" : "Limited")")
     }
     
-    // MARK: - Volume Loading
+    // MARK: - Volume Loading (WORKING VERSION - Integer Textures)
     
     /// Load volume data into 3D Metal texture
     public func loadVolume(_ volumeData: VolumeData) throws {
         self.volumeData = volumeData
         
-        // Create 3D texture descriptor
+        // WORKING: Create 3D texture descriptor for integer format
         let descriptor = MTLTextureDescriptor()
         descriptor.textureType = .type3D
-        descriptor.pixelFormat = .r16Sint  // 16-bit signed integer for CT data
+        descriptor.pixelFormat = .r16Sint  // Integer format (working)
         descriptor.width = volumeData.dimensions.x
         descriptor.height = volumeData.dimensions.y
         descriptor.depth = volumeData.dimensions.z
@@ -135,7 +135,6 @@ public class MetalVolumeRenderer {
         completion: @escaping (MTLTexture?) -> Void
     ) {
         guard let volumeTexture = volumeTexture,
-              let volumeData = volumeData,
               let pipelineState = mprPipelineState else {
             completion(nil)
             return

@@ -1,8 +1,6 @@
 @preconcurrency import SwiftUI
 @preconcurrency import MetalKit
 
-
-
 struct RescaleParameters {
     let slope: Float
     let intercept: Float
@@ -32,12 +30,12 @@ struct AspectRatioUniforms {
     }
 }
 
-// MARK: - Main DICOM Viewer Interface
+// MARK: - Main DICOM Viewer Interface with MPR
 
 struct DICOMViewerView: View {
     @StateObject private var viewModel = DICOMViewerViewModel()
     @State private var selectedWindowingPreset: CTWindowPresets.WindowLevel = CTWindowPresets.softTissue
-    @State private var showingPresets = false
+    @State private var currentPlane: MPRPlane = .axial  // NEW: Current viewing plane
     @State private var currentSlice = 0
     @State private var isLoading = true
     @State private var dragOffset: CGSize = .zero
@@ -48,16 +46,16 @@ struct DICOMViewerView: View {
         NavigationView {
             GeometryReader { geometry in
                 VStack(spacing: 0) {
-                    // MARK: - Header with Series Info
+                    // MARK: - Header with Series Info + Plane Info
                     headerView
                     
                     // MARK: - Main Image Display
                     imageDisplayView(geometry: geometry)
-                        .frame(height: geometry.size.height * 0.75)
+                        .frame(height: geometry.size.height * 0.7)  // More space for controls
                     
                     // MARK: - Controls Section
                     controlsView
-                        .frame(height: geometry.size.height * 0.25)
+                        .frame(height: geometry.size.height * 0.3)
                 }
                 .background(Color.black)
                 .navigationBarHidden(true)
@@ -73,11 +71,11 @@ struct DICOMViewerView: View {
         .preferredColorScheme(.dark)
     }
     
-    // MARK: - Header View
+    // MARK: - Header View with Plane Info
     private var headerView: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text("X-Anatomy Pro v2.0")
+                Text("X-Anatomy Pro v2.0 - MPR")
                     .font(.headline)
                     .foregroundColor(.white)
                 
@@ -85,24 +83,24 @@ struct DICOMViewerView: View {
                     Text(seriesInfo.patientName ?? "Unknown Patient")
                         .font(.subheadline)
                         .foregroundColor(.gray)
-                    
-                    Text(seriesInfo.studyDate ?? "Unknown Date")
-                        .font(.caption)
-                        .foregroundColor(.gray)
                 }
             }
             
             Spacer()
             
-            // Slice Counter
+            // NEW: Current Plane and Slice Info
             VStack(alignment: .trailing, spacing: 4) {
-                Text("Slice \(currentSlice + 1)/\(viewModel.totalSlices)")
+                Text(currentPlane.rawValue)
                     .font(.headline)
+                    .foregroundColor(.blue)
+                
+                Text("Slice \(currentSlice + 1)/\(getMaxSlicesForPlane())")
+                    .font(.caption)
                     .foregroundColor(.white)
                 
                 Text(selectedWindowingPreset.name)
-                    .font(.caption)
-                    .foregroundColor(.blue)
+                    .font(.caption2)
+                    .foregroundColor(.gray)
             }
         }
         .padding(.horizontal)
@@ -114,14 +112,23 @@ struct DICOMViewerView: View {
     private func imageDisplayView(geometry: GeometryProxy) -> some View {
         ZStack {
             if isLoading {
-                ProgressView("Loading DICOM Series...")
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    .foregroundColor(.white)
+                VStack {
+                    ProgressView("Loading DICOM Series...")
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .foregroundColor(.white)
+                    
+                    if viewModel.isVolumeLoaded {
+                        Text("3D Volume Ready!")
+                            .foregroundColor(.green)
+                            .padding(.top, 8)
+                    }
+                }
             } else {
-                // Metal-rendered DICOM image
+                // Metal-rendered DICOM image with MPR support
                 MetalDICOMImageView(
                     viewModel: viewModel,
                     currentSlice: currentSlice,
+                    currentPlane: currentPlane,  // NEW: Pass current plane
                     windowingPreset: selectedWindowingPreset
                 )
                 .scaleEffect(scale)
@@ -181,7 +188,7 @@ struct DICOMViewerView: View {
             }
             .frame(width: geometry.size.width * 0.2, height: geometry.size.height)
             .contentShape(Rectangle())
-            .disabled(currentSlice == viewModel.totalSlices - 1)
+            .disabled(currentSlice == getMaxSlicesForPlane() - 1)
         }
         .background(Color.clear)
         .gesture(
@@ -197,9 +204,12 @@ struct DICOMViewerView: View {
         )
     }
     
-    // MARK: - Controls View
+    // MARK: - Controls View with MPR Plane Switching
     private var controlsView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 12) {
+            // NEW: MPR Plane Selection
+            mprPlaneSelector
+            
             // Windowing Presets
             windowingPresetsView
             
@@ -210,8 +220,43 @@ struct DICOMViewerView: View {
             actionButtonsView
         }
         .padding()
-       // .background(Color.red.opacity(0.3))
         .background(Color.gray.opacity(0.1))
+    }
+    
+    // MARK: - NEW: MPR Plane Selector
+    private var mprPlaneSelector: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Anatomical Plane")
+                .font(.headline)
+                .foregroundColor(.white)
+            
+            HStack(spacing: 12) {
+                ForEach([MPRPlane.axial, MPRPlane.sagittal, MPRPlane.coronal], id: \.self) { plane in
+                    Button(action: {
+                        switchToPlane(plane)
+                    }) {
+                        VStack(spacing: 4) {
+                            Text(plane.rawValue)
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                            
+                            Text(getPlaneDescription(plane))
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            currentPlane == plane
+                                ? Color.blue
+                                : Color.gray.opacity(0.3)
+                        )
+                        .cornerRadius(8)
+                    }
+                }
+            }
+        }
     }
     
     // MARK: - Windowing Presets
@@ -221,12 +266,10 @@ struct DICOMViewerView: View {
                 .font(.headline)
                 .foregroundColor(.white)
             
-           ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(CTWindowPresets.all, id: \.name) { preset in
-
                         Button(action: {
-                            print("🪟 Windowing preset tapped: \(preset.name)")
                             selectedWindowingPreset = preset
                         }) {
                             VStack(spacing: 4) {
@@ -234,7 +277,7 @@ struct DICOMViewerView: View {
                                     .font(.caption)
                                     .fontWeight(.medium)
                                     .foregroundColor(.white)
-
+                                
                                 Text("C:\(Int(preset.center)) W:\(Int(preset.width))")
                                     .font(.caption2)
                                     .foregroundColor(.gray)
@@ -246,16 +289,13 @@ struct DICOMViewerView: View {
                                     ? Color.blue
                                     : Color.gray.opacity(0.3)
                             )
-                            
                             .cornerRadius(8)
                         }
                     }
-               }
+                }
                 .padding(.horizontal)
             }
         }
-        .background(Color.green.opacity(0.5))  // Add this to see if the view exists
-        .border(Color.yellow, width: 2)
     }
     
     // MARK: - Slice Slider
@@ -270,22 +310,23 @@ struct DICOMViewerView: View {
                     .font(.caption)
                     .foregroundColor(.gray)
                 
-                if viewModel.totalSlices > 1 {
+                let maxSlices = getMaxSlicesForPlane()
+                if maxSlices > 1 {
                     Slider(
                         value: Binding(
                             get: { Double(currentSlice) },
                             set: { newValue in
                                 currentSlice = Int(newValue)
-                                viewModel.navigateToSlice(currentSlice)
+                                navigateToSlice(currentSlice)
                             }
                         ),
-                        in: 0...Double(viewModel.totalSlices - 1),
+                        in: 0...Double(maxSlices - 1),
                         step: 1
                     )
                     .accentColor(.blue)
                 }
                 
-                Text("\(viewModel.totalSlices)")
+                Text("\(maxSlices)")
                     .font(.caption)
                     .foregroundColor(.gray)
             }
@@ -335,21 +376,58 @@ struct DICOMViewerView: View {
         }
     }
     
-    // MARK: - Actions
+    // MARK: - NEW: MPR Plane Functions
+    
+    private func switchToPlane(_ plane: MPRPlane) {
+        print("🔄 Switching to \(plane.rawValue) plane")
+        withAnimation(.easeInOut(duration: 0.3)) {
+            currentPlane = plane
+            currentSlice = getMaxSlicesForPlane() / 2  // Start at center slice
+        }
+        navigateToSlice(currentSlice)
+    }
+    
+    private func getMaxSlicesForPlane() -> Int {
+        switch currentPlane {
+        case .axial:
+            return viewModel.totalSlices  // 53 slices
+        case .sagittal:
+            return 512  // Image width becomes slice count
+        case .coronal:
+            return 512  // Image height becomes slice count
+        }
+    }
+    
+    private func getPlaneDescription(_ plane: MPRPlane) -> String {
+        switch plane {
+        case .axial:
+            return "Head Slices"
+        case .sagittal:
+            return "Side View"
+        case .coronal:
+            return "Front View"
+        }
+    }
+    
+    // MARK: - Navigation Actions
     private func previousSlice() {
         guard currentSlice > 0 else { return }
         withAnimation(.easeInOut(duration: 0.1)) {
             currentSlice -= 1
         }
-        viewModel.navigateToSlice(currentSlice)
+        navigateToSlice(currentSlice)
     }
     
     private func nextSlice() {
-        guard currentSlice < viewModel.totalSlices - 1 else { return }
+        guard currentSlice < getMaxSlicesForPlane() - 1 else { return }
         withAnimation(.easeInOut(duration: 0.1)) {
             currentSlice += 1
         }
-        viewModel.navigateToSlice(currentSlice)
+        navigateToSlice(currentSlice)
+    }
+    
+    private func navigateToSlice(_ slice: Int) {
+        viewModel.navigateToSlice(slice, plane: currentPlane)
     }
     
     private func resetView() {
@@ -373,17 +451,18 @@ struct DICOMViewerView: View {
     }
     
     private func showInfo() {
-        // TODO: Show DICOM metadata info sheet
-        print("Show DICOM info")
+        print("🔍 Current plane: \(currentPlane.rawValue)")
+        print("🔍 Current slice: \(currentSlice)")
+        print("🔍 Volume loaded: \(viewModel.isVolumeLoaded)")
     }
-    
 }
 
-// MARK: - Metal-based DICOM Image View
+// MARK: - Enhanced Metal-based DICOM Image View with MPR
 
 struct MetalDICOMImageView: UIViewRepresentable {
     let viewModel: DICOMViewerViewModel
     let currentSlice: Int
+    let currentPlane: MPRPlane  // NEW: Current viewing plane
     let windowingPreset: CTWindowPresets.WindowLevel
     
     func makeUIView(context: Context) -> MTKView {
@@ -396,42 +475,35 @@ struct MetalDICOMImageView: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: MTKView, context: Context) {
-        context.coordinator.updateSlice(currentSlice, windowing: windowingPreset)
+        context.coordinator.updateSlice(currentSlice, plane: currentPlane, windowing: windowingPreset)
     }
     
     func makeCoordinator() -> Coordinator {
         Coordinator(viewModel: viewModel)
     }
     
-    // MARK: - Cleaned Up Coordinator Class for DICOMViewerView.swift
-    // Replace the existing Coordinator class with this version
-
+    // MARK: - Enhanced Coordinator with MPR Support
     class Coordinator: NSObject, MTKViewDelegate {
         let viewModel: DICOMViewerViewModel
         private var metalRenderer: MetalRenderer?
         private var currentTexture: MTLTexture?
         private var currentWindowing: CTWindowPresets.WindowLevel = CTWindowPresets.softTissue
-        
-        // NEW: Add these properties
-         private var aspectRatioBuffer: MTLBuffer?
-         private var lastViewportSize: CGSize = .zero
+        private var currentPlane: MPRPlane = .axial
         
         // Metal pipeline for texture display
         private var displayPipelineState: MTLRenderPipelineState?
         private var vertexBuffer: MTLBuffer?
-        
-        // Debug flag - set to true only when debugging
-        private let DEBUG_LOGGING = false
+        private var aspectRatioBuffer: MTLBuffer?
+        private var lastViewportSize: CGSize = .zero
         
         init(viewModel: DICOMViewerViewModel) {
             self.viewModel = viewModel
             super.init()
             
-            // Initialize MetalRenderer
             do {
                 self.metalRenderer = try MetalRenderer()
                 setupDisplayPipeline()
-                print("✅ MetalRenderer initialized for SwiftUI")
+                print("✅ MetalRenderer initialized for SwiftUI MPR")
             } catch {
                 print("❌ Failed to initialize MetalRenderer: \(error)")
             }
@@ -444,11 +516,10 @@ struct MetalDICOMImageView: UIViewRepresentable {
                 return
             }
             
-            // Create render pipeline for displaying textures
             let pipelineDescriptor = MTLRenderPipelineDescriptor()
             pipelineDescriptor.vertexFunction = library.makeFunction(name: "vertex_main")
             pipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragment_display_texture")
-            pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm // Match drawable format
+            pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
             
             do {
                 displayPipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
@@ -457,13 +528,11 @@ struct MetalDICOMImageView: UIViewRepresentable {
                 print("❌ Failed to create display pipeline: \(error)")
             }
             
-            // Create vertex buffer for full-screen quad
             let vertices: [Float] = [
-                // Position (x,y)  TexCoord (u,v)
-                -1.0, -1.0,        0.0, 1.0,  // Bottom-left
-                 1.0, -1.0,        1.0, 1.0,  // Bottom-right
-                -1.0,  1.0,        0.0, 0.0,  // Top-left
-                 1.0,  1.0,        1.0, 0.0   // Top-right
+                -1.0, -1.0,        0.0, 1.0,
+                 1.0, -1.0,        1.0, 1.0,
+                -1.0,  1.0,        0.0, 0.0,
+                 1.0,  1.0,        1.0, 0.0
             ]
             
             vertexBuffer = device.makeBuffer(bytes: vertices,
@@ -472,11 +541,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
         }
         
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-            if DEBUG_LOGGING {
-                print("📱 MTKView size changed to: \(size)")
-            }
-            
-            updateAspectRatio(for: size)  // ADD this line
+            updateAspectRatio(for: size)
         }
         
         func draw(in view: MTKView) {
@@ -488,65 +553,109 @@ struct MetalDICOMImageView: UIViewRepresentable {
             renderTextureWithPipeline(texture: texture, view: view)
         }
         
-        func updateSlice(_ slice: Int, windowing: CTWindowPresets.WindowLevel) {
+        // NEW: Enhanced update method with MPR plane support
+        func updateSlice(_ slice: Int, plane: MPRPlane, windowing: CTWindowPresets.WindowLevel) {
             guard let renderer = metalRenderer else {
                 print("❌ No MetalRenderer available")
                 return
             }
             
-            if DEBUG_LOGGING {
-                print("🔍 Loading slice \(slice) with \(windowing.name) windowing")
-            }
+            print("🔍 Loading \(plane.rawValue) slice \(slice) with \(windowing.name) windowing")
             
             self.currentWindowing = windowing
+            self.currentPlane = plane
+            
+            // FIXED: Update aspect ratio when plane changes
+            if plane != currentPlane {
+                updateAspectRatio(for: lastViewportSize)
+            }
             
             Task { @MainActor in
-                if let pixelData = await viewModel.getPixelData(for: slice) {
-                    if DEBUG_LOGGING {
-                        print("✅ Got pixel data: \(pixelData.columns)×\(pixelData.rows)")
+                // Handle different planes
+                switch plane {
+                case .axial:
+                    // Original axial slice from DICOM files
+                    if let pixelData = await viewModel.getPixelData(for: slice) {
+                        await renderPixelData(pixelData, with: windowing, using: renderer)
                     }
                     
-                    do {
-                        let inputTexture = try renderer.createTexture(from: pixelData)
-                        
-                        if DEBUG_LOGGING {
-                            print("✅ Created input texture")
-                        }
-                        
-                        // Get rescale parameters from DICOM dataset
-                        let rescaleParams = await viewModel.getRescaleParameters(for: slice)
-
-                        // Apply windowing with proper rescale parameters
-                        let config = MetalRenderer.RenderConfig(
-                            windowCenter: Float(windowing.center),
-                            windowWidth: Float(windowing.width),
-                            rescaleSlope: rescaleParams.slope,
-                            rescaleIntercept: rescaleParams.intercept
-                        )
-                        
-                        renderer.renderCTImage(
-                            inputTexture: inputTexture,
-                            config: config
-                        ) { [weak self] windowedTexture in
-                            guard let self = self, let windowedTexture = windowedTexture else {
-                                print("❌ Windowing failed for slice \(slice)")
-                                return
-                            }
-                            
-                            DispatchQueue.main.async {
-                                self.currentTexture = windowedTexture
-                                
-                                if self.DEBUG_LOGGING {
-                                    print("✅ Set windowed texture for display")
-                                }
-                            }
-                        }
-                    } catch {
-                        print("❌ Failed to process slice \(slice): \(error)")
+                case .sagittal, .coronal:
+                    // NEW: MPR slices from 3D volume
+                    if await viewModel.isVolumeLoaded {
+                        await renderMPRSlice(plane: plane, slice: slice, windowing: windowing)
+                    } else {
+                        print("⚠️ 3D volume not loaded for MPR")
                     }
-                } else {
-                    print("❌ No pixel data available for slice \(slice)")
                 }
+            }
+        }
+        
+        // NEW: Render MPR slice from 3D volume
+        private func renderMPRSlice(plane: MPRPlane, slice: Int, windowing: CTWindowPresets.WindowLevel) async {
+            guard let volumeRenderer = await viewModel.volumeRenderer else {
+                print("❌ No volume renderer available")
+                return
+            }
+            
+            // Convert slice index to normalized position [0, 1]
+            let maxSlices = await getMaxSlicesForPlane(plane)
+            let normalizedPosition = Float(slice) / Float(maxSlices - 1)
+            
+            print("🎬 Generating \(plane.rawValue) slice at position \(normalizedPosition)")
+            
+            let config = MetalVolumeRenderer.MPRConfig(
+                plane: plane,
+                sliceIndex: normalizedPosition,
+                windowCenter: Float(windowing.center),
+                windowWidth: Float(windowing.width)
+            )
+            
+            volumeRenderer.generateMPRSlice(config: config) { [weak self] texture in
+                guard let self = self, let texture = texture else {
+                    print("❌ MPR slice generation failed")
+                    return
+                }
+                
+                DispatchQueue.main.async {
+                    self.currentTexture = texture
+                    print("✅ MPR \(plane.rawValue) slice ready for display")
+                }
+            }
+        }
+        
+        private func renderPixelData(_ pixelData: PixelData, with windowing: CTWindowPresets.WindowLevel, using renderer: MetalRenderer) async {
+            do {
+                let inputTexture = try renderer.createTexture(from: pixelData)
+                let rescaleParams = await viewModel.getRescaleParameters(for: 0)
+                
+                let config = MetalRenderer.RenderConfig(
+                    windowCenter: Float(windowing.center),
+                    windowWidth: Float(windowing.width),
+                    rescaleSlope: rescaleParams.slope,
+                    rescaleIntercept: rescaleParams.intercept
+                )
+                
+                renderer.renderCTImage(
+                    inputTexture: inputTexture,
+                    config: config
+                ) { [weak self] windowedTexture in
+                    guard let self = self, let windowedTexture = windowedTexture else { return }
+                    
+                    DispatchQueue.main.async {
+                        self.currentTexture = windowedTexture
+                    }
+                }
+            } catch {
+                print("❌ Failed to render pixel data: \(error)")
+            }
+        }
+        
+        private func getMaxSlicesForPlane(_ plane: MPRPlane) async -> Int {
+            switch plane {
+            case .axial:
+                return await viewModel.totalSlices
+            case .sagittal, .coronal:
+                return 512
             }
         }
         
@@ -555,24 +664,20 @@ struct MetalDICOMImageView: UIViewRepresentable {
                   let pipelineState = displayPipelineState,
                   let vertexBuffer = vertexBuffer,
                   let commandBuffer = view.device?.makeCommandQueue()?.makeCommandBuffer() else {
-                print("❌ Missing Metal components for pipeline rendering")
                 clearView(view)
                 return
             }
             
-            // Ensure aspect ratio is updated for current view size
             let currentSize = view.drawableSize
             if currentSize != lastViewportSize {
                 updateAspectRatio(for: currentSize)
             }
             
             guard let aspectBuffer = aspectRatioBuffer else {
-                print("❌ No aspect ratio buffer")
                 clearView(view)
                 return
             }
             
-            // Create render pass
             let renderPassDescriptor = MTLRenderPassDescriptor()
             renderPassDescriptor.colorAttachments[0].texture = drawable.texture
             renderPassDescriptor.colorAttachments[0].loadAction = .clear
@@ -580,25 +685,19 @@ struct MetalDICOMImageView: UIViewRepresentable {
             renderPassDescriptor.colorAttachments[0].storeAction = .store
             
             guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
-                print("❌ Failed to create render encoder")
                 return
             }
             
-            // Setup render pipeline with aspect ratio correction
             renderEncoder.setRenderPipelineState(pipelineState)
             renderEncoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-            renderEncoder.setVertexBuffer(aspectBuffer, offset: 0, index: 1)  // NEW: Aspect ratio uniforms
+            renderEncoder.setVertexBuffer(aspectBuffer, offset: 0, index: 1)
             renderEncoder.setFragmentTexture(texture, index: 0)
             
-            // Draw full-screen quad with corrected aspect ratio
             renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
             renderEncoder.endEncoding()
             
-            // Present drawable
             commandBuffer.present(drawable)
             commandBuffer.commit()
-            
-//            print("🎨 Rendered texture with aspect ratio correction")
         }
         
         private func clearView(_ view: MTKView) {
@@ -621,37 +720,38 @@ struct MetalDICOMImageView: UIViewRepresentable {
             commandBuffer.commit()
         }
         
-        
         private func updateAspectRatio(for viewSize: CGSize) {
             guard let device = MTLCreateSystemDefaultDevice(),
                   viewSize.width > 0 && viewSize.height > 0 else { return }
             
-            // Calculate viewport aspect ratio
             let viewportAspect = Float(viewSize.width / viewSize.height)
-            let imageAspect: Float = 1.0  // DICOM images are 512×512 (square)
             
-            // Calculate scaling factors for 1:1 pixel aspect ratio
+            // FIXED: Calculate proper aspect ratio based on current plane
+            let imageAspect: Float
+            switch currentPlane {
+            case .axial:
+                imageAspect = 1.0  // 512×512 = square
+            case .sagittal, .coronal:
+                imageAspect = 512.0 / 53.0  // 512×53 = very wide (9.66:1)
+            }
+            
             let scaleX: Float
             let scaleY: Float
             
             if viewportAspect > imageAspect {
-                // Viewport is wider than image (landscape-ish)
                 scaleX = imageAspect / viewportAspect
                 scaleY = 1.0
             } else {
-                // Viewport is taller than image (portrait-ish)
                 scaleX = 1.0
                 scaleY = viewportAspect / imageAspect
             }
             
-            // Create aspect ratio uniforms
             var aspectUniforms = AspectRatioUniforms(
                 scaleX: scaleX,
                 scaleY: scaleY,
                 offset: SIMD2<Float>(0, 0)
             )
             
-            // Update or create buffer
             aspectRatioBuffer = device.makeBuffer(
                 bytes: &aspectUniforms,
                 length: MemoryLayout<AspectRatioUniforms>.size,
@@ -660,12 +760,12 @@ struct MetalDICOMImageView: UIViewRepresentable {
             
             lastViewportSize = viewSize
             
-            print("📐 Aspect ratio updated: Scale X=\(scaleX), Y=\(scaleY)")
+            print("📐 Aspect ratio updated for \(currentPlane.rawValue): Scale X=\(scaleX), Y=\(scaleY)")
         }
-
     }
 }
-// MARK: - View Model
+
+// MARK: - Enhanced View Model with MPR Support
 
 @MainActor
 class DICOMViewerViewModel: ObservableObject {
@@ -693,35 +793,16 @@ class DICOMViewerViewModel: ObservableObject {
     func loadDICOMSeries() async {
         isLoading = true
         
-        // Get DICOM files from bundle (original filename order)
         let originalFiles = getDICOMFiles()
         print("📁 Found \(originalFiles.count) DICOM files")
         
-        // NEW: Sort by anatomical position instead of filename
         dicomFiles = await sortDICOMFilesByAnatomicalPosition(originalFiles)
         totalSlices = dicomFiles.count
         
-        // Parse first file for series info (rest of method unchanged)
         if let firstFile = dicomFiles.first {
             do {
                 let data = try Data(contentsOf: firstFile)
                 let dataset = try DICOMParser.parse(data)
-                
-                if let rescaleSlope = dataset.getDouble(tag: .rescaleSlope) {
-                    print("🔍 Rescale Slope: \(rescaleSlope)")
-                }
-                if let rescaleIntercept = dataset.getDouble(tag: .rescaleIntercept) {
-                    print("🔍 Rescale Intercept: \(rescaleIntercept)")
-                }
-                if let windowCenter = dataset.windowCenter {
-                    print("🔍 DICOM Window Center: \(windowCenter)")
-                }
-                if let windowWidth = dataset.windowWidth {
-                    print("🔍 DICOM Window Width: \(windowWidth)")
-                }
-                
-                
-                
                 
                 seriesInfo = DICOMSeriesInfo(
                     patientName: dataset.patientName,
@@ -730,7 +811,6 @@ class DICOMViewerViewModel: ObservableObject {
                     modality: dataset.getString(tag: .modality)
                 )
                 
-                // Pre-load first few slices in correct order
                 await preloadSlices(0..<min(5, dicomFiles.count))
                 
             } catch {
@@ -738,7 +818,6 @@ class DICOMViewerViewModel: ObservableObject {
             }
         }
         
-        // Initialize Metal renderer
         if let _ = MTLCreateSystemDefaultDevice() {
             do {
                 metalRenderer = try MetalRenderer()
@@ -749,27 +828,25 @@ class DICOMViewerViewModel: ObservableObject {
         }
         
         isLoading = false
-        // Add this line at the very end of your loadDICOMSeries() method
         await loadVolumeForMPR()
     }
     
-    func navigateToSlice(_ slice: Int) {
-        guard slice >= 0 && slice < totalSlices else { return }
+    // NEW: Enhanced navigation with plane support
+    func navigateToSlice(_ slice: Int, plane: MPRPlane) {
+        guard slice >= 0 else { return }
         
         currentSlice = slice
+        currentPlane = plane
         
-        // Pre-load adjacent slices in background
-        Task {
-            let preloadRange = max(0, slice - 2)..<min(totalSlices, slice + 3)
-            await preloadSlices(preloadRange)
-        }
-    }
-    
-    
-    func prepareSliceForRendering(_ slice: Int, windowing: CTWindowPresets.WindowLevel) async {
-        // Just ensure pixel data is loaded
-        if pixelDataCache[slice] == nil {
-            await loadPixelData(for: slice)
+        // Only preload for axial plane (uses DICOM files)
+        if plane == .axial {
+            let maxSlices = totalSlices
+            guard slice < maxSlices else { return }
+            
+            Task {
+                let preloadRange = max(0, slice - 2)..<min(maxSlices, slice + 3)
+                await preloadSlices(preloadRange)
+            }
         }
     }
     
@@ -782,28 +859,16 @@ class DICOMViewerViewModel: ObservableObject {
     }
     
     func getPixelData(for sliceIndex: Int) async -> PixelData? {
-        print("🔍 Loading slice \(sliceIndex)")
-        
-        guard sliceIndex >= 0 && sliceIndex < dicomFiles.count else {
-            print("❌ Invalid slice index: \(sliceIndex)")
-            return nil
-        }
+        guard sliceIndex >= 0 && sliceIndex < dicomFiles.count else { return nil }
         
         do {
             let data = try Data(contentsOf: dicomFiles[sliceIndex])
             let dataset = try DICOMParser.parse(data)
-            
-            if let pixelData = DICOMParser.extractPixelData(from: dataset) {
-                print("✅ Pixel data: \(pixelData.columns)×\(pixelData.rows)")
-                return pixelData
-            } else {
-                print("❌ No pixel data extracted")
-            }
+            return DICOMParser.extractPixelData(from: dataset)
         } catch {
             print("❌ Error: \(error)")
+            return nil
         }
-        
-        return nil
     }
     
     private func loadPixelData(for index: Int) async {
@@ -843,58 +908,53 @@ class DICOMViewerViewModel: ObservableObject {
     }
     
     private func sortDICOMFilesByAnatomicalPosition(_ files: [URL]) async -> [URL] {
-          print("📊 Sorting \(files.count) DICOM files by anatomical position...")
-          
-          var sliceInfos: [DICOMSliceInfo] = []
-          
-          for (index, file) in files.enumerated() {
-              do {
-                  let data = try Data(contentsOf: file)
-                  let dataset = try DICOMParser.parse(data)
-                  
-                  let sliceLocation = dataset.getDouble(tag: .sliceLocation) ?? Double(index)
-                  let instanceNumber = Int(dataset.getUInt16(tag: .instanceNumber) ?? UInt16(index))
-                  
-                  let sliceInfo = DICOMSliceInfo(
-                      fileURL: file,
-                      sliceLocation: sliceLocation,
-                      instanceNumber: instanceNumber
-                  )
-                  
-                  sliceInfos.append(sliceInfo)
-                  
-              } catch {
-                  print("⚠️  Could not parse slice info from \(file.lastPathComponent): \(error)")
-                  let fallbackInfo = DICOMSliceInfo(
-                      fileURL: file,
-                      sliceLocation: Double(index),
-                      instanceNumber: index
-                  )
-                  sliceInfos.append(fallbackInfo)
-              }
-          }
-          
-          // Sort by anatomical position: Superior (top) to Inferior (bottom)
-          let sortedInfos = sliceInfos.sorted { slice1, slice2 in
-              // Higher Z = slice 1 (top of head)
-              return slice1.sliceLocation > slice2.sliceLocation
-          }
-          
-          // Debug output
-          print("📋 First 5 slices after sorting:")
-          for (index, info) in sortedInfos.prefix(5).enumerated() {
-              let shortName = String(info.fileURL.lastPathComponent.suffix(15))
-              print("   \(index + 1): \(shortName) | Loc: \(String(format: "%.1f", info.sliceLocation))")
-          }
-          
-          return sortedInfos.map { $0.fileURL }
-      }
+        print("📊 Sorting \(files.count) DICOM files by anatomical position...")
+        
+        var sliceInfos: [DICOMSliceInfo] = []
+        
+        for (index, file) in files.enumerated() {
+            do {
+                let data = try Data(contentsOf: file)
+                let dataset = try DICOMParser.parse(data)
+                
+                let sliceLocation = dataset.getDouble(tag: .sliceLocation) ?? Double(index)
+                let instanceNumber = Int(dataset.getUInt16(tag: .instanceNumber) ?? UInt16(index))
+                
+                let sliceInfo = DICOMSliceInfo(
+                    fileURL: file,
+                    sliceLocation: sliceLocation,
+                    instanceNumber: instanceNumber
+                )
+                
+                sliceInfos.append(sliceInfo)
+                
+            } catch {
+                print("⚠️  Could not parse slice info from \(file.lastPathComponent): \(error)")
+                let fallbackInfo = DICOMSliceInfo(
+                    fileURL: file,
+                    sliceLocation: Double(index),
+                    instanceNumber: index
+                )
+                sliceInfos.append(fallbackInfo)
+            }
+        }
+        
+        let sortedInfos = sliceInfos.sorted { slice1, slice2 in
+            return slice1.sliceLocation > slice2.sliceLocation
+        }
+        
+        print("📋 First 5 slices after sorting:")
+        for (index, info) in sortedInfos.prefix(5).enumerated() {
+            let shortName = String(info.fileURL.lastPathComponent.suffix(15))
+            print("   \(index + 1): \(shortName) | Loc: \(String(format: "%.1f", info.sliceLocation))")
+        }
+        
+        return sortedInfos.map { $0.fileURL }
+    }
     
-    
-    /// Extract rescale parameters from DICOM dataset
     func getRescaleParameters(for sliceIndex: Int) async -> RescaleParameters {
         guard sliceIndex >= 0 && sliceIndex < dicomFiles.count else {
-            return RescaleParameters() // Default values
+            return RescaleParameters()
         }
         
         do {
@@ -904,13 +964,11 @@ class DICOMViewerViewModel: ObservableObject {
             let slope = Float(dataset.getDouble(tag: .rescaleSlope) ?? 1.0)
             let intercept = Float(dataset.getDouble(tag: .rescaleIntercept) ?? 0.0)
             
-            print("🔍 Rescale parameters for slice \(sliceIndex): slope=\(slope), intercept=\(intercept)")
-            
             return RescaleParameters(slope: slope, intercept: intercept)
             
         } catch {
             print("❌ Error extracting rescale parameters: \(error)")
-            return RescaleParameters() // Default values
+            return RescaleParameters()
         }
     }
     
@@ -918,12 +976,10 @@ class DICOMViewerViewModel: ObservableObject {
         print("🧊 Loading 3D volume for MPR...")
         
         await MainActor.run {
-            isLoading = true
             volumeLoadingProgress = 0.0
         }
         
         do {
-            // Initialize volume renderer
             let renderer = try MetalVolumeRenderer()
             
             await MainActor.run {
@@ -931,7 +987,6 @@ class DICOMViewerViewModel: ObservableObject {
                 volumeLoadingProgress = 0.2
             }
             
-            // Get all DICOM files and load volume
             let allFiles = getDICOMFiles()
             let volumeData = try await MetalVolumeRenderer.loadVolumeFromDICOMFiles(allFiles)
             
@@ -939,26 +994,23 @@ class DICOMViewerViewModel: ObservableObject {
                 volumeLoadingProgress = 0.8
             }
             
-            // Upload to GPU
             try renderer.loadVolume(volumeData)
             
             await MainActor.run {
                 isVolumeLoaded = true
                 volumeLoadingProgress = 1.0
-                isLoading = false
             }
             
-            print("✅ 3D volume loaded successfully")
+            print("✅ 3D volume loaded successfully for MPR")
             
         } catch {
             print("❌ Volume loading failed: \(error)")
             await MainActor.run {
-                isLoading = false
                 volumeLoadingProgress = 0.0
             }
         }
-    }  }
-
+    }
+}
 
 // MARK: - Preview
 
