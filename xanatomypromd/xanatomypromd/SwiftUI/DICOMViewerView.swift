@@ -35,7 +35,7 @@ struct AspectRatioUniforms {
 struct DICOMViewerView: View {
     @StateObject private var viewModel = DICOMViewerViewModel()
     @State private var selectedWindowingPreset: CTWindowPresets.WindowLevel = CTWindowPresets.softTissue
-    @State private var currentPlane: MPRPlane = .axial  // NEW: Current viewing plane
+    @State private var currentPlane: MPRPlane = .axial
     @State private var currentSlice = 0
     @State private var isLoading = true
     @State private var dragOffset: CGSize = .zero
@@ -51,7 +51,7 @@ struct DICOMViewerView: View {
                     
                     // MARK: - Main Image Display
                     imageDisplayView(geometry: geometry)
-                        .frame(height: geometry.size.height * 0.7)  // More space for controls
+                        .frame(height: geometry.size.height * 0.7)
                     
                     // MARK: - Controls Section
                     controlsView
@@ -88,7 +88,6 @@ struct DICOMViewerView: View {
             
             Spacer()
             
-            // NEW: Current Plane and Slice Info
             VStack(alignment: .trailing, spacing: 4) {
                 Text(currentPlane.rawValue)
                     .font(.headline)
@@ -128,7 +127,7 @@ struct DICOMViewerView: View {
                 MetalDICOMImageView(
                     viewModel: viewModel,
                     currentSlice: currentSlice,
-                    currentPlane: currentPlane,  // NEW: Pass current plane
+                    currentPlane: currentPlane,
                     windowingPreset: selectedWindowingPreset
                 )
                 .scaleEffect(scale)
@@ -207,7 +206,7 @@ struct DICOMViewerView: View {
     // MARK: - Controls View with MPR Plane Switching
     private var controlsView: some View {
         VStack(spacing: 12) {
-            // NEW: MPR Plane Selection
+            // MPR Plane Selection
             mprPlaneSelector
             
             // Windowing Presets
@@ -223,7 +222,7 @@ struct DICOMViewerView: View {
         .background(Color.gray.opacity(0.1))
     }
     
-    // MARK: - NEW: MPR Plane Selector
+    // MARK: - MPR Plane Selector
     private var mprPlaneSelector: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Anatomical Plane")
@@ -376,7 +375,7 @@ struct DICOMViewerView: View {
         }
     }
     
-    // MARK: - NEW: MPR Plane Functions
+    // MARK: - MPR Plane Functions
     
     private func switchToPlane(_ plane: MPRPlane) {
         print("🔄 Switching to \(plane.rawValue) plane")
@@ -387,25 +386,32 @@ struct DICOMViewerView: View {
         navigateToSlice(currentSlice)
     }
     
+    // FIXED: Dynamic slice count based on actual volume dimensions
     private func getMaxSlicesForPlane() -> Int {
-        switch currentPlane {
-        case .axial:
-            return viewModel.totalSlices  // 53 slices
-        case .sagittal:
-            return 512  // Image width becomes slice count
-        case .coronal:
-            return 512  // Image height becomes slice count
-        }
+        return viewModel.getMaxSlicesForPlane(currentPlane)
     }
     
+    // FIXED: Dynamic plane descriptions with actual slice counts
     private func getPlaneDescription(_ plane: MPRPlane) -> String {
+        guard let dimensions = viewModel.getVolumeDimensions() else {
+            // Fallback descriptions when volume not loaded
+            switch plane {
+            case .axial:
+                return "Head Slices"
+            case .sagittal:
+                return "Side View"
+            case .coronal:
+                return "Front View"
+            }
+        }
+        
         switch plane {
         case .axial:
-            return "Head Slices"
+            return "\(dimensions.z) slices"
         case .sagittal:
-            return "Side View"
+            return "\(dimensions.x) slices"
         case .coronal:
-            return "Front View"
+            return "\(dimensions.y) slices"
         }
     }
     
@@ -450,10 +456,29 @@ struct DICOMViewerView: View {
         }
     }
     
+    // FIXED: Enhanced debug info with dynamic dimensions
     private func showInfo() {
         print("🔍 Current plane: \(currentPlane.rawValue)")
         print("🔍 Current slice: \(currentSlice)")
         print("🔍 Volume loaded: \(viewModel.isVolumeLoaded)")
+        
+        if let dimensions = viewModel.getVolumeDimensions() {
+            print("🔍 Volume dimensions: \(dimensions)")
+            print("🔍 Max slices for \(currentPlane.rawValue): \(getMaxSlicesForPlane())")
+            
+            let imageAspect: Float
+            switch currentPlane {
+            case .axial:
+                imageAspect = Float(dimensions.x) / Float(dimensions.y)
+            case .sagittal:
+                imageAspect = Float(dimensions.y) / Float(dimensions.z)
+            case .coronal:
+                imageAspect = Float(dimensions.x) / Float(dimensions.z)
+            }
+            print("🔍 Natural aspect ratio: \(String(format: "%.3f", imageAspect))")
+        } else {
+            print("🔍 Volume dimensions not available")
+        }
     }
 }
 
@@ -462,7 +487,7 @@ struct DICOMViewerView: View {
 struct MetalDICOMImageView: UIViewRepresentable {
     let viewModel: DICOMViewerViewModel
     let currentSlice: Int
-    let currentPlane: MPRPlane  // NEW: Current viewing plane
+    let currentPlane: MPRPlane
     let windowingPreset: CTWindowPresets.WindowLevel
     
     func makeUIView(context: Context) -> MTKView {
@@ -482,7 +507,8 @@ struct MetalDICOMImageView: UIViewRepresentable {
         Coordinator(viewModel: viewModel)
     }
     
-    // MARK: - Enhanced Coordinator with MPR Support
+    // MARK: - Enhanced Coordinator with Dynamic Aspect Ratio
+    @MainActor
     class Coordinator: NSObject, MTKViewDelegate {
         let viewModel: DICOMViewerViewModel
         private var metalRenderer: MetalRenderer?
@@ -553,7 +579,6 @@ struct MetalDICOMImageView: UIViewRepresentable {
             renderTextureWithPipeline(texture: texture, view: view)
         }
         
-        // NEW: Enhanced update method with MPR plane support
         func updateSlice(_ slice: Int, plane: MPRPlane, windowing: CTWindowPresets.WindowLevel) {
             guard let renderer = metalRenderer else {
                 print("❌ No MetalRenderer available")
@@ -563,10 +588,11 @@ struct MetalDICOMImageView: UIViewRepresentable {
             print("🔍 Loading \(plane.rawValue) slice \(slice) with \(windowing.name) windowing")
             
             self.currentWindowing = windowing
+            let previousPlane = self.currentPlane
             self.currentPlane = plane
             
-            // FIXED: Update aspect ratio when plane changes
-            if plane != currentPlane {
+            // Update aspect ratio when plane changes
+            if plane != previousPlane {
                 updateAspectRatio(for: lastViewportSize)
             }
             
@@ -580,7 +606,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
                     }
                     
                 case .sagittal, .coronal:
-                    // NEW: MPR slices from 3D volume
+                    // MPR slices from 3D volume
                     if await viewModel.isVolumeLoaded {
                         await renderMPRSlice(plane: plane, slice: slice, windowing: windowing)
                     } else {
@@ -590,7 +616,6 @@ struct MetalDICOMImageView: UIViewRepresentable {
             }
         }
         
-        // NEW: Render MPR slice from 3D volume
         private func renderMPRSlice(plane: MPRPlane, slice: Int, windowing: CTWindowPresets.WindowLevel) async {
             guard let volumeRenderer = await viewModel.volumeRenderer else {
                 print("❌ No volume renderer available")
@@ -598,7 +623,9 @@ struct MetalDICOMImageView: UIViewRepresentable {
             }
             
             // Convert slice index to normalized position [0, 1]
-            let maxSlices = await getMaxSlicesForPlane(plane)
+            let maxSlices = await MainActor.run {
+                viewModel.getMaxSlicesForPlane(plane)
+            }
             let normalizedPosition = Float(slice) / Float(maxSlices - 1)
             
             print("🎬 Generating \(plane.rawValue) slice at position \(normalizedPosition)")
@@ -610,13 +637,13 @@ struct MetalDICOMImageView: UIViewRepresentable {
                 windowWidth: Float(windowing.width)
             )
             
-            volumeRenderer.generateMPRSlice(config: config) { [weak self] texture in
-                guard let self = self, let texture = texture else {
+            volumeRenderer.generateMPRSlice(config: config) { @Sendable texture in
+                guard let texture = texture else {
                     print("❌ MPR slice generation failed")
                     return
                 }
                 
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     self.currentTexture = texture
                     print("✅ MPR \(plane.rawValue) slice ready for display")
                 }
@@ -638,10 +665,10 @@ struct MetalDICOMImageView: UIViewRepresentable {
                 renderer.renderCTImage(
                     inputTexture: inputTexture,
                     config: config
-                ) { [weak self] windowedTexture in
-                    guard let self = self, let windowedTexture = windowedTexture else { return }
+                ) { @Sendable windowedTexture in
+                    guard let windowedTexture = windowedTexture else { return }
                     
-                    DispatchQueue.main.async {
+                    Task { @MainActor in
                         self.currentTexture = windowedTexture
                     }
                 }
@@ -650,13 +677,146 @@ struct MetalDICOMImageView: UIViewRepresentable {
             }
         }
         
-        private func getMaxSlicesForPlane(_ plane: MPRPlane) async -> Int {
-            switch plane {
-            case .axial:
-                return await viewModel.totalSlices
-            case .sagittal, .coronal:
-                return 512
+        // Remove the unused getMaxSlicesForPlane function since we access it directly via MainActor
+        
+        // FIXED: Dynamic aspect ratio calculation
+        private func updateAspectRatio(for viewSize: CGSize) {
+            guard let device = MTLCreateSystemDefaultDevice(),
+                  viewSize.width > 0 && viewSize.height > 0 else { return }
+            
+            let viewportAspect = Float(viewSize.width / viewSize.height)
+            
+            // Get actual image aspect ratio based on volume dimensions
+            let imageAspect: Float = calculateImageAspect()
+            
+            let scaleX: Float
+            let scaleY: Float
+            
+            if viewportAspect > imageAspect {
+                // Viewport is wider than image - letterbox horizontally
+                scaleX = imageAspect / viewportAspect
+                scaleY = 1.0
+            } else {
+                // Viewport is taller than image - letterbox vertically
+                scaleX = 1.0
+                scaleY = viewportAspect / imageAspect
             }
+            
+            var aspectUniforms = AspectRatioUniforms(
+                scaleX: scaleX,
+                scaleY: scaleY,
+                offset: SIMD2<Float>(0, 0)
+            )
+            
+            aspectRatioBuffer = device.makeBuffer(
+                bytes: &aspectUniforms,
+                length: MemoryLayout<AspectRatioUniforms>.size,
+                options: []
+            )
+            
+            lastViewportSize = viewSize
+            
+            print("📐 Aspect ratio updated for \(currentPlane.rawValue):")
+            print("   Image aspect: \(String(format: "%.3f", imageAspect))")
+            print("   Viewport aspect: \(String(format: "%.3f", viewportAspect))")
+            print("   Scale: X=\(String(format: "%.3f", scaleX)), Y=\(String(format: "%.3f", scaleY))")
+        }
+        
+        /// FIXED: Calculate the natural image aspect ratio using PHYSICAL spacing
+        private func calculateImageAspect() -> Float {
+            // Get actual volume dimensions and physical spacing from view model
+            Task { @MainActor in
+                guard let dimensions = viewModel.getVolumeDimensions(),
+                      let spacing = viewModel.getVolumeSpacing() else {
+                    print("⚠️  Volume dimensions/spacing not available, using fallback aspect ratio")
+                    return
+                }
+                
+                let imageAspect: Float
+                switch currentPlane {
+                case .axial:
+                    // X×Y plane - use physical spacing in both directions
+                    let physicalX = Float(dimensions.x) * spacing.x
+                    let physicalY = Float(dimensions.y) * spacing.y
+                    imageAspect = physicalX / physicalY
+                    
+                case .sagittal:
+                    // Y×Z plane - use REAL physical dimensions
+                    let physicalY = Float(dimensions.y) * spacing.y  // In-plane spacing (~0.7mm)
+                    let physicalZ = Float(dimensions.z) * spacing.z  // Slice thickness (~3.0mm)
+                    imageAspect = physicalY / physicalZ
+                    
+                case .coronal:
+                    // X×Z plane - use REAL physical dimensions
+                    let physicalX = Float(dimensions.x) * spacing.x  // In-plane spacing (~0.7mm)
+                    let physicalZ = Float(dimensions.z) * spacing.z  // Slice thickness (~3.0mm)
+                    imageAspect = physicalX / physicalZ
+                }
+                
+                print("📊 \(currentPlane.rawValue) plane PHYSICAL aspect: \(String(format: "%.3f", imageAspect))")
+                print("   Dimensions: \(dimensions)")
+                print("   Spacing: \(spacing) mm")
+                
+                let physicalSizes: String
+                switch currentPlane {
+                case .axial:
+                    let sizeX = Float(dimensions.x) * spacing.x
+                    let sizeY = Float(dimensions.y) * spacing.y
+                    physicalSizes = "\(String(format: "%.1f", sizeX))×\(String(format: "%.1f", sizeY)) mm"
+                case .sagittal:
+                    let sizeY = Float(dimensions.y) * spacing.y
+                    let sizeZ = Float(dimensions.z) * spacing.z
+                    physicalSizes = "\(String(format: "%.1f", sizeY))×\(String(format: "%.1f", sizeZ)) mm"
+                case .coronal:
+                    let sizeX = Float(dimensions.x) * spacing.x
+                    let sizeZ = Float(dimensions.z) * spacing.z
+                    physicalSizes = "\(String(format: "%.1f", sizeX))×\(String(format: "%.1f", sizeZ)) mm"
+                }
+                print("   Physical size: \(physicalSizes)")
+                
+                // Update aspect ratio with calculated value
+                updateAspectRatioWithValue(imageAspect)
+            }
+            
+            return 1.0  // Temporary fallback while async calculation completes
+        }
+        
+        /// Helper to update aspect ratio with calculated value
+        private func updateAspectRatioWithValue(_ imageAspect: Float) {
+            guard let device = MTLCreateSystemDefaultDevice(),
+                  lastViewportSize.width > 0 && lastViewportSize.height > 0 else { return }
+            
+            let viewportAspect = Float(lastViewportSize.width / lastViewportSize.height)
+            
+            let scaleX: Float
+            let scaleY: Float
+            
+            if viewportAspect > imageAspect {
+                // Viewport is wider than image - letterbox horizontally
+                scaleX = imageAspect / viewportAspect
+                scaleY = 1.0
+            } else {
+                // Viewport is taller than image - letterbox vertically
+                scaleX = 1.0
+                scaleY = viewportAspect / imageAspect
+            }
+            
+            var aspectUniforms = AspectRatioUniforms(
+                scaleX: scaleX,
+                scaleY: scaleY,
+                offset: SIMD2<Float>(0, 0)
+            )
+            
+            aspectRatioBuffer = device.makeBuffer(
+                bytes: &aspectUniforms,
+                length: MemoryLayout<AspectRatioUniforms>.size,
+                options: []
+            )
+            
+            print("📐 Aspect ratio updated for \(currentPlane.rawValue):")
+            print("   Image aspect: \(String(format: "%.3f", imageAspect))")
+            print("   Viewport aspect: \(String(format: "%.3f", viewportAspect))")
+            print("   Scale: X=\(String(format: "%.3f", scaleX)), Y=\(String(format: "%.3f", scaleY))")
         }
         
         private func renderTextureWithPipeline(texture: MTLTexture, view: MTKView) {
@@ -719,53 +879,10 @@ struct MetalDICOMImageView: UIViewRepresentable {
             commandBuffer.present(drawable)
             commandBuffer.commit()
         }
-        
-        private func updateAspectRatio(for viewSize: CGSize) {
-            guard let device = MTLCreateSystemDefaultDevice(),
-                  viewSize.width > 0 && viewSize.height > 0 else { return }
-            
-            let viewportAspect = Float(viewSize.width / viewSize.height)
-            
-            // FIXED: Calculate proper aspect ratio based on current plane
-            let imageAspect: Float
-            switch currentPlane {
-            case .axial:
-                imageAspect = 1.0  // 512×512 = square
-            case .sagittal, .coronal:
-                imageAspect = 512.0 / 53.0  // 512×53 = very wide (9.66:1)
-            }
-            
-            let scaleX: Float
-            let scaleY: Float
-            
-            if viewportAspect > imageAspect {
-                scaleX = imageAspect / viewportAspect
-                scaleY = 1.0
-            } else {
-                scaleX = 1.0
-                scaleY = viewportAspect / imageAspect
-            }
-            
-            var aspectUniforms = AspectRatioUniforms(
-                scaleX: scaleX,
-                scaleY: scaleY,
-                offset: SIMD2<Float>(0, 0)
-            )
-            
-            aspectRatioBuffer = device.makeBuffer(
-                bytes: &aspectUniforms,
-                length: MemoryLayout<AspectRatioUniforms>.size,
-                options: []
-            )
-            
-            lastViewportSize = viewSize
-            
-            print("📐 Aspect ratio updated for \(currentPlane.rawValue): Scale X=\(scaleX), Y=\(scaleY)")
-        }
     }
 }
 
-// MARK: - Enhanced View Model with MPR Support
+// MARK: - Enhanced View Model with Dynamic Dimensions
 
 @MainActor
 class DICOMViewerViewModel: ObservableObject {
@@ -788,6 +905,50 @@ class DICOMViewerViewModel: ObservableObject {
         let studyDate: String?
         let seriesDescription: String?
         let modality: String?
+    }
+    
+    // MARK: - NEW: Dynamic Volume Dimension Access
+    
+    /// Get actual volume dimensions from loaded volume data
+    func getVolumeDimensions() -> SIMD3<Int>? {
+        guard let renderer = volumeRenderer,
+              renderer.isVolumeLoaded() else {
+            return nil
+        }
+        
+        return renderer.getVolumeDimensions()
+    }
+    
+    /// Get actual volume spacing (physical dimensions) from loaded volume data
+    func getVolumeSpacing() -> SIMD3<Float>? {
+        guard let renderer = volumeRenderer,
+              renderer.isVolumeLoaded() else {
+            return nil
+        }
+        
+        return renderer.getVolumeSpacing()
+    }
+    
+    /// Get max slices for current plane based on actual volume dimensions
+    func getMaxSlicesForPlane(_ plane: MPRPlane) -> Int {
+        guard let dimensions = getVolumeDimensions() else {
+            // Fallback values if volume not loaded
+            switch plane {
+            case .axial:
+                return totalSlices  // From DICOM file count
+            case .sagittal, .coronal:
+                return 512  // Conservative fallback
+            }
+        }
+        
+        switch plane {
+        case .axial:
+            return dimensions.z  // Actual depth
+        case .sagittal:
+            return dimensions.x  // Actual width
+        case .coronal:
+            return dimensions.y  // Actual height
+        }
     }
     
     func loadDICOMSeries() async {
@@ -831,7 +992,6 @@ class DICOMViewerViewModel: ObservableObject {
         await loadVolumeForMPR()
     }
     
-    // NEW: Enhanced navigation with plane support
     func navigateToSlice(_ slice: Int, plane: MPRPlane) {
         guard slice >= 0 else { return }
         
@@ -1011,6 +1171,9 @@ class DICOMViewerViewModel: ObservableObject {
         }
     }
 }
+
+// MARK: - Sendable Conformance
+extension MPRPlane: @unchecked Sendable {}
 
 // MARK: - Preview
 

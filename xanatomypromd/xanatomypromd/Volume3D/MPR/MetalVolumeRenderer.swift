@@ -127,6 +127,23 @@ public class MetalVolumeRenderer {
         print("   📊 Value range: \(stats.minValue) to \(stats.maxValue)")
     }
     
+    // MARK: - NEW: Volume Dimension Access
+    
+    /// Get the actual volume dimensions
+    public func getVolumeDimensions() -> SIMD3<Int>? {
+        return volumeData?.dimensions
+    }
+    
+    /// Get the actual volume spacing (physical dimensions in mm)
+    public func getVolumeSpacing() -> SIMD3<Float>? {
+        return volumeData?.spacing
+    }
+    
+    /// Get volume statistics for UI display
+    public func getVolumeStatistics() -> VolumeStatistics? {
+        return volumeData?.getStatistics()
+    }
+    
     // MARK: - MPR Slice Generation
     
     /// Generate MPR slice from 3D volume
@@ -249,11 +266,11 @@ public class MetalVolumeRenderer {
         
         switch plane {
         case .axial:
-            return (dims.x, dims.y)  // XY plane (512 × 512)
+            return (dims.x, dims.y)  // XY plane
         case .sagittal:
-            return (dims.y, dims.z)  // YZ plane (512 × 53)
+            return (dims.y, dims.z)  // YZ plane
         case .coronal:
-            return (dims.x, dims.z)  // XZ plane (512 × 53)
+            return (dims.x, dims.z)  // XZ plane
         }
     }
     
