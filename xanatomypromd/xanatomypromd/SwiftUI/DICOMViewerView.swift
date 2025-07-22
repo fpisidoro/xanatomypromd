@@ -606,8 +606,8 @@ struct MetalDICOMImageView: UIViewRepresentable {
                     }
                     
                 case .sagittal, .coronal:
-                    // MPR slices from 3D volume
-                    if await viewModel.isVolumeLoaded {
+                    // MPR slices from 3D volume - FIXED: Remove await
+                    if viewModel.isVolumeLoaded {
                         await renderMPRSlice(plane: plane, slice: slice, windowing: windowing)
                     } else {
                         print("⚠️ 3D volume not loaded for MPR")
@@ -617,15 +617,15 @@ struct MetalDICOMImageView: UIViewRepresentable {
         }
         
         private func renderMPRSlice(plane: MPRPlane, slice: Int, windowing: CTWindowPresets.WindowLevel) async {
-            guard let volumeRenderer = await viewModel.volumeRenderer else {
+            // FIXED: Remove await since volumeRenderer is @Published property
+            guard let volumeRenderer = viewModel.volumeRenderer else {
                 print("❌ No volume renderer available")
                 return
             }
             
             // Convert slice index to normalized position [0, 1]
-            let maxSlices = await MainActor.run {
-                viewModel.getMaxSlicesForPlane(plane)
-            }
+            // FIXED: Remove await since this is a synchronous function
+            let maxSlices = getMaxSlicesForPlane(plane)
             let normalizedPosition = Float(slice) / Float(maxSlices - 1)
             
             print("🎬 Generating \(plane.rawValue) slice at position \(normalizedPosition)")
@@ -645,8 +645,18 @@ struct MetalDICOMImageView: UIViewRepresentable {
                 
                 Task { @MainActor in
                     self.currentTexture = texture
-                    print("✅ MPR \(plane.rawValue) slice ready for display")
+                    print("✅ HARDWARE MPR \(plane.rawValue) slice ready for display")
                 }
+            }
+        }
+        
+        // FIXED: Add the missing function that's being called
+        private func getMaxSlicesForPlane(_ plane: MPRPlane) -> Int {
+            switch plane {
+            case .axial:
+                return viewModel.totalSlices
+            case .sagittal, .coronal:
+                return 512
             }
         }
         

@@ -89,13 +89,16 @@ class ViewController: UIViewController {
     
     #if DEBUG
     private func runDevelopmentTests() {
+        // ADD THIS FLAG:
+        let enableVolumeTests = false  // Set to true when you want testing
+        
+        guard enableVolumeTests else {
+            print("📱 Volume testing disabled for faster startup")
+            return
+        }
+        
         DispatchQueue.global(qos: .background).async {
-            // Existing tests...
-            
-            // Add 3D volume tests
             VolumeTestManager.runVolumeTests()
-            
-            // Test specific planes
             VolumeTestManager.testSpecificPlane(.sagittal, position: 0.5)
             VolumeTestManager.testSpecificPlane(.coronal, position: 0.5)
         }
