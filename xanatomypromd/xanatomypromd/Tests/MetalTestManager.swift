@@ -229,7 +229,7 @@ class MetalTestManager {
             return
         }
         
-        guard let firstFile = DICOMTestManager.getDICOMFiles().first else {
+        guard let firstFile = DICOMFileManager.getCTImageFiles().first else {
             print("   ❌ No DICOM files available")
             return
         }

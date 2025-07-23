@@ -1,5 +1,11 @@
 @preconcurrency import SwiftUI
 @preconcurrency import MetalKit
+import Foundation
+import Combine
+import Metal
+
+// MARK: - Type alias to resolve DICOMDataset naming conflict
+typealias ParsedDICOMDataset = DICOMDataset
 
 struct RescaleParameters {
     let slope: Float
@@ -606,7 +612,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
                     }
                     
                 case .sagittal, .coronal:
-                    // MPR slices from 3D volume - FIXED: Remove await
+                    // MPR slices from 3D volume
                     if viewModel.isVolumeLoaded {
                         await renderMPRSlice(plane: plane, slice: slice, windowing: windowing)
                     } else {
@@ -617,14 +623,12 @@ struct MetalDICOMImageView: UIViewRepresentable {
         }
         
         private func renderMPRSlice(plane: MPRPlane, slice: Int, windowing: CTWindowPresets.WindowLevel) async {
-            // FIXED: Remove await since volumeRenderer is @Published property
             guard let volumeRenderer = viewModel.volumeRenderer else {
                 print("❌ No volume renderer available")
                 return
             }
             
             // Convert slice index to normalized position [0, 1]
-            // FIXED: Remove await since this is a synchronous function
             let maxSlices = getMaxSlicesForPlane(plane)
             let normalizedPosition = Float(slice) / Float(maxSlices - 1)
             
@@ -650,7 +654,6 @@ struct MetalDICOMImageView: UIViewRepresentable {
             }
         }
         
-        // FIXED: Add the missing function that's being called
         private func getMaxSlicesForPlane(_ plane: MPRPlane) -> Int {
             switch plane {
             case .axial:
@@ -687,27 +690,20 @@ struct MetalDICOMImageView: UIViewRepresentable {
             }
         }
         
-        // Remove the unused getMaxSlicesForPlane function since we access it directly via MainActor
-        
-        // FIXED: Dynamic aspect ratio calculation
         private func updateAspectRatio(for viewSize: CGSize) {
             guard let device = MTLCreateSystemDefaultDevice(),
                   viewSize.width > 0 && viewSize.height > 0 else { return }
             
             let viewportAspect = Float(viewSize.width / viewSize.height)
-            
-            // Get actual image aspect ratio based on volume dimensions
             let imageAspect: Float = calculateImageAspect()
             
             let scaleX: Float
             let scaleY: Float
             
             if viewportAspect > imageAspect {
-                // Viewport is wider than image - letterbox horizontally
                 scaleX = imageAspect / viewportAspect
                 scaleY = 1.0
             } else {
-                // Viewport is taller than image - letterbox vertically
                 scaleX = 1.0
                 scaleY = viewportAspect / imageAspect
             }
@@ -725,73 +721,39 @@ struct MetalDICOMImageView: UIViewRepresentable {
             )
             
             lastViewportSize = viewSize
-            
-            print("📐 Aspect ratio updated for \(currentPlane.rawValue):")
-            print("   Image aspect: \(String(format: "%.3f", imageAspect))")
-            print("   Viewport aspect: \(String(format: "%.3f", viewportAspect))")
-            print("   Scale: X=\(String(format: "%.3f", scaleX)), Y=\(String(format: "%.3f", scaleY))")
         }
         
-        /// FIXED: Calculate the natural image aspect ratio using PHYSICAL spacing
         private func calculateImageAspect() -> Float {
-            // Get actual volume dimensions and physical spacing from view model
             Task { @MainActor in
                 guard let dimensions = viewModel.getVolumeDimensions(),
                       let spacing = viewModel.getVolumeSpacing() else {
-                    print("⚠️  Volume dimensions/spacing not available, using fallback aspect ratio")
                     return
                 }
                 
                 let imageAspect: Float
                 switch currentPlane {
                 case .axial:
-                    // X×Y plane - use physical spacing in both directions
                     let physicalX = Float(dimensions.x) * spacing.x
                     let physicalY = Float(dimensions.y) * spacing.y
                     imageAspect = physicalX / physicalY
                     
                 case .sagittal:
-                    // Y×Z plane - use REAL physical dimensions
-                    let physicalY = Float(dimensions.y) * spacing.y  // In-plane spacing (~0.7mm)
-                    let physicalZ = Float(dimensions.z) * spacing.z  // Slice thickness (~3.0mm)
+                    let physicalY = Float(dimensions.y) * spacing.y
+                    let physicalZ = Float(dimensions.z) * spacing.z
                     imageAspect = physicalY / physicalZ
                     
                 case .coronal:
-                    // X×Z plane - use REAL physical dimensions
-                    let physicalX = Float(dimensions.x) * spacing.x  // In-plane spacing (~0.7mm)
-                    let physicalZ = Float(dimensions.z) * spacing.z  // Slice thickness (~3.0mm)
+                    let physicalX = Float(dimensions.x) * spacing.x
+                    let physicalZ = Float(dimensions.z) * spacing.z
                     imageAspect = physicalX / physicalZ
                 }
                 
-                print("📊 \(currentPlane.rawValue) plane PHYSICAL aspect: \(String(format: "%.3f", imageAspect))")
-                print("   Dimensions: \(dimensions)")
-                print("   Spacing: \(spacing) mm")
-                
-                let physicalSizes: String
-                switch currentPlane {
-                case .axial:
-                    let sizeX = Float(dimensions.x) * spacing.x
-                    let sizeY = Float(dimensions.y) * spacing.y
-                    physicalSizes = "\(String(format: "%.1f", sizeX))×\(String(format: "%.1f", sizeY)) mm"
-                case .sagittal:
-                    let sizeY = Float(dimensions.y) * spacing.y
-                    let sizeZ = Float(dimensions.z) * spacing.z
-                    physicalSizes = "\(String(format: "%.1f", sizeY))×\(String(format: "%.1f", sizeZ)) mm"
-                case .coronal:
-                    let sizeX = Float(dimensions.x) * spacing.x
-                    let sizeZ = Float(dimensions.z) * spacing.z
-                    physicalSizes = "\(String(format: "%.1f", sizeX))×\(String(format: "%.1f", sizeZ)) mm"
-                }
-                print("   Physical size: \(physicalSizes)")
-                
-                // Update aspect ratio with calculated value
                 updateAspectRatioWithValue(imageAspect)
             }
             
-            return 1.0  // Temporary fallback while async calculation completes
+            return 1.0
         }
         
-        /// Helper to update aspect ratio with calculated value
         private func updateAspectRatioWithValue(_ imageAspect: Float) {
             guard let device = MTLCreateSystemDefaultDevice(),
                   lastViewportSize.width > 0 && lastViewportSize.height > 0 else { return }
@@ -802,11 +764,9 @@ struct MetalDICOMImageView: UIViewRepresentable {
             let scaleY: Float
             
             if viewportAspect > imageAspect {
-                // Viewport is wider than image - letterbox horizontally
                 scaleX = imageAspect / viewportAspect
                 scaleY = 1.0
             } else {
-                // Viewport is taller than image - letterbox vertically
                 scaleX = 1.0
                 scaleY = viewportAspect / imageAspect
             }
@@ -822,11 +782,6 @@ struct MetalDICOMImageView: UIViewRepresentable {
                 length: MemoryLayout<AspectRatioUniforms>.size,
                 options: []
             )
-            
-            print("📐 Aspect ratio updated for \(currentPlane.rawValue):")
-            print("   Image aspect: \(String(format: "%.3f", imageAspect))")
-            print("   Viewport aspect: \(String(format: "%.3f", viewportAspect))")
-            print("   Scale: X=\(String(format: "%.3f", scaleX)), Y=\(String(format: "%.3f", scaleY))")
         }
         
         private func renderTextureWithPipeline(texture: MTLTexture, view: MTKView) {
@@ -905,8 +860,14 @@ class DICOMViewerViewModel: ObservableObject {
     @Published var isVolumeLoaded: Bool = false
     @Published var volumeLoadingProgress: Double = 0.0
     
-    private var dicomFiles: [URL] = []
-    private var parsedDatasets: [DICOMDataset] = []
+    // MARK: - Dataset Selection and RTStruct Support
+    @Published var availableDatasets: [String: DICOMFileSet] = [:]
+    @Published var currentDatasetKey: String = "test"
+    @Published var rtStructFiles: [URL] = []
+    @Published var isRTStructLoaded: Bool = false
+    
+    private var ctFiles: [URL] = []
+    private var parsedDatasets: [ParsedDICOMDataset] = []
     private var pixelDataCache: [Int: PixelData] = [:]
     private var metalRenderer: MetalRenderer?
     
@@ -915,11 +876,46 @@ class DICOMViewerViewModel: ObservableObject {
         let studyDate: String?
         let seriesDescription: String?
         let modality: String?
+        let datasetName: String?
     }
     
-    // MARK: - NEW: Dynamic Volume Dimension Access
+    // MARK: - Dataset Management
     
-    /// Get actual volume dimensions from loaded volume data
+    func initializeDatasets() {
+        print("📁 Initializing DICOM datasets with file filtering...")
+        
+        availableDatasets = DICOMFileManager.organizeDatasets()
+        
+        if availableDatasets.keys.contains("test") {
+            currentDatasetKey = "test"
+        } else if availableDatasets.keys.contains("male") {
+            currentDatasetKey = "male"
+        } else if let firstKey = availableDatasets.keys.first {
+            currentDatasetKey = firstKey
+        }
+        
+        print("📊 Available datasets: \(availableDatasets.keys.joined(separator: ", "))")
+        print("🎯 Selected dataset: \(currentDatasetKey)")
+    }
+    
+    func switchToDataset(_ datasetKey: String) async {
+        guard let dataset = availableDatasets[datasetKey] else {
+            print("❌ Dataset not found: \(datasetKey)")
+            return
+        }
+        
+        print("🔄 Switching to dataset: \(dataset.datasetName)")
+        
+        currentDatasetKey = datasetKey
+        pixelDataCache.removeAll()
+        isVolumeLoaded = false
+        volumeRenderer = nil
+        
+        await loadDICOMSeries()
+    }
+    
+    // MARK: - Volume Dimension Access
+    
     func getVolumeDimensions() -> SIMD3<Int>? {
         guard let renderer = volumeRenderer,
               renderer.isVolumeLoaded() else {
@@ -929,7 +925,6 @@ class DICOMViewerViewModel: ObservableObject {
         return renderer.getVolumeDimensions()
     }
     
-    /// Get actual volume spacing (physical dimensions) from loaded volume data
     func getVolumeSpacing() -> SIMD3<Float>? {
         guard let renderer = volumeRenderer,
               renderer.isVolumeLoaded() else {
@@ -939,38 +934,52 @@ class DICOMViewerViewModel: ObservableObject {
         return renderer.getVolumeSpacing()
     }
     
-    /// Get max slices for current plane based on actual volume dimensions
     func getMaxSlicesForPlane(_ plane: MPRPlane) -> Int {
         guard let dimensions = getVolumeDimensions() else {
-            // Fallback values if volume not loaded
             switch plane {
             case .axial:
-                return totalSlices  // From DICOM file count
+                return totalSlices
             case .sagittal, .coronal:
-                return 512  // Conservative fallback
+                return 512
             }
         }
         
         switch plane {
         case .axial:
-            return dimensions.z  // Actual depth
+            return dimensions.z
         case .sagittal:
-            return dimensions.x  // Actual width
+            return dimensions.x
         case .coronal:
-            return dimensions.y  // Actual height
+            return dimensions.y
         }
     }
+    
+    // MARK: - DICOM Loading with Filtering
     
     func loadDICOMSeries() async {
         isLoading = true
         
-        let originalFiles = getDICOMFiles()
-        print("📁 Found \(originalFiles.count) DICOM files")
+        if availableDatasets.isEmpty {
+            initializeDatasets()
+        }
         
-        dicomFiles = await sortDICOMFilesByAnatomicalPosition(originalFiles)
-        totalSlices = dicomFiles.count
+        guard let currentDataset = availableDatasets[currentDatasetKey] else {
+            print("❌ No dataset selected")
+            isLoading = false
+            return
+        }
         
-        if let firstFile = dicomFiles.first {
+        ctFiles = currentDataset.ctFiles
+        rtStructFiles = currentDataset.rtStructFiles
+        totalSlices = ctFiles.count
+        
+        print("📁 Loading \(currentDataset.datasetName):")
+        print("   🩻 CT files: \(ctFiles.count)")
+        print("   📊 RTStruct files: \(rtStructFiles.count)")
+        
+        ctFiles = await sortDICOMFilesByAnatomicalPosition(ctFiles)
+        
+        if let firstFile = ctFiles.first {
             do {
                 let data = try Data(contentsOf: firstFile)
                 let dataset = try DICOMParser.parse(data)
@@ -979,10 +988,11 @@ class DICOMViewerViewModel: ObservableObject {
                     patientName: dataset.patientName,
                     studyDate: dataset.studyDate,
                     seriesDescription: dataset.getString(tag: .seriesDescription),
-                    modality: dataset.getString(tag: .modality)
+                    modality: dataset.getString(tag: .modality),
+                    datasetName: currentDataset.datasetName
                 )
                 
-                await preloadSlices(0..<min(5, dicomFiles.count))
+                await preloadSlices(0..<min(5, ctFiles.count))
                 
             } catch {
                 print("Error loading series info: \(error)")
@@ -992,15 +1002,54 @@ class DICOMViewerViewModel: ObservableObject {
         if let _ = MTLCreateSystemDefaultDevice() {
             do {
                 metalRenderer = try MetalRenderer()
-                print("✅ DICOM series loaded with proper anatomical ordering")
+                print("✅ DICOM series loaded with proper CT/RTStruct separation")
             } catch {
                 print("Failed to initialize MetalRenderer: \(error)")
             }
         }
         
+        if !rtStructFiles.isEmpty {
+            await loadRTStructFiles()
+        }
+        
         isLoading = false
         await loadVolumeForMPR()
     }
+    
+    // MARK: - RTStruct File Loading
+    
+    private func loadRTStructFiles() async {
+        print("📊 Loading RTStruct files for ROI data...")
+        
+        for rtFile in rtStructFiles {
+            do {
+                let data = try Data(contentsOf: rtFile)
+                let dataset = try DICOMParser.parse(data)
+                
+                print("✅ Successfully parsed RTStruct: \(rtFile.lastPathComponent)")
+                
+                if let modality = dataset.getString(tag: .modality) {
+                    print("   🏷️  Modality: \(modality)")
+                    
+                    if modality == "RTSTRUCT" {
+                        print("   ✅ Confirmed RTStruct modality")
+                        isRTStructLoaded = true
+                    }
+                }
+                
+                if let seriesDescription = dataset.getString(tag: .seriesDescription) {
+                    print("   📝 Series Description: \(seriesDescription)")
+                }
+                
+                print("   🎯 ROI extraction: Ready for implementation")
+                
+            } catch {
+                print("❌ Failed to parse RTStruct \(rtFile.lastPathComponent): \(error)")
+            }
+        }
+    }
+    
+    // MARK: - Navigation and Caching
     
     func navigateToSlice(_ slice: Int, plane: MPRPlane) {
         guard slice >= 0 else { return }
@@ -1008,7 +1057,6 @@ class DICOMViewerViewModel: ObservableObject {
         currentSlice = slice
         currentPlane = plane
         
-        // Only preload for axial plane (uses DICOM files)
         if plane == .axial {
             let maxSlices = totalSlices
             guard slice < maxSlices else { return }
@@ -1029,10 +1077,10 @@ class DICOMViewerViewModel: ObservableObject {
     }
     
     func getPixelData(for sliceIndex: Int) async -> PixelData? {
-        guard sliceIndex >= 0 && sliceIndex < dicomFiles.count else { return nil }
+        guard sliceIndex >= 0 && sliceIndex < ctFiles.count else { return nil }
         
         do {
-            let data = try Data(contentsOf: dicomFiles[sliceIndex])
+            let data = try Data(contentsOf: ctFiles[sliceIndex])
             let dataset = try DICOMParser.parse(data)
             return DICOMParser.extractPixelData(from: dataset)
         } catch {
@@ -1042,10 +1090,10 @@ class DICOMViewerViewModel: ObservableObject {
     }
     
     private func loadPixelData(for index: Int) async {
-        guard index >= 0 && index < dicomFiles.count else { return }
+        guard index >= 0 && index < ctFiles.count else { return }
         
         do {
-            let data = try Data(contentsOf: dicomFiles[index])
+            let data = try Data(contentsOf: ctFiles[index])
             let dataset = try DICOMParser.parse(data)
             
             if let pixelData = DICOMParser.extractPixelData(from: dataset) {
@@ -1056,29 +1104,8 @@ class DICOMViewerViewModel: ObservableObject {
         }
     }
     
-    private func getDICOMFiles() -> [URL] {
-        guard let bundlePath = Bundle.main.resourcePath else { return [] }
-        
-        do {
-            let fileURLs = try FileManager.default.contentsOfDirectory(
-                at: URL(fileURLWithPath: bundlePath),
-                includingPropertiesForKeys: nil,
-                options: .skipsHiddenFiles
-            )
-            
-            return fileURLs.filter {
-                $0.pathExtension.lowercased() == "dcm" ||
-                $0.lastPathComponent.contains("2.16.840.1.114362")
-            }.sorted { $0.lastPathComponent < $1.lastPathComponent }
-            
-        } catch {
-            print("Error reading DICOM files: \(error)")
-            return []
-        }
-    }
-    
     private func sortDICOMFilesByAnatomicalPosition(_ files: [URL]) async -> [URL] {
-        print("📊 Sorting \(files.count) DICOM files by anatomical position...")
+        print("📊 Sorting \(files.count) CT files by anatomical position...")
         
         var sliceInfos: [DICOMSliceInfo] = []
         
@@ -1113,22 +1140,16 @@ class DICOMViewerViewModel: ObservableObject {
             return slice1.sliceLocation > slice2.sliceLocation
         }
         
-        print("📋 First 5 slices after sorting:")
-        for (index, info) in sortedInfos.prefix(5).enumerated() {
-            let shortName = String(info.fileURL.lastPathComponent.suffix(15))
-            print("   \(index + 1): \(shortName) | Loc: \(String(format: "%.1f", info.sliceLocation))")
-        }
-        
         return sortedInfos.map { $0.fileURL }
     }
     
     func getRescaleParameters(for sliceIndex: Int) async -> RescaleParameters {
-        guard sliceIndex >= 0 && sliceIndex < dicomFiles.count else {
+        guard sliceIndex >= 0 && sliceIndex < ctFiles.count else {
             return RescaleParameters()
         }
         
         do {
-            let data = try Data(contentsOf: dicomFiles[sliceIndex])
+            let data = try Data(contentsOf: ctFiles[sliceIndex])
             let dataset = try DICOMParser.parse(data)
             
             let slope = Float(dataset.getDouble(tag: .rescaleSlope) ?? 1.0)
@@ -1143,7 +1164,7 @@ class DICOMViewerViewModel: ObservableObject {
     }
     
     func loadVolumeForMPR() async {
-        print("🧊 Loading 3D volume for MPR...")
+        print("🧊 Loading 3D volume for MPR from CT files...")
         
         await MainActor.run {
             volumeLoadingProgress = 0.0
@@ -1157,8 +1178,7 @@ class DICOMViewerViewModel: ObservableObject {
                 volumeLoadingProgress = 0.2
             }
             
-            let allFiles = getDICOMFiles()
-            let volumeData = try await MetalVolumeRenderer.loadVolumeFromDICOMFiles(allFiles)
+            let volumeData = try await MetalVolumeRenderer.loadVolumeFromDICOMFiles(ctFiles)
             
             await MainActor.run {
                 volumeLoadingProgress = 0.8
@@ -1171,7 +1191,7 @@ class DICOMViewerViewModel: ObservableObject {
                 volumeLoadingProgress = 1.0
             }
             
-            print("✅ 3D volume loaded successfully for MPR")
+            print("✅ 3D volume loaded successfully for MPR from \(ctFiles.count) CT files")
             
         } catch {
             print("❌ Volume loading failed: \(error)")

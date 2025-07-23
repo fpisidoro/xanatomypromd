@@ -2,6 +2,9 @@ import Foundation
 import Metal
 import simd
 
+// MARK: - Type alias to resolve DICOMDataset naming conflict
+typealias ParsedDICOMDataset = DICOMDataset
+
 // MARK: - 3D Volume Test Manager
 // Comprehensive testing for VolumeData and MetalVolumeRenderer
 // Validates MPR functionality and spatial reconstruction
@@ -38,19 +41,19 @@ class VolumeTestManager {
     static func testVolumeDataCreation() {
         print("🧊 TEST: Volume Data Creation from DICOM Series")
         
-        let dicomFiles = DICOMTestManager.getDICOMFiles()
-        guard dicomFiles.count > 0 else {
-            print("   ❌ No DICOM files available")
+        let ctFiles = DICOMFileManager.getCTImageFiles()
+        guard ctFiles.count > 0 else {
+            print("   ❌ No CT files available")
             return
         }
         
-        print("   📁 Loading \(dicomFiles.count) DICOM files...")
+        print("   📁 Loading \(ctFiles.count) CT files...")
         
         do {
             // Parse all DICOM datasets
-            var datasets: [(DICOMDataset, Int)] = []
+            var datasets: [(ParsedDICOMDataset, Int)] = []
             
-            for (index, fileURL) in dicomFiles.enumerated() {
+            for (index, fileURL) in ctFiles.enumerated() {
                 let data = try Data(contentsOf: fileURL)
                 let dataset = try DICOMParser.parse(data)
                 datasets.append((dataset, index))
@@ -436,7 +439,7 @@ class VolumeTestManager {
         
         for (name, plane, position) in testCases {
             Task {
-                if let pixelData = await renderer.mprSliceToPixelData(plane: plane, slicePosition: Float(position)) {
+                if let pixelData = renderer.mprSliceToPixelData(plane: plane, slicePosition: Float(position)) {
                     print("   🔄 \(name): ✅ \(pixelData.columns)×\(pixelData.rows)")
                     print("      Bits allocated: \(pixelData.bitsAllocated)")
                     print("      Pixel representation: \(pixelData.pixelRepresentation)")

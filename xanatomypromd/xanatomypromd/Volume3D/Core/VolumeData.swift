@@ -1,6 +1,9 @@
 import Foundation
 import simd
 
+// MARK: - Type alias to resolve DICOMDataset naming conflict
+typealias ParsedDICOMDataset = DICOMDataset
+
 // MARK: - 3D Volume Data Structure
 // Foundation for Multi-Planar Reconstruction (MPR)
 // Handles spatial reconstruction from DICOM slice series
@@ -32,7 +35,7 @@ public class VolumeData {
     
     // MARK: - Initialization
     
-    public init(from datasets: [(DICOMDataset, Int)]) throws {
+    public init(from datasets: [(ParsedDICOMDataset, Int)]) throws {
         guard !datasets.isEmpty else {
             throw VolumeError.emptyDataset
         }
@@ -218,7 +221,7 @@ public class VolumeData {
     
     // MARK: - Helper Methods
     
-    private static func extractSliceInfo(from dataset: DICOMDataset, index: Int) throws -> SliceInfo {
+    private static func extractSliceInfo(from dataset: ParsedDICOMDataset, index: Int) throws -> SliceInfo {
         // Extract image position
         let position = extractImagePosition(from: dataset) ?? SIMD3<Float>(0, 0, Float(index))
         
@@ -247,7 +250,7 @@ public class VolumeData {
         )
     }
     
-    private static func extractImagePosition(from dataset: DICOMDataset) -> SIMD3<Float>? {
+    private static func extractImagePosition(from dataset: ParsedDICOMDataset) -> SIMD3<Float>? {
         guard let positionString = dataset.imagePosition else { return nil }
         
         let components = positionString.split(separator: "\\").compactMap { Float(String($0)) }
@@ -256,7 +259,7 @@ public class VolumeData {
         return SIMD3<Float>(components[0], components[1], components[2])
     }
     
-    private static func extractImageOrientation(from dataset: DICOMDataset) -> simd_float3x3? {
+    private static func extractImageOrientation(from dataset: ParsedDICOMDataset) -> simd_float3x3? {
         guard let orientationString = dataset.imageOrientation else { return nil }
         
         let components = orientationString.split(separator: "\\").compactMap { Float(String($0)) }
@@ -275,7 +278,7 @@ public class VolumeData {
         )
     }
     
-    private static func extractPixelSpacing(from dataset: DICOMDataset) -> SIMD2<Float>? {
+    private static func extractPixelSpacing(from dataset: ParsedDICOMDataset) -> SIMD2<Float>? {
         guard let spacingString = dataset.pixelSpacing else { return nil }
         
         let components = spacingString.split(separator: "\\").compactMap { Float(String($0)) }
