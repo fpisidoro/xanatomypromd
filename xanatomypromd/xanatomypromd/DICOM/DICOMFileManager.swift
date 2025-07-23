@@ -9,7 +9,8 @@ enum DICOMFileType {
     case unknown
 }
 
-struct DICOMDataset {
+// FIXED: Renamed to avoid conflict with DICOMParser's DICOMDataset
+struct DICOMFileSet {
     let ctFiles: [URL]
     let rtStructFiles: [URL]
     let datasetName: String
@@ -26,7 +27,7 @@ class DICOMFileManager {
         let filename = fileURL.lastPathComponent.lowercased()
         
         // RTStruct file patterns
-        if filename.contains("_rtstruct.dcm") || 
+        if filename.contains("_rtstruct.dcm") ||
            filename.contains("rtstruct") ||
            filename.contains("rs.") {
             return .rtStruct
@@ -124,25 +125,25 @@ class DICOMFileManager {
     // MARK: - Dataset Organization
     
     /// Organize files into male/female datasets
-    static func organizeDatasets() -> [String: DICOMDataset] {
+    static func organizeDatasets() -> [String: DICOMFileSet] {
         let (ctFiles, rtStructFiles, _) = discoverDICOMFiles()
         
-        var datasets: [String: DICOMDataset] = [:]
+        var datasets: [String: DICOMFileSet] = [:]
         
         // Group by dataset name (male/female/test)
         let maleCtFiles = ctFiles.filter { $0.lastPathComponent.lowercased().contains("male_ct") }
         let femaleCtFiles = ctFiles.filter { $0.lastPathComponent.lowercased().contains("female_ct") }
-        let testCtFiles = ctFiles.filter { !$0.lastPathComponent.lowercased().contains("male_ct") && 
+        let testCtFiles = ctFiles.filter { !$0.lastPathComponent.lowercased().contains("male_ct") &&
                                           !$0.lastPathComponent.lowercased().contains("female_ct") }
         
         let maleRtFiles = rtStructFiles.filter { $0.lastPathComponent.lowercased().contains("male_rtstruct") }
         let femaleRtFiles = rtStructFiles.filter { $0.lastPathComponent.lowercased().contains("female_rtstruct") }
-        let testRtFiles = rtStructFiles.filter { !$0.lastPathComponent.lowercased().contains("male_rtstruct") && 
+        let testRtFiles = rtStructFiles.filter { !$0.lastPathComponent.lowercased().contains("male_rtstruct") &&
                                                 !$0.lastPathComponent.lowercased().contains("female_rtstruct") }
         
         // Create datasets
         if !maleCtFiles.isEmpty {
-            datasets["male"] = DICOMDataset(
+            datasets["male"] = DICOMFileSet(
                 ctFiles: maleCtFiles,
                 rtStructFiles: maleRtFiles,
                 datasetName: "Male Anatomy"
@@ -150,7 +151,7 @@ class DICOMFileManager {
         }
         
         if !femaleCtFiles.isEmpty {
-            datasets["female"] = DICOMDataset(
+            datasets["female"] = DICOMFileSet(
                 ctFiles: femaleCtFiles,
                 rtStructFiles: femaleRtFiles,
                 datasetName: "Female Anatomy"
@@ -159,7 +160,7 @@ class DICOMFileManager {
         
         // Test/current dataset
         if !testCtFiles.isEmpty {
-            datasets["test"] = DICOMDataset(
+            datasets["test"] = DICOMFileSet(
                 ctFiles: testCtFiles,
                 rtStructFiles: testRtFiles,
                 datasetName: "Test Dataset"
@@ -172,7 +173,7 @@ class DICOMFileManager {
     // MARK: - Validation
     
     /// Validate dataset completeness
-    static func validateDataset(_ dataset: DICOMDataset) -> (isValid: Bool, issues: [String]) {
+    static func validateDataset(_ dataset: DICOMFileSet) -> (isValid: Bool, issues: [String]) {
         var issues: [String] = []
         
         // Check for CT files

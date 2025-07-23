@@ -1,7 +1,5 @@
 import Foundation
 
-// MARK: - DICOM Data Structures
-
 /// Represents a parsed DICOM dataset
 public struct DICOMDataset {
     public let elements: [DICOMTag: DICOMElement]

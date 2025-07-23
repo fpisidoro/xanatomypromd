@@ -4,9 +4,6 @@ import Foundation
 import Combine
 import Metal
 
-// MARK: - Type alias to resolve DICOMDataset naming conflict
-typealias ParsedDICOMDataset = DICOMDataset
-
 struct RescaleParameters {
     let slope: Float
     let intercept: Float

@@ -2,8 +2,6 @@ import Foundation
 import Metal
 import simd
 
-// MARK: - Type alias to resolve DICOMDataset naming conflict
-typealias ParsedDICOMDataset = DICOMDataset
 
 // MARK: - 3D Volume Test Manager
 // Comprehensive testing for VolumeData and MetalVolumeRenderer

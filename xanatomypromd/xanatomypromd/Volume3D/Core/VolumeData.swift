@@ -2,7 +2,7 @@ import Foundation
 import simd
 
 // MARK: - Type alias to resolve DICOMDataset naming conflict
-typealias ParsedDICOMDataset = DICOMDataset
+public typealias ParsedDICOMDataset = DICOMDataset
 
 // MARK: - 3D Volume Data Structure
 // Foundation for Multi-Planar Reconstruction (MPR)
