@@ -37,6 +37,7 @@ struct AspectRatioUniforms {
 
 struct DICOMViewerView: View {
     @StateObject private var viewModel = DICOMViewerViewModel()
+    @StateObject private var roiManager = ROIIntegrationManager()
     @State private var selectedWindowingPreset: CTWindowPresets.WindowLevel = CTWindowPresets.softTissue
     @State private var currentPlane: MPRPlane = .axial
     @State private var currentSlice = 0
@@ -69,6 +70,11 @@ struct DICOMViewerView: View {
             Task {
                 await viewModel.loadDICOMSeries()
                 isLoading = false
+                
+                // Connect RTStruct data to ROI manager
+                if let rtStructData = viewModel.getRTStructData() {
+                    roiManager.loadRTStructData(rtStructData)
+                }
             }
         }
         .preferredColorScheme(.dark)
@@ -129,6 +135,7 @@ struct DICOMViewerView: View {
                 // Metal-rendered DICOM image with MPR support
                 MetalDICOMImageView(
                     viewModel: viewModel,
+                    roiManager: roiManager,
                     currentSlice: currentSlice,
                     currentPlane: currentPlane,
                     windowingPreset: selectedWindowingPreset
@@ -165,6 +172,49 @@ struct DICOMViewerView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
+    }
+    
+    private var roiControlsView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("ROI Overlays")
+                .font(.headline)
+                .foregroundColor(.white)
+            
+            HStack {
+                Button(action: {
+                    roiManager.toggleAllROIs()
+                }) {
+                    HStack {
+                        Image(systemName: roiManager.isROIVisible ? "eye" : "eye.slash")
+                        Text(roiManager.isROIVisible ? "Hide ROIs" : "Show ROIs")
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(roiManager.isROIVisible ? Color.blue : Color.gray.opacity(0.3))
+                    .cornerRadius(8)
+                }
+                
+                Spacer()
+                
+                if let stats = roiManager.getROIStatistics() {
+                    Text("\(stats.visibleROIs)/\(stats.totalROIs) ROIs")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+            }
+            
+            if roiManager.isROIVisible {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Opacity: \(Int(roiManager.globalROIOpacity * 100))%")
+                        .font(.caption)
+                        .foregroundColor(.white)
+                    
+                    Slider(value: $roiManager.globalROIOpacity, in: 0...1)
+                        .accentColor(.blue)
+                }
+            }
+        }
     }
     
     // MARK: - Slice Navigation Overlay
@@ -209,16 +259,10 @@ struct DICOMViewerView: View {
     // MARK: - Controls View with MPR Plane Switching
     private var controlsView: some View {
         VStack(spacing: 12) {
-            // MPR Plane Selection
             mprPlaneSelector
-            
-            // Windowing Presets
             windowingPresetsView
-            
-            // Slice Slider
+            roiControlsView
             sliceSliderView
-            
-            // Action Buttons
             actionButtonsView
         }
         .padding()
@@ -489,6 +533,7 @@ struct DICOMViewerView: View {
 
 struct MetalDICOMImageView: UIViewRepresentable {
     let viewModel: DICOMViewerViewModel
+    let roiManager: ROIIntegrationManager
     let currentSlice: Int
     let currentPlane: MPRPlane
     let windowingPreset: CTWindowPresets.WindowLevel
@@ -862,6 +907,7 @@ class DICOMViewerViewModel: ObservableObject {
     @Published var currentDatasetKey: String = "test"
     @Published var rtStructFiles: [URL] = []
     @Published var isRTStructLoaded: Bool = false
+    private var currentRTStructData: RTStructData?
     
     private var ctFiles: [URL] = []
     private var parsedDatasets: [ParsedDICOMDataset] = []
@@ -1023,27 +1069,32 @@ class DICOMViewerViewModel: ObservableObject {
                 let data = try Data(contentsOf: rtFile)
                 let dataset = try DICOMParser.parse(data)
                 
-                print("✅ Successfully parsed RTStruct: \(rtFile.lastPathComponent)")
-                
-                if let modality = dataset.getString(tag: .modality) {
-                    print("   🏷️  Modality: \(modality)")
+                if let modality = dataset.getString(tag: .modality), modality == "RTSTRUCT" {
+                    print("✅ Parsing RTStruct: \(rtFile.lastPathComponent)")
                     
-                    if modality == "RTSTRUCT" {
-                        print("   ✅ Confirmed RTStruct modality")
-                        isRTStructLoaded = true
+                    // Parse ROI data
+                    let rtStructData = try RTStructParser.parseRTStruct(from: dataset)
+                    
+                    // Store RTStruct data for ROI overlay
+                    await MainActor.run {
+                        self.currentRTStructData = rtStructData
+                        self.isRTStructLoaded = true
+                    }
+                    
+                    print("✅ Loaded \(rtStructData.roiStructures.count) ROI structures")
+                    for roi in rtStructData.roiStructures {
+                        print("   🏷️ \(roi.roiName): \(roi.contours.count) contours")
                     }
                 }
-                
-                if let seriesDescription = dataset.getString(tag: .seriesDescription) {
-                    print("   📝 Series Description: \(seriesDescription)")
-                }
-                
-                print("   🎯 ROI extraction: Ready for implementation")
                 
             } catch {
                 print("❌ Failed to parse RTStruct \(rtFile.lastPathComponent): \(error)")
             }
         }
+    }
+    
+    func getRTStructData() -> RTStructData? {
+        return currentRTStructData
     }
     
     // MARK: - Navigation and Caching
