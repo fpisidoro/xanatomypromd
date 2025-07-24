@@ -69,7 +69,7 @@ public struct DICOMParser {
         // Determine if main dataset uses explicit or implicit VR based on transfer syntax
         let useExplicitVR: Bool
         if let transferSyntax = transferSyntaxUID {
-            print("🔍 Transfer Syntax: \(transferSyntax)")
+            //print("🔍 Transfer Syntax: \(transferSyntax)")
             // Implicit VR Little Endian is the most common
             useExplicitVR = transferSyntax == TransferSyntax.explicitVRLittleEndian ||
                           transferSyntax == TransferSyntax.explicitVRBigEndian
@@ -78,7 +78,7 @@ public struct DICOMParser {
             useExplicitVR = false
         }
         
-        print("📋 Using \(useExplicitVR ? "Explicit" : "Implicit") VR for main dataset")
+       // print("📋 Using \(useExplicitVR ? "Explicit" : "Implicit") VR for main dataset")
         
         // Continue parsing main dataset with correct VR
         while currentOffset < data.count {

@@ -421,9 +421,9 @@ extension MetalVolumeRenderer {
                 let dataset = try DICOMParser.parse(data)
                 datasets.append((dataset, index))
                 
-                if index % 10 == 0 || index < 5 {
-                    print("   ✅ Loaded file \(index + 1)/\(fileURLs.count)")
-                }
+//                if index % 10 == 0 || index < 5 {
+//                    print("   ✅ Loaded file \(index + 1)/\(fileURLs.count)")
+//                }
             } catch {
                 print("   ❌ Failed to load file \(index): \(fileURL.lastPathComponent) - \(error)")
                 throw error
