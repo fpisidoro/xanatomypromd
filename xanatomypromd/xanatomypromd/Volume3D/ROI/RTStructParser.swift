@@ -2,7 +2,7 @@ import Foundation
 import simd
 
 // MARK: - RTStruct Parser
-// Parses RTStruct DICOM files to extract ROI contour data
+// Real DICOM sequence parsing for RTStruct files to extract ROI contour data
 
 public class RTStructParser {
     
@@ -23,15 +23,15 @@ public class RTStructParser {
         let metadata = extractMetadata(from: dataset)
         
         // Parse Structure Set ROI Sequence (ROI definitions)
-        let roiDefinitions = try parseStructureSetROISequence(from: dataset)
+        let roiDefinitions: [ROIDefinition] = try parseStructureSetROISequence(from: dataset)
         print("   🎯 Found \(roiDefinitions.count) ROI definitions")
         
         // Parse ROI Contour Sequence (contour geometry)
-        let roiContours = try parseROIContourSequence(from: dataset)
+        let roiContours: [ROIContourSet] = try parseROIContourSequence(from: dataset)
         print("   📐 Found \(roiContours.count) ROI contour sets")
         
         // Parse RT ROI Observations Sequence (display properties)
-        let roiObservations = parseRTROIObservationsSequence(from: dataset)
+        let roiObservations: [ROIObservation] = parseRTROIObservationsSequence(from: dataset)
         print("   🎨 Found \(roiObservations.count) ROI observations")
         
         // Combine all data into complete ROI structures
@@ -68,97 +68,400 @@ public class RTStructParser {
     
     private static func extractMetadata(from dataset: DICOMDataset) -> RTStructMetadata {
         return RTStructMetadata(
-            patientName: dataset.getString(tag: .patientName),
-            studyInstanceUID: dataset.getString(tag: .studyInstanceUID),
-            seriesInstanceUID: dataset.getString(tag: .seriesInstanceUID),
-            structureSetLabel: dataset.getString(tag: .structureSetLabel),
-            structureSetName: dataset.getString(tag: .structureSetName),
-            structureSetDescription: dataset.getString(tag: .structureSetDescription),
-            structureSetDate: dataset.getString(tag: .structureSetDate),
-            structureSetTime: dataset.getString(tag: .structureSetTime),
+            patientName: dataset.getString(tag: DICOMTag.patientName),
+            studyInstanceUID: dataset.getString(tag: DICOMTag.studyInstanceUID),
+            seriesInstanceUID: dataset.getString(tag: DICOMTag.seriesInstanceUID),
+            structureSetLabel: dataset.getString(tag: DICOMTag.structureSetLabel),
+            structureSetName: dataset.getString(tag: DICOMTag.structureSetName),
+            structureSetDescription: dataset.getString(tag: DICOMTag.structureSetDescription),
+            structureSetDate: dataset.getString(tag: DICOMTag.structureSetDate),
+            structureSetTime: dataset.getString(tag: DICOMTag.structureSetTime),
             referencedFrameOfReferenceUID: extractReferencedFrameOfReference(from: dataset),
             referencedStudyInstanceUID: extractReferencedStudyUID(from: dataset),
             referencedSeriesInstanceUID: extractReferencedSeriesUID(from: dataset)
         )
     }
     
-    // MARK: - Structure Set ROI Sequence Parsing
+    // MARK: - Structure Set ROI Sequence Parsing (REAL IMPLEMENTATION)
     
     private static func parseStructureSetROISequence(from dataset: DICOMDataset) throws -> [ROIDefinition] {
-        guard let sequenceElement = dataset.elements[.structureSetROISequence] else {
+        guard let sequenceElement = dataset.elements[DICOMTag.structureSetROISequence] else {
             throw RTStructError.missingRequiredSequence("Structure Set ROI Sequence")
         }
         
         print("   📋 Parsing Structure Set ROI Sequence...")
         
-        // For now, parse the sequence as a basic implementation
-        // In a full implementation, you'd parse the actual DICOM sequence structure
-        // This is a simplified version that extracts available data
+        // Parse the actual DICOM sequence structure
+        let sequenceItems = try parseDICOMSequence(sequenceElement.data)
         
         var roiDefinitions: [ROIDefinition] = []
         
-        // Since we don't have full sequence parsing yet, we'll create a basic structure
-        // This will be enhanced when we can test with actual sequence data
-        let basicROI = ROIDefinition(
-            roiNumber: 1,
-            roiName: "Unknown Structure",
-            roiDescription: nil,
-            roiGenerationAlgorithm: nil
-        )
-        
-        roiDefinitions.append(basicROI)
+        for (index, item) in sequenceItems.enumerated() {
+            do {
+                // Extract ROI Number (3006,0022)
+                let roiNumber = extractIntFromSequenceItem(item, tag: DICOMTag.roiNumber) ?? (index + 1)
+                
+                // Extract ROI Name (3006,0026)
+                let roiName = extractStringFromSequenceItem(item, tag: DICOMTag.roiName) ?? "ROI \(roiNumber)"
+                
+                // Extract optional fields
+                let roiDescription = extractStringFromSequenceItem(item, tag: DICOMTag.roiDescription)
+                let roiGenerationAlgorithm = extractStringFromSequenceItem(item, tag: DICOMTag.roiGenerationAlgorithm)
+                
+                let definition = ROIDefinition(
+                    roiNumber: roiNumber,
+                    roiName: roiName,
+                    roiDescription: roiDescription,
+                    roiGenerationAlgorithm: roiGenerationAlgorithm
+                )
+                
+                roiDefinitions.append(definition)
+                
+                print("      📍 ROI \(roiNumber): \(roiName)")
+                
+            } catch {
+                print("      ⚠️ Failed to parse ROI definition \(index): \(error)")
+            }
+        }
         
         return roiDefinitions
     }
     
-    // MARK: - ROI Contour Sequence Parsing
+    // MARK: - ROI Contour Sequence Parsing (REAL IMPLEMENTATION)
     
     private static func parseROIContourSequence(from dataset: DICOMDataset) throws -> [ROIContourSet] {
-        guard let sequenceElement = dataset.elements[.roiContourSequence] else {
+        guard let sequenceElement = dataset.elements[DICOMTag.roiContourSequence] else {
             throw RTStructError.missingRequiredSequence("ROI Contour Sequence")
         }
         
         print("   🖼️ Parsing ROI Contour Sequence...")
         
-        // Placeholder implementation - will be enhanced with actual sequence parsing
+        let sequenceItems = try parseDICOMSequence(sequenceElement.data)
+        
         var contourSets: [ROIContourSet] = []
         
-        // Create a basic contour set for testing
-        let basicContourSet = ROIContourSet(
-            referencedROINumber: 1,
-            displayColor: SIMD3<Float>(1.0, 0.0, 0.0), // Red
-            contours: []
-        )
-        
-        contourSets.append(basicContourSet)
+        for (index, item) in sequenceItems.enumerated() {
+            do {
+                // Extract Referenced ROI Number
+                let referencedROINumber = extractIntFromSequenceItem(item, tag: DICOMTag.referencedROINumber) ?? (index + 1)
+                
+                // Extract ROI Display Color (RGB values 0-255)
+                let displayColor = extractDisplayColorFromSequenceItem(item)
+                
+                // Parse Contour Sequence (3006,0040)
+                let contours = try parseContourSequence(item)
+                
+                let contourSet = ROIContourSet(
+                    referencedROINumber: referencedROINumber,
+                    displayColor: displayColor,
+                    contours: contours
+                )
+                
+                contourSets.append(contourSet)
+                
+                print("      🎨 ROI \(referencedROINumber): \(contours.count) contours, color: RGB(\(String(format: "%.2f", displayColor.x)), \(String(format: "%.2f", displayColor.y)), \(String(format: "%.2f", displayColor.z)))")
+                
+            } catch {
+                print("      ⚠️ Failed to parse contour set \(index): \(error)")
+            }
+        }
         
         return contourSets
     }
     
-    // MARK: - RT ROI Observations Sequence Parsing
+    // MARK: - Contour Sequence Parsing (REAL IMPLEMENTATION)
+    
+    private static func parseContourSequence(_ roiContourItem: DICOMSequenceItem) throws -> [ROIContour] {
+        // Look for Contour Sequence tag (3006,0040) within this ROI contour item
+        guard let contourSequenceData = extractSequenceFromSequenceItem(roiContourItem, tag: DICOMTag.contourSequence) else {
+            print("        ℹ️ No contour sequence found in this ROI")
+            return []
+        }
+        
+        let contourItems = try parseDICOMSequence(contourSequenceData)
+        var contours: [ROIContour] = []
+        
+        for (contourIndex, contourItem) in contourItems.enumerated() {
+            do {
+                // Extract Contour Geometric Type (3006,0042)
+                let geometricTypeString = extractStringFromSequenceItem(contourItem, tag: DICOMTag.contourGeometricType) ?? "CLOSED_PLANAR"
+                let geometricType = ContourGeometricType(rawValue: geometricTypeString) ?? .closedPlanar
+                
+                // Extract Number of Contour Points (3006,0046)
+                let numberOfPoints = extractIntFromSequenceItem(contourItem, tag: DICOMTag.numberOfContourPoints) ?? 0
+                
+                // Extract Contour Data (3006,0050) - The actual 3D points
+                guard let contourDataString = extractStringFromSequenceItem(contourItem, tag: DICOMTag.contourData) else {
+                    print("        ⚠️ No contour data found for contour \(contourIndex)")
+                    continue
+                }
+                
+                // Parse the contour data points (x1\y1\z1\x2\y2\z2\...)
+                let contourPoints = parseContourDataPoints(contourDataString)
+                
+                guard contourPoints.count == numberOfPoints else {
+                    print("        ⚠️ Point count mismatch: expected \(numberOfPoints), got \(contourPoints.count)")
+                }
+                
+                // Calculate slice position (Z coordinate - typically the same for all points in a contour)
+                let slicePosition = contourPoints.first?.z ?? 0.0
+                
+                // Extract referenced SOP instance UID if present
+                let referencedSOPInstanceUID = extractReferencedSOPInstanceUID(contourItem)
+                
+                let contour = ROIContour(
+                    contourNumber: contourIndex + 1,
+                    geometricType: geometricType,
+                    numberOfPoints: contourPoints.count,
+                    contourData: contourPoints,
+                    slicePosition: slicePosition,
+                    referencedSOPInstanceUID: referencedSOPInstanceUID
+                )
+                
+                contours.append(contour)
+                
+                print("        📐 Contour \(contourIndex + 1): \(geometricType.rawValue), \(contourPoints.count) points, Z=\(String(format: "%.1f", slicePosition))")
+                
+            } catch {
+                print("        ⚠️ Failed to parse contour \(contourIndex): \(error)")
+            }
+        }
+        
+        return contours
+    }
+    
+    // MARK: - RT ROI Observations Sequence Parsing (REAL IMPLEMENTATION)
     
     private static func parseRTROIObservationsSequence(from dataset: DICOMDataset) -> [ROIObservation] {
-        guard let sequenceElement = dataset.elements[.rtROIObservationsSequence] else {
+        guard let sequenceElement = dataset.elements[DICOMTag.rtROIObservationsSequence] else {
             print("   ℹ️ No RT ROI Observations Sequence found (optional)")
             return []
         }
         
         print("   👁️ Parsing RT ROI Observations Sequence...")
         
-        // Placeholder implementation
-        var observations: [ROIObservation] = []
+        do {
+            let sequenceItems = try parseDICOMSequence(sequenceElement.data)
+            var observations: [ROIObservation] = []
+            
+            for (index, item) in sequenceItems.enumerated() {
+                let observationNumber = extractIntFromSequenceItem(item, tag: DICOMTag.observationNumber) ?? (index + 1)
+                let referencedROINumber = extractIntFromSequenceItem(item, tag: DICOMTag.referencedROINumber) ?? (index + 1)
+                let roiObservationLabel = extractStringFromSequenceItem(item, tag: DICOMTag.roiObservationLabel)
+                let rtROIInterpretedType = extractStringFromSequenceItem(item, tag: DICOMTag.rtROIInterpretedType)
+                let roiInterpreter = extractStringFromSequenceItem(item, tag: DICOMTag.roiInterpreter)
+                
+                let observation = ROIObservation(
+                    observationNumber: observationNumber,
+                    referencedROINumber: referencedROINumber,
+                    roiObservationLabel: roiObservationLabel,
+                    rtROIInterpretedType: rtROIInterpretedType,
+                    roiInterpreter: roiInterpreter
+                )
+                
+                observations.append(observation)
+                
+                print("      👁️ Observation \(observationNumber): ROI \(referencedROINumber), Type: \(rtROIInterpretedType ?? "Unknown")")
+            }
+            
+            return observations
+        } catch {
+            print("   ⚠️ Failed to parse RT ROI Observations: \(error)")
+            return []
+        }
+    }
+    
+    // MARK: - DICOM Sequence Parsing Infrastructure
+    
+    /// Parse DICOM sequence data into individual items
+    private static func parseDICOMSequence(_ sequenceData: Data) throws -> [DICOMSequenceItem] {
+        var items: [DICOMSequenceItem] = []
+        var offset = 0
         
-        let basicObservation = ROIObservation(
-            observationNumber: 1,
-            referencedROINumber: 1,
-            roiObservationLabel: nil,
-            rtROIInterpretedType: nil,
-            roiInterpreter: nil
-        )
+        while offset < sequenceData.count {
+            // Look for sequence item tag (FFFE,E000)
+            guard offset + 8 <= sequenceData.count else { break }
+            
+            let group = sequenceData.readUInt16(at: offset, littleEndian: true)
+            let element = sequenceData.readUInt16(at: offset + 2, littleEndian: true)
+            let length = sequenceData.readUInt32(at: offset + 4, littleEndian: true)
+            
+            offset += 8
+            
+            if group == 0xFFFE && element == 0xE000 {
+                // This is a sequence item
+                let itemLength = Int(length)
+                
+                if length == 0xFFFFFFFF {
+                    // Undefined length - find the item delimiter
+                    let itemData = findItemWithUndefinedLength(sequenceData, startOffset: offset)
+                    if !itemData.isEmpty {
+                        let item = try parseSequenceItemData(itemData)
+                        items.append(item)
+                        offset += itemData.count + 8 // Include delimiter
+                    } else {
+                        break
+                    }
+                } else if itemLength > 0 && offset + itemLength <= sequenceData.count {
+                    // Defined length
+                    let itemData = sequenceData.subdata(in: offset..<offset + itemLength)
+                    let item = try parseSequenceItemData(itemData)
+                    items.append(item)
+                    offset += itemLength
+                } else {
+                    break
+                }
+            } else if group == 0xFFFE && element == 0xE0DD {
+                // Sequence delimiter - end of sequence
+                break
+            } else {
+                // Skip unknown tags
+                offset += Int(length)
+            }
+        }
         
-        observations.append(basicObservation)
+        return items
+    }
+    
+    /// Parse individual sequence item data into a dictionary of tags
+    private static func parseSequenceItemData(_ itemData: Data) throws -> DICOMSequenceItem {
+        var elements: [DICOMTag: Data] = [:]
+        var offset = 0
         
-        return observations
+        while offset + 8 <= itemData.count {
+            let group = itemData.readUInt16(at: offset, littleEndian: true)
+            let element = itemData.readUInt16(at: offset + 2, littleEndian: true)
+            let tag = DICOMTag(group: group, element: element)
+            
+            offset += 4
+            
+            // Determine VR and length (assume implicit VR for simplicity)
+            guard offset + 4 <= itemData.count else { break }
+            let length = itemData.readUInt32(at: offset, littleEndian: true)
+            offset += 4
+            
+            if length == 0xFFFFFFFF {
+                // Undefined length - skip for now
+                break
+            }
+            
+            let dataLength = Int(length)
+            guard offset + dataLength <= itemData.count else { break }
+            
+            let elementData = itemData.subdata(in: offset..<offset + dataLength)
+            elements[tag] = elementData
+            
+            offset += dataLength
+        }
+        
+        return DICOMSequenceItem(elements: elements)
+    }
+    
+    // MARK: - Sequence Item Data Extraction
+    
+    private static func extractStringFromSequenceItem(_ item: DICOMSequenceItem, tag: DICOMTag) -> String? {
+        guard let data = item.elements[tag] else { return nil }
+        return String(data: data, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    private static func extractIntFromSequenceItem(_ item: DICOMSequenceItem, tag: DICOMTag) -> Int? {
+        guard let data = item.elements[tag] else { return nil }
+        
+        if data.count >= 2 {
+            return Int(data.readUInt16(at: 0, littleEndian: true))
+        } else if data.count >= 4 {
+            return Int(data.readUInt32(at: 0, littleEndian: true))
+        }
+        
+        return nil
+    }
+    
+    private static func extractSequenceFromSequenceItem(_ item: DICOMSequenceItem, tag: DICOMTag) -> Data? {
+        return item.elements[tag]
+    }
+    
+    private static func extractDisplayColorFromSequenceItem(_ item: DICOMSequenceItem) -> SIMD3<Float> {
+        guard let colorData = item.elements[DICOMTag.roiDisplayColor] else {
+            // No color specified - generate one based on ROI number
+            return StandardROIColors.getColorForROI("Unknown")
+        }
+        
+        // DICOM color is stored as 3 unsigned shorts (RGB, 0-65535 range)
+        guard colorData.count >= 6 else {
+            return StandardROIColors.getColorForROI("Unknown")
+        }
+        
+        let r = Float(colorData.readUInt16(at: 0, littleEndian: true)) / 65535.0
+        let g = Float(colorData.readUInt16(at: 2, littleEndian: true)) / 65535.0
+        let b = Float(colorData.readUInt16(at: 4, littleEndian: true)) / 65535.0
+        
+        return SIMD3<Float>(r, g, b)
+    }
+    
+    // MARK: - Contour Data Processing
+    
+    /// Parse contour data string into 3D points
+    private static func parseContourDataPoints(_ contourDataString: String) -> [SIMD3<Float>] {
+        // DICOM contour data is stored as "x1\y1\z1\x2\y2\z2\..." where \ is the delimiter
+        let components = contourDataString.split(separator: "\\").compactMap { Float(String($0)) }
+        
+        guard components.count % 3 == 0 else {
+            print("        ⚠️ Invalid contour data: \(components.count) components (not divisible by 3)")
+            return []
+        }
+        
+        var points: [SIMD3<Float>] = []
+        
+        for i in stride(from: 0, to: components.count, by: 3) {
+            let point = SIMD3<Float>(
+                components[i],     // X coordinate
+                components[i + 1], // Y coordinate
+                components[i + 2]  // Z coordinate
+            )
+            points.append(point)
+        }
+        
+        return points
+    }
+    
+    private static func extractReferencedSOPInstanceUID(_ contourItem: DICOMSequenceItem) -> String? {
+        // Look for Contour Image Sequence, then Referenced SOP Instance UID
+        guard let contourImageSeqData = contourItem.elements[DICOMTag.contourImageSequence] else { return nil }
+        
+        do {
+            let imageItems = try parseDICOMSequence(contourImageSeqData)
+            if let firstImageItem = imageItems.first {
+                return extractStringFromSequenceItem(firstImageItem, tag: DICOMTag.referencedSOPInstanceUID)
+            }
+        } catch {
+            print("        ⚠️ Failed to parse contour image sequence: \(error)")
+        }
+        
+        return nil
+    }
+    
+    // MARK: - Utility Functions
+    
+    private static func findItemWithUndefinedLength(_ data: Data, startOffset: Int) -> Data {
+        var offset = startOffset
+        
+        while offset + 8 <= data.count {
+            let group = data.readUInt16(at: offset, littleEndian: true)
+            let element = data.readUInt16(at: offset + 2, littleEndian: true)
+            
+            if group == 0xFFFE && element == 0xE00D {
+                // Found item delimiter
+                return data.subdata(in: startOffset..<offset)
+            }
+            
+            offset += 8
+            let length = data.readUInt32(at: offset - 4, littleEndian: true)
+            if length != 0xFFFFFFFF {
+                offset += Int(length)
+            }
+        }
+        
+        return Data()
     }
     
     // MARK: - Data Combination
@@ -202,18 +505,16 @@ public class RTStructParser {
     // MARK: - Reference Extraction Helpers
     
     private static func extractReferencedFrameOfReference(from dataset: DICOMDataset) -> String? {
-        // Parse Referenced Frame of Reference Sequence if present
-        return dataset.getString(tag: .frameOfReferenceUID)
+        return dataset.getString(tag: DICOMTag.frameOfReferenceUID)
     }
     
     private static func extractReferencedStudyUID(from dataset: DICOMDataset) -> String? {
-        // Parse Referenced Study Sequence if present
-        return dataset.getString(tag: .studyInstanceUID) // May be different in referenced context
+        return dataset.getString(tag: DICOMTag.studyInstanceUID)
     }
     
     private static func extractReferencedSeriesUID(from dataset: DICOMDataset) -> String? {
-        // Parse Referenced Series Sequence if present
-        return nil // Will be implemented when we parse the actual sequence
+        // This would need to be extracted from Referenced Series Sequence when implemented
+        return nil
     }
 }
 
@@ -254,81 +555,10 @@ private struct ROIObservation {
     let roiInterpreter: String?
 }
 
-// MARK: - Sequence Parsing Utilities (Placeholder)
+// MARK: - DICOM Sequence Item Structure
 
-extension RTStructParser {
-    
-    /// Parse DICOM sequence element (placeholder implementation)
-    /// This will be enhanced when we have actual sequence data to work with
-    private static func parseSequence(_ element: DICOMElement) -> [[String: Any]] {
-        // Placeholder: In a real implementation, this would parse the DICOM sequence structure
-        // For now, return empty array - will be populated with actual parsing logic
-        return []
-    }
-    
-    /// Extract string from sequence item
-    private static func extractString(from item: [String: Any], key: String) -> String? {
-        return item[key] as? String
-    }
-    
-    /// Extract integer from sequence item
-    private static func extractInt(from item: [String: Any], key: String) -> Int? {
-        return item[key] as? Int
-    }
-    
-    /// Extract float array from sequence item (for contour data)
-    private static func extractFloatArray(from item: [String: Any], key: String) -> [Float]? {
-        return item[key] as? [Float]
-    }
-}
-
-// MARK: - Contour Data Parsing
-
-extension RTStructParser {
-    
-    /// Parse contour data points from DICOM format
-    private static func parseContourData(_ contourDataString: String) -> [SIMD3<Float>] {
-        let components = contourDataString.split(separator: "\\").compactMap { Float(String($0)) }
-        
-        // DICOM contour data is stored as x1\y1\z1\x2\y2\z2\...
-        guard components.count % 3 == 0 else {
-            print("⚠️ Invalid contour data: not divisible by 3")
-            return []
-        }
-        
-        var points: [SIMD3<Float>] = []
-        
-        for i in stride(from: 0, to: components.count, by: 3) {
-            let point = SIMD3<Float>(
-                components[i],     // X
-                components[i + 1], // Y
-                components[i + 2]  // Z
-            )
-            points.append(point)
-        }
-        
-        return points
-    }
-    
-    /// Parse RGB color from DICOM format
-    private static func parseDisplayColor(_ colorString: String?) -> SIMD3<Float> {
-        guard let colorString = colorString else {
-            return SIMD3<Float>(1.0, 0.0, 0.0) // Default red
-        }
-        
-        let components = colorString.split(separator: "\\").compactMap { Float(String($0)) }
-        
-        if components.count >= 3 {
-            // DICOM colors are typically 0-255, normalize to 0-1
-            return SIMD3<Float>(
-                components[0] / 255.0,
-                components[1] / 255.0,
-                components[2] / 255.0
-            )
-        }
-        
-        return SIMD3<Float>(1.0, 0.0, 0.0) // Default red
-    }
+private struct DICOMSequenceItem {
+    let elements: [DICOMTag: Data]
 }
 
 // MARK: - Testing and Validation
@@ -350,22 +580,22 @@ extension RTStructParser {
     public static func getRTStructInfo(from dataset: DICOMDataset) -> String {
         var info = "📊 RTStruct Information:\n"
         
-        if let structureSetName = dataset.getString(tag: .structureSetName) {
+        if let structureSetName = dataset.getString(tag: DICOMTag.structureSetName) {
             info += "   🏷️ Name: \(structureSetName)\n"
         }
         
-        if let structureSetDescription = dataset.getString(tag: .structureSetDescription) {
+        if let structureSetDescription = dataset.getString(tag: DICOMTag.structureSetDescription) {
             info += "   📝 Description: \(structureSetDescription)\n"
         }
         
-        if let structureSetDate = dataset.getString(tag: .structureSetDate) {
+        if let structureSetDate = dataset.getString(tag: DICOMTag.structureSetDate) {
             info += "   📅 Date: \(structureSetDate)\n"
         }
         
         // Check for required sequences
-        let hasStructureSetROI = dataset.elements[.structureSetROISequence] != nil
-        let hasROIContour = dataset.elements[.roiContourSequence] != nil
-        let hasROIObservations = dataset.elements[.rtROIObservationsSequence] != nil
+        let hasStructureSetROI = dataset.elements[DICOMTag.structureSetROISequence] != nil
+        let hasROIContour = dataset.elements[DICOMTag.roiContourSequence] != nil
+        let hasROIObservations = dataset.elements[DICOMTag.rtROIObservationsSequence] != nil
         
         info += "   📋 Structure Set ROI Sequence: \(hasStructureSetROI ? "✅" : "❌")\n"
         info += "   🖼️ ROI Contour Sequence: \(hasROIContour ? "✅" : "❌")\n"

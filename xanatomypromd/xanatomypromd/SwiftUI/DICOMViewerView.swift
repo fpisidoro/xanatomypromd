@@ -175,47 +175,67 @@ struct DICOMViewerView: View {
     }
     
     private var roiControlsView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("ROI Overlays")
-                .font(.headline)
-                .foregroundColor(.white)
-            
-            HStack {
+            HStack(spacing: 12) {
+                // Toggle button
                 Button(action: {
                     roiManager.toggleAllROIs()
                 }) {
-                    HStack {
+                    HStack(spacing: 4) {
                         Image(systemName: roiManager.isROIVisible ? "eye" : "eye.slash")
-                        Text(roiManager.isROIVisible ? "Hide ROIs" : "Show ROIs")
+                            .font(.caption)
+                        Text(roiManager.isROIVisible ? "ROI ON" : "ROI OFF")
+                            .font(.caption)
+                            .fontWeight(.medium)
                     }
                     .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
                     .background(roiManager.isROIVisible ? Color.blue : Color.gray.opacity(0.3))
-                    .cornerRadius(8)
+                    .cornerRadius(6)
+                }
+                
+                // Compact opacity slider
+                if roiManager.isROIVisible {
+                    VStack(spacing: 2) {
+                        Text("Opacity")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                        
+                        HStack(spacing: 4) {
+                            Text("0")
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                            
+                            Slider(value: $roiManager.globalROIOpacity, in: 0...1)
+                                .accentColor(.blue)
+                                .frame(width: 80)
+                            
+                            Text("100")
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                        }
+                    }
                 }
                 
                 Spacer()
                 
+                // ROI count
                 if let stats = roiManager.getROIStatistics() {
-                    Text("\(stats.visibleROIs)/\(stats.totalROIs) ROIs")
-                        .font(.caption)
-                        .foregroundColor(.gray)
+                    VStack(spacing: 2) {
+                        Text("ROIs")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                        Text("\(stats.visibleROIs)/\(stats.totalROIs)")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                    }
                 }
             }
-            
-            if roiManager.isROIVisible {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Opacity: \(Int(roiManager.globalROIOpacity * 100))%")
-                        .font(.caption)
-                        .foregroundColor(.white)
-                    
-                    Slider(value: $roiManager.globalROIOpacity, in: 0...1)
-                        .accentColor(.blue)
-                }
-            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.gray.opacity(0.1))
+            .cornerRadius(8)
         }
-    }
     
     // MARK: - Slice Navigation Overlay
     private func sliceNavigationOverlay(geometry: GeometryProxy) -> some View {

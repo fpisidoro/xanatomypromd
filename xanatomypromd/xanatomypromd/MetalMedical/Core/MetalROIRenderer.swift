@@ -50,12 +50,12 @@ public class MetalROIRenderer {
         }
     }
     
-    public enum ROIRenderMode {
-        case filled
-        case outline
-        case filledWithOutline
-        case points
-        case adaptive
+    public enum ROIRenderMode: UInt32 {
+        case filled = 0
+        case outline = 1
+        case filledWithOutline = 2
+        case points = 3
+        case adaptive = 4
     }
     
     // MARK: - Uniform Structures
@@ -86,9 +86,18 @@ public class MetalROIRenderer {
         init(roi: ROIGeometry, config: ROIRenderConfig, textureSize: SIMD2<Float>) {
             self.roiColor = SIMD4<Float>(roi.color.x, roi.color.y, roi.color.z, roi.opacity)
             self.opacity = roi.opacity
-            self.geometricType = roi.geometricType.rawValue
+            // Convert geometric type to UInt32 safely
+            self.geometricType = Self.geometricTypeToUInt32(roi.geometricType)
             self.enableAntialiasing = config.enableAntialiasing ? 1 : 0
             self.textureSize = textureSize
+        }
+        
+        private static func geometricTypeToUInt32(_ type: ContourGeometricType) -> UInt32 {
+            switch type {
+            case .point: return 0
+            case .openPlanar, .openNonplanar: return 1
+            case .closedPlanar, .closedNonplanar: return 2
+            }
         }
     }
     
@@ -159,7 +168,7 @@ public class MetalROIRenderer {
                 outputTexture: outputTexture,
                 plane: plane,
                 slicePosition: slicePosition,
-                volumeOriginpublic struct ROIGeometry : volumeOrigin,
+                volumeOrigin: volumeOrigin,
                 volumeSpacing: volumeSpacing,
                 config: config,
                 completion: completion
@@ -274,7 +283,7 @@ public class MetalROIRenderer {
         
         // Render each ROI geometry
         for geometry in roiGeometries {
-            renderROIGeometry(geometry, encoder: renderEncoder, config: config)
+            renderROIGeometry(geometry, encoder: renderEncoder, config: config, outputTexture: outputTexture)
         }
         
         renderEncoder.endEncoding()
@@ -291,7 +300,8 @@ public class MetalROIRenderer {
     private func renderROIGeometry(
         _ geometry: ROIGeometry,
         encoder: MTLRenderCommandEncoder,
-        config: ROIRenderConfig
+        config: ROIRenderConfig,
+        outputTexture: MTLTexture
     ) {
         // Choose pipeline based on geometric type
         let pipeline: MTLRenderPipelineState?
@@ -321,8 +331,7 @@ public class MetalROIRenderer {
         var uniforms = ROIUniforms(mvpMatrix: mvpMatrix, config: config)
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<ROIUniforms>.size, index: 1)
         
-        // Set ROI-specific parameters
-        // BETTER FIX 3: Get actual texture dimensions
+        // Set ROI-specific parameters with proper texture dimensions
         let textureSize = SIMD2<Float>(
             Float(outputTexture.width),
             Float(outputTexture.height)
@@ -334,11 +343,11 @@ public class MetalROIRenderer {
         )
         encoder.setFragmentBytes(&params, length: MemoryLayout<ROIRenderParams>.size, index: 0)
         
-        // Draw geometry
+        // Draw geometry using supported Metal primitive types
         let vertexCount = geometry.vertices.count
         if geometry.geometricType.shouldFill {
-            // Draw filled contour (triangle fan)
-            encoder.drawPrimitives(type: .triangleFan, vertexStart: 0, vertexCount: vertexCount)
+            // Draw filled contour (use triangle strip instead of fan)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexCount)
         } else {
             // Draw line strip
             encoder.drawPrimitives(type: .lineStrip, vertexStart: 0, vertexCount: vertexCount)
@@ -552,29 +561,6 @@ public struct ROIGeometry {
         self.geometricType = geometricType
         self.color = color
         self.opacity = opacity
-    }
-}
-// MARK: - Extensions for Render Mode
-
-extension MetalROIRenderer.ROIRenderMode {
-    var rawValue: UInt32 {
-        switch self {
-        case .filled: return 0
-        case .outline: return 1
-        case .filledWithOutline: return 2
-        case .points: return 3
-        case .adaptive: return 4
-        }
-    }
-}
-
-extension ContourGeometricType {
-    public var rawValue: UInt32 {
-        switch self {
-        case .point: return 0
-        case .openPlanar, .openNonplanar: return 1
-        case .closedPlanar, .closedNonplanar: return 2
-        }
     }
 }
 
