@@ -146,3 +146,161 @@ public enum DICOMError: Error, LocalizedError {
         }
     }
 }
+
+extension DICOMDataset {
+    
+    /// Get raw sequence data for undefined length sequences
+    /// This bypasses the normal DICOM parser's sequence skipping
+    public func getSequenceData(tag: DICOMTag, fromRawData data: Data) -> Data? {
+        // Find the tag in the raw DICOM data and extract sequence content
+        return findSequenceInRawData(tag: tag, data: data)
+    }
+    
+    /// Find and extract undefined length sequence data from raw DICOM file
+    private func findSequenceInRawData(tag: DICOMTag, data: Data) -> Data? {
+        let targetGroup = tag.group
+        let targetElement = tag.element
+        
+        var offset = 132 // Skip DICOM header
+        
+        // Search through the raw DICOM data for our target tag
+        while offset + 8 <= data.count {
+            let group = data.readUInt16(at: offset, littleEndian: true)
+            let element = data.readUInt16(at: offset + 2, littleEndian: true)
+            
+            offset += 4
+            
+            // Check if this is our target sequence
+            if group == targetGroup && element == targetElement {
+                print("   🎯 Found target sequence tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) at offset \(offset - 4)")
+                
+                // Parse the sequence data
+                return extractUndefinedLengthSequence(data: data, startOffset: offset)
+            }
+            
+            // Skip this element to continue searching
+            if let nextOffset = skipElement(data: data, currentOffset: offset) {
+                offset = nextOffset
+            } else {
+                break
+            }
+        }
+        
+        print("   ❌ Could not find sequence tag (\(String(format: "%04X", targetGroup)),\(String(format: "%04X", targetElement))) in raw data")
+        return nil
+    }
+    
+    /// Extract undefined length sequence content
+    private func extractUndefinedLengthSequence(data: Data, startOffset: Int) -> Data? {
+        var offset = startOffset
+        
+        // Check if this is explicit or implicit VR
+        let potentialVR = data.subdata(in: offset..<min(offset + 2, data.count))
+        let vrString = String(data: potentialVR, encoding: .ascii) ?? ""
+        
+        let isExplicitVR = ["SQ"].contains(vrString)
+        
+        if isExplicitVR {
+            // Explicit VR: VR (2) + Reserved (2) + Length (4)
+            guard offset + 8 <= data.count else { return nil }
+            offset += 8
+        } else {
+            // Implicit VR: Length (4)
+            guard offset + 4 <= data.count else { return nil }
+            let length = data.readUInt32(at: offset, littleEndian: true)
+            offset += 4
+            
+            if length != 0xFFFFFFFF {
+                // Defined length sequence
+                guard offset + Int(length) <= data.count else { return nil }
+                let sequenceData = data.subdata(in: offset..<offset + Int(length))
+                print("   ✅ Extracted defined length sequence: \(sequenceData.count) bytes")
+                return sequenceData
+            }
+        }
+        
+        // Undefined length sequence - find the sequence delimiter
+        let sequenceStart = offset
+        var nestingLevel = 0
+        
+        while offset + 8 <= data.count {
+            let group = data.readUInt16(at: offset, littleEndian: true)
+            let element = data.readUInt16(at: offset + 2, littleEndian: true)
+            let length = data.readUInt32(at: offset + 4, littleEndian: true)
+            
+            offset += 8
+            
+            if group == 0xFFFE {
+                if element == 0xE000 {
+                    // Sequence item start
+                    nestingLevel += 1
+                } else if element == 0xE00D {
+                    // Item delimiter
+                    nestingLevel -= 1
+                } else if element == 0xE0DD {
+                    // Sequence delimiter
+                    if nestingLevel == 0 {
+                        // Found the end of our sequence
+                        let sequenceData = data.subdata(in: sequenceStart..<offset - 8)
+                        print("   ✅ Extracted undefined length sequence: \(sequenceData.count) bytes")
+                        return sequenceData
+                    }
+                }
+            }
+            
+            // Skip element data
+            if length != 0xFFFFFFFF && length > 0 {
+                offset += Int(length)
+            }
+        }
+        
+        print("   ⚠️ Could not find sequence delimiter for undefined length sequence")
+        return nil
+    }
+    
+    /// Skip an element in raw DICOM data
+    private func skipElement(data: Data, currentOffset: Int) -> Int? {
+        var offset = currentOffset
+        
+        // Try explicit VR first
+        guard offset + 2 <= data.count else { return nil }
+        let potentialVR = data.subdata(in: offset..<offset + 2)
+        let vrString = String(data: potentialVR, encoding: .ascii) ?? ""
+        
+        let isValidVR = ["AE", "AS", "AT", "CS", "DA", "DS", "DT", "FL", "FD", "IS", "LO", "LT", "OB", "OF", "OW", "PN", "SH", "SL", "SS", "ST", "TM", "UI", "UL", "UN", "US", "UT", "SQ"].contains(vrString)
+        
+        if isValidVR {
+            // Explicit VR
+            offset += 2
+            
+            let length: UInt32
+            if ["OB", "OW", "OF", "SQ", "UT", "UN"].contains(vrString) {
+                // 4-byte length after 2 reserved bytes
+                guard offset + 6 <= data.count else { return nil }
+                offset += 2 // Skip reserved bytes
+                length = data.readUInt32(at: offset, littleEndian: true)
+                offset += 4
+            } else {
+                // 2-byte length
+                guard offset + 2 <= data.count else { return nil }
+                length = UInt32(data.readUInt16(at: offset, littleEndian: true))
+                offset += 2
+            }
+            
+            if length != 0xFFFFFFFF {
+                offset += Int(length)
+            }
+        } else {
+            // Implicit VR
+            guard offset + 4 <= data.count else { return nil }
+            let length = data.readUInt32(at: offset, littleEndian: true)
+            offset += 4
+            
+            if length != 0xFFFFFFFF {
+                offset += Int(length)
+            }
+        }
+        
+        return offset
+    }
+}

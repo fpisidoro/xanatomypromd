@@ -1092,8 +1092,21 @@ class DICOMViewerViewModel: ObservableObject {
                 if let modality = dataset.getString(tag: .modality), modality == "RTSTRUCT" {
                     print("✅ Parsing RTStruct: \(rtFile.lastPathComponent)")
                     
+                    // 🔍 DIAGNOSTIC: Check what's actually in the RTStruct file
+                    let info = RTStructParser.getRTStructInfo(from: dataset)
+                    print("🔍 RTStruct Diagnostic Info:")
+                    print(info)
+                    
+                    let validation = RTStructValidator.validateRTStruct(dataset)
+                    print("📋 RTStruct Validation: \(validation.isValid ? "✅ VALID" : "⚠️ ISSUES")")
+                    if !validation.isValid {
+                        for issue in validation.issues {
+                            print("   - \(issue)")
+                        }
+                    }
+                    
                     // Parse ROI data
-                    let rtStructData = try RTStructParser.parseRTStruct(from: dataset)
+                    let rtStructData = try RTStructParser.parseRTStructWithRawData(from: dataset, rawData: data)
                     
                     // Store RTStruct data for ROI overlay
                     await MainActor.run {
