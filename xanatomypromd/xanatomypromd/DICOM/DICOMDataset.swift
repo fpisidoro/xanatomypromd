@@ -304,3 +304,21 @@ extension DICOMDataset {
         return offset
     }
 }
+
+extension DICOMDataset {
+    public func getImagePosition() -> SIMD3<Double>? {
+        guard let positionString = getString(tag: DICOMTag.imagePositionPatient) else {
+            return nil
+        }
+        
+        let components = positionString.components(separatedBy: "\\")
+        guard components.count >= 3,
+              let x = Double(components[0]),
+              let y = Double(components[1]),
+              let z = Double(components[2]) else {
+            return nil
+        }
+        
+        return SIMD3<Double>(x, y, z)
+    }
+}

@@ -1,10 +1,10 @@
+import Foundation
 import Metal
-import MetalKit
 import simd
 
-// MARK: - Metal Volume Renderer
-// GPU-accelerated Multi-Planar Reconstruction (MPR)
-// FIXED: Hardware sampling with r16Sint (no broken Float16 conversion)
+// MARK: - FIXED HARDWARE ACCELERATED Metal Volume Renderer
+// GPU-accelerated 3D volume reconstruction and MPR slice generation
+// Uses r16Sint format with hardware sampling for maximum performance
 
 public class MetalVolumeRenderer {
     
@@ -14,38 +14,27 @@ public class MetalVolumeRenderer {
     private let commandQueue: MTLCommandQueue
     private let library: MTLLibrary
     
-    // MPR Compute Pipelines
-    private var mprPipelineState: MTLComputePipelineState?
+    // 3D Volume Storage (FIXED: Made public)
+    public var volumeData: VolumeData?  // FIXED: Changed from private to public
     private var volumeTexture: MTLTexture?
-    private var volumeData: VolumeData?
     
-    // MARK: - MPR Configuration
+    // MPR Compute Pipeline
+    private var mprPipelineState: MTLComputePipelineState?
+    
+    // MARK: - Configuration for MPR Generation
     
     public struct MPRConfig {
-        let plane: MPRPlane
-        let sliceIndex: Float           // 0.0 to 1.0 normalized position
-        let windowCenter: Float
-        let windowWidth: Float
-        let interpolation: InterpolationType
+        public let plane: MPRPlane
+        public let sliceIndex: Float        // 0.0 to 1.0 normalized position
+        public let windowCenter: Float
+        public let windowWidth: Float
         
-        public init(
-            plane: MPRPlane,
-            sliceIndex: Float,
-            windowCenter: Float = 0.0,
-            windowWidth: Float = 2000.0,
-            interpolation: InterpolationType = .trilinear
-        ) {
+        public init(plane: MPRPlane, sliceIndex: Float, windowCenter: Float = 0.0, windowWidth: Float = 2000.0) {
             self.plane = plane
             self.sliceIndex = sliceIndex
             self.windowCenter = windowCenter
             self.windowWidth = windowWidth
-            self.interpolation = interpolation
         }
-    }
-    
-    public enum InterpolationType {
-        case nearestNeighbor
-        case trilinear
     }
     
     // MARK: - Initialization
@@ -67,13 +56,12 @@ public class MetalVolumeRenderer {
         }
         self.library = library
         
-        // Setup MPR compute pipeline
+        // Setup MPR pipeline
         try setupMPRPipeline()
         
         print("✅ MetalVolumeRenderer initialized with FIXED HARDWARE ACCELERATION")
         print("   🖥️  Device: \(device.name)")
-        print("   🚀 Hardware sampling: r16Sint format (FIXED)")
-        print("   🧠 3D texture support: \(device.supportsFamily(.apple4) ? "Yes" : "Limited")")
+        print("   🧠 3D texture support: \(device.supportsFamily(.apple5) ? "Full" : "Limited")")
     }
     
     // MARK: - Volume Loading (FIXED - No Float16 Conversion)
@@ -287,56 +275,49 @@ public class MetalVolumeRenderer {
         
         // Setup compute pipeline
         encoder.setComputePipelineState(pipelineState)
-        encoder.setTexture(volumeTexture, index: 0)      // Input 3D volume (r16Sint format)
-        encoder.setTexture(outputTexture, index: 1)      // Output 2D slice
+        encoder.setTexture(volumeTexture, index: 0)
+        encoder.setTexture(outputTexture, index: 1)
         
-        // Pass MPR parameters to shader with safe conversions
-        let planeTypeValue: UInt32
-        switch config.plane {
-        case .axial:
-            planeTypeValue = 0
-        case .sagittal:
-            planeTypeValue = 1
-        case .coronal:
-            planeTypeValue = 2
+        // Setup shader parameters
+        guard let volumeData = volumeData else {
+            completion(false)
+            return
         }
         
-        var mprParams = MPRShaderParams(
-            planeType: planeTypeValue,
-            slicePosition: max(0.0, min(1.0, config.sliceIndex)),
+        var params = MPRShaderParams(
+            planeType: UInt32(config.plane.rawValue.hash % 3),  // Simple hash to ID
+            slicePosition: config.sliceIndex,
             windowCenter: config.windowCenter,
             windowWidth: config.windowWidth,
             volumeDimensions: SIMD3<UInt32>(
-                UInt32(min(volumeTexture.width, 65535)),
-                UInt32(min(volumeTexture.height, 65535)),
-                UInt32(min(volumeTexture.depth, 65535))
+                UInt32(volumeData.dimensions.x),
+                UInt32(volumeData.dimensions.y),
+                UInt32(volumeData.dimensions.z)
             ),
-            spacing: volumeData?.spacing ?? SIMD3<Float>(1, 1, 1)
+            spacing: volumeData.spacing
         )
         
-        encoder.setBytes(&mprParams, length: MemoryLayout<MPRShaderParams>.size, index: 0)
+        encoder.setBytes(&params, length: MemoryLayout<MPRShaderParams>.size, index: 0)
         
-        // Calculate threadgroups with safety bounds
-        let maxThreadsPerGroup = 16 // Conservative for compatibility
-        let threadsPerGroup = MTLSize(width: maxThreadsPerGroup, height: maxThreadsPerGroup, depth: 1)
+        // Calculate thread groups
+        let threadgroupSize = MTLSizeMake(16, 16, 1)
+        let threadgroupCount = MTLSizeMake(
+            (outputTexture.width + threadgroupSize.width - 1) / threadgroupSize.width,
+            (outputTexture.height + threadgroupSize.height - 1) / threadgroupSize.height,
+            1
+        )
         
-        let gridWidth = (outputTexture.width + maxThreadsPerGroup - 1) / maxThreadsPerGroup
-        let gridHeight = (outputTexture.height + maxThreadsPerGroup - 1) / maxThreadsPerGroup
-        let threadgroupsPerGrid = MTLSize(width: gridWidth, height: gridHeight, depth: 1)
-        
-        encoder.dispatchThreadgroups(threadgroupsPerGrid, threadsPerThreadgroup: threadsPerGroup)
+        encoder.dispatchThreadgroups(threadgroupCount, threadsPerThreadgroup: threadgroupSize)
         encoder.endEncoding()
         
-        // Execute on GPU
         commandBuffer.addCompletedHandler { _ in
-            DispatchQueue.main.async {
-                completion(true)
-            }
+            completion(true)
         }
+        
         commandBuffer.commit()
     }
     
-    // MARK: - Volume Information
+    // MARK: - Volume Information and Status
     
     public func getVolumeInfo() -> String? {
         guard let volumeData = volumeData else { return nil }
@@ -366,6 +347,44 @@ public class MetalVolumeRenderer {
     
     public func getVolumeSpacing() -> SIMD3<Float>? {
         return volumeData?.spacing
+    }
+    
+    // MARK: - FIXED: Instance method for loading volume from DICOM files
+    
+    /// Load volume from DICOM files with hardware acceleration (FIXED: Instance method)
+    public func loadVolumeFromDICOMFiles(_ fileURLs: [URL]) async throws -> VolumeData {
+        print("📂 Loading volume from \(fileURLs.count) DICOM files for FIXED HARDWARE ACCELERATION...")
+        
+        var datasets: [(DICOMDataset, Int)] = []
+        
+        for (index, fileURL) in fileURLs.enumerated() {
+            do {
+                let data = try Data(contentsOf: fileURL)
+                let dataset = try DICOMParser.parse(data)
+                datasets.append((dataset, index))
+                
+                if index % 10 == 0 || index < 5 {
+                    print("   ✅ Loaded file \(index + 1)/\(fileURLs.count)")
+                }
+            } catch {
+                print("   ❌ Failed to load file \(index): \(fileURL.lastPathComponent) - \(error)")
+                throw error
+            }
+        }
+        
+        // Create volume from datasets
+        let volumeData = try VolumeData(from: datasets)
+        
+        // Store the volume data in this renderer instance
+        try loadVolume(volumeData)
+        
+        let stats = volumeData.getStatistics()
+        print("✅ Volume loading complete for FIXED HARDWARE ACCELERATION:")
+        print("   📐 Dimensions: \(stats.dimensions)")
+        print("   📏 Spacing: \(stats.spacing) mm")
+        print("   📊 Value range: \(stats.minValue) to \(stats.maxValue)")
+        
+        return volumeData
     }
 }
 
@@ -402,44 +421,6 @@ public enum MetalVolumeError: Error, LocalizedError {
         case .volumeNotLoaded:
             return "Volume data not loaded"
         }
-    }
-}
-
-// MARK: - Volume Loading Utilities
-
-extension MetalVolumeRenderer {
-    
-    /// Load volume from DICOM files with hardware acceleration
-    public static func loadVolumeFromDICOMFiles(_ fileURLs: [URL]) async throws -> VolumeData {
-        print("📂 Loading volume from \(fileURLs.count) DICOM files for FIXED HARDWARE ACCELERATION...")
-        
-        var datasets: [(DICOMDataset, Int)] = []
-        
-        for (index, fileURL) in fileURLs.enumerated() {
-            do {
-                let data = try Data(contentsOf: fileURL)
-                let dataset = try DICOMParser.parse(data)
-                datasets.append((dataset, index))
-                
-//                if index % 10 == 0 || index < 5 {
-//                    print("   ✅ Loaded file \(index + 1)/\(fileURLs.count)")
-//                }
-            } catch {
-                print("   ❌ Failed to load file \(index): \(fileURL.lastPathComponent) - \(error)")
-                throw error
-            }
-        }
-        
-        // Create volume from datasets
-        let volumeData = try VolumeData(from: datasets)
-        
-        let stats = volumeData.getStatistics()
-        print("✅ Volume loading complete for FIXED HARDWARE ACCELERATION:")
-        print("   📐 Dimensions: \(stats.dimensions)")
-        print("   📏 Spacing: \(stats.spacing) mm")
-        print("   📊 Value range: \(stats.minValue) to \(stats.maxValue)")
-        
-        return volumeData
     }
 }
 
