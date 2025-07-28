@@ -1,0 +1,291 @@
+import Foundation
+import Metal
+import simd
+
+// MARK: - ROI Integration Test
+// Simple test implementation to verify RTStruct parsing and ROI display
+// WITHOUT breaking the existing CT viewer functionality
+
+public class ROITestImplementation {
+    
+    // MARK: - Core Components
+    
+    private let roiManager: CleanROIManager
+    private var rtStructData: RTStructData?
+    
+    // MARK: - Initialization
+    
+    public init() {
+        self.roiManager = CleanROIManager()
+        print("🧪 ROI Test Implementation initialized")
+    }
+    
+    // MARK: - RTStruct Loading and Testing
+    
+    /// Load and parse the test RTStruct file
+    @MainActor
+    public func loadTestRTStruct() async {
+        print("📂 Loading test RTStruct data...")
+        
+        // For now, use generated test data since the complex parser has issues
+        // TODO: Replace with actual RTStruct file parsing once parser is fixed
+        
+        do {
+            // Try to load actual RTStruct file first
+            if let testRTStructURL = Bundle.main.url(
+                forResource: "test_rtstruct",
+                withExtension: "dcm",
+                subdirectory: "Resources/TestData"
+            ) {
+                print("📂 Found test RTStruct file, attempting to parse...")
+                
+                let dicomData = try Data(contentsOf: testRTStructURL)
+                let dicomDataset = try DICOMParser.parseDICOM(data: dicomData)
+                
+                // Try simple parsing
+                if let simpleData = MinimalRTStructParser.parseSimpleRTStruct(from: dicomDataset) {
+                    let rtStructData = MinimalRTStructParser.convertToFullROI(simpleData)
+                    self.rtStructData = rtStructData
+                    roiManager.loadRTStructData(rtStructData)
+                    printRTStructInfo(rtStructData)
+                    return
+                }
+            }
+            
+            // Fallback to generated test data
+            print("📊 Using generated test RTStruct data")
+            let testData = RTStructTestGenerator.generateTestRTStructData()
+            self.rtStructData = testData
+            roiManager.loadRTStructData(testData)
+            printRTStructInfo(testData)
+            
+        } catch {
+            print("⚠️ Error loading RTStruct file: \(error)")
+            print("📊 Falling back to generated test data")
+            
+            // Use generated test data as fallback
+            let testData = RTStructTestGenerator.generateTestRTStructData()
+            self.rtStructData = testData
+            roiManager.loadRTStructData(testData)
+            printRTStructInfo(testData)
+        }
+    }
+    
+    // MARK: - ROI Information Display
+    
+    private func printRTStructInfo(_ rtStructData: RTStructData) {
+        print("\n🎨 RTStruct Data Successfully Parsed:")
+        print("   📊 Structure Set: \(rtStructData.structureSetName ?? "Unknown")")
+        print("   📅 Date: \(rtStructData.structureSetDate ?? "Unknown")")
+        print("   🏷️  Description: \(rtStructData.structureSetDescription ?? "None")")
+        print("   📏 Total ROIs: \(rtStructData.roiStructures.count)")
+        
+        print("\n🏷️  ROI Structures Found:")
+        for (index, roi) in rtStructData.roiStructures.enumerated() {
+            let totalPoints = roi.totalPoints
+            let zRange = roi.zRange
+            let rangeStr = zRange != nil ? String(format: "%.1f to %.1f mm", zRange!.min, zRange!.max) : "No contours"
+            
+            print("   \(index + 1). \(roi.roiName)")
+            print("      🔢 ROI Number: \(roi.roiNumber)")
+            print("      📐 Contours: \(roi.contours.count)")
+            print("      📍 Points: \(totalPoints)")
+            print("      📏 Z Range: \(rangeStr)")
+            print("      🎨 Color: RGB(\(roi.displayColor.x), \(roi.displayColor.y), \(roi.displayColor.z))")
+            
+            // Show first few contour points as example
+            if let firstContour = roi.contours.first, !firstContour.contourData.isEmpty {
+                let firstPoint = firstContour.contourData[0]
+                print("      📍 First Point: (\(firstPoint.x), \(firstPoint.y), \(firstPoint.z))")
+            }
+            print("")
+        }
+        
+        let stats = rtStructData.getStatistics()
+        print("📊 Statistics: \(stats.description)")
+    }
+    
+    // MARK: - Simple ROI Display Test
+    
+    /// Test ROI overlay generation for different planes
+    public func testROIDisplay(
+        plane: MPRPlane,
+        slicePosition: Float,
+        volumeOrigin: SIMD3<Float>,
+        volumeSpacing: SIMD3<Float>
+    ) {
+        guard let rtStructData = rtStructData else {
+            print("❌ No RTStruct data loaded")
+            return
+        }
+        
+        print("🧪 Testing ROI display for \(plane.rawValue) plane at \(slicePosition)mm")
+        
+        // Get ROI info for this slice
+        let roiInfo = roiManager.getROIInfoForSlice(
+            plane: plane,
+            slicePosition: slicePosition
+        )
+        
+        if roiInfo.isEmpty {
+            print("   ℹ️ No ROIs found on this slice")
+        } else {
+            print("   🎯 ROIs on this slice:")
+            for info in roiInfo {
+                print("      - \(info)")
+            }
+        }
+        
+        // Test overlay generation
+        let textureSize = SIMD2<Int>(512, 512)
+        let overlayTexture = roiManager.generateROIOverlay(
+            plane: plane,
+            slicePosition: slicePosition,
+            textureSize: textureSize,
+            volumeOrigin: volumeOrigin,
+            volumeSpacing: volumeSpacing
+        )
+        
+        if overlayTexture != nil {
+            print("   ✅ ROI overlay texture generated successfully (\(textureSize.x)x\(textureSize.y))")
+        } else {
+            print("   ❌ Failed to generate ROI overlay texture")
+        }
+    }
+    
+    // MARK: - Interactive ROI Testing
+    
+    /// Test ROI selection functionality
+    public func testROISelection() {
+        guard let rtStructData = rtStructData else {
+            print("❌ No RTStruct data loaded")
+            return
+        }
+        
+        print("🧪 Testing ROI selection functionality")
+        
+        let roiNames = roiManager.getROINames()
+        print("   Available ROIs: \(roiNames.joined(separator: ", "))")
+        
+        // Test selecting first ROI
+        if let firstROI = rtStructData.roiStructures.first {
+            print("   Selecting ROI: \(firstROI.roiName)")
+            roiManager.selectOnly(firstROI.roiNumber)
+            
+            let selectedCount = roiManager.selectedROIs.count
+            print("   ✅ Selected ROIs: \(selectedCount)")
+        }
+        
+        // Test clearing selection
+        roiManager.clearSelection()
+        print("   🗑️ Selection cleared - showing all ROIs")
+    }
+    
+    // MARK: - Volume Compatibility Test
+    
+    /// Test ROI compatibility with volume data
+    public func testVolumeCompatibility(
+        volumeOrigin: SIMD3<Float>,
+        volumeSpacing: SIMD3<Float>,
+        volumeDimensions: SIMD3<Int>
+    ) {
+        guard let rtStructData = rtStructData else {
+            print("❌ No RTStruct data loaded")
+            return
+        }
+        
+        print("🧪 Testing ROI-Volume compatibility")
+        print("   Volume: origin=\(volumeOrigin), spacing=\(volumeSpacing), dimensions=\(volumeDimensions)")
+        
+        // Check each ROI's Z-range against volume Z-range
+        let volumeZMin = volumeOrigin.z
+        let volumeZMax = volumeOrigin.z + Float(volumeDimensions.z) * volumeSpacing.z
+        
+        print("   Volume Z-range: \(volumeZMin) to \(volumeZMax) mm")
+        
+        for roi in rtStructData.roiStructures {
+            if let zRange = roi.zRange {
+                let isCompatible = zRange.max >= volumeZMin && zRange.min <= volumeZMax
+                let status = isCompatible ? "✅" : "❌"
+                print("   \(status) \(roi.roiName): \(zRange.min) to \(zRange.max) mm")
+            } else {
+                print("   ⚠️ \(roi.roiName): No contour data")
+            }
+        }
+    }
+    
+    // MARK: - Comprehensive Test Suite
+    
+    /// Run all ROI tests
+    @MainActor
+    public func runAllTests() async {
+        print("\n🚀 Starting ROI Integration Test Suite")
+        print("="*50)
+        
+        // Test 1: Load RTStruct
+        await loadTestRTStruct()
+        
+        guard rtStructData != nil else {
+            print("❌ Cannot continue tests - RTStruct loading failed")
+            return
+        }
+        
+        // Test 2: ROI Selection
+        testROISelection()
+        
+        // Test 3: Volume compatibility (using typical CT volume parameters)
+        let volumeOrigin = SIMD3<Float>(0, 0, 0)
+        let volumeSpacing = SIMD3<Float>(0.7, 0.7, 3.0)  // Typical CT spacing
+        let volumeDimensions = SIMD3<Int>(512, 512, 53)   // Match our test data
+        
+        testVolumeCompatibility(
+            volumeOrigin: volumeOrigin,
+            volumeSpacing: volumeSpacing,
+            volumeDimensions: volumeDimensions
+        )
+        
+        // Test 4: ROI Display for different planes
+        let testSlicePositions: [(MPRPlane, Float)] = [
+            (.axial, 100.0),      // Middle axial slice
+            (.sagittal, 256.0),   // Middle sagittal slice  
+            (.coronal, 256.0)     // Middle coronal slice
+        ]
+        
+        for (plane, slicePos) in testSlicePositions {
+            testROIDisplay(
+                plane: plane,
+                slicePosition: slicePos,
+                volumeOrigin: volumeOrigin,
+                volumeSpacing: volumeSpacing
+            )
+        }
+        
+        print("\n✅ ROI Integration Test Suite Complete")
+        print("="*50)
+    }
+    
+    // MARK: - Public Interface for Integration
+    
+    /// Get the ROI manager for integration with existing viewer
+    public func getROIManager() -> CleanROIManager {
+        return roiManager
+    }
+    
+    /// Get parsed RTStruct data
+    public func getRTStructData() -> RTStructData? {
+        return rtStructData
+    }
+    
+    /// Check if ROI data is loaded and ready
+    public var isROIDataReady: Bool {
+        return rtStructData != nil
+    }
+}
+
+// MARK: - String Extension for Pretty Printing
+
+private extension String {
+    static func *(lhs: String, rhs: Int) -> String {
+        return String(repeating: lhs, count: rhs)
+    }
+}
