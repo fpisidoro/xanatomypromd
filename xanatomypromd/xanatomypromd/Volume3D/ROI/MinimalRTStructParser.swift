@@ -321,11 +321,17 @@ public class MinimalRTStructParser {
         
         print("       📝 Creating contours for ROI \(roiNumber) from \(contourItems.count) contour items")
         
-        // Try to extract real contour data from contour sequence items
+        // The contour items contain nested ROI Contour sequences
+        // We need to parse the nested structure to find actual contour data
         for (itemIndex, contourItem) in contourItems.enumerated() {
-            if let extractedContour = extractRealContourData(from: contourItem, roiNumber: roiNumber) {
-                contours.append(extractedContour)
-                print("       ✅ Extracted real contour \(itemIndex + 1): \(extractedContour.points.count) points at Z=\(extractedContour.slicePosition)")
+            print("       🔍 Processing contour item \(itemIndex + 1) (\(contourItem.count) bytes)...")
+            
+            // Look for nested contour sequences in this item
+            let nestedContours = extractNestedContourSequences(from: contourItem, roiNumber: roiNumber)
+            contours.append(contentsOf: nestedContours)
+            
+            if !nestedContours.isEmpty {
+                print("       ✅ Extracted \(nestedContours.count) nested contours from item \(itemIndex + 1)")
             }
         }
         
@@ -334,13 +340,121 @@ public class MinimalRTStructParser {
             print("       🔄 No real contours found, creating simplified contours")
             for i in 0..<min(max(1, contourItems.count), 10) { // At least 1, max 10
                 let z = Float(20 + i * 3) // 3mm spacing
-                let points = createCircularContour(center: SIMD3<Float>(256, 256, z), radius: 30 + Float(roiNumber * 10))
+                let points = createCircularContour(center: SIMD3<Float>(256, 256, z), radius: 30 + Float(roiNumber % 100 * 10))
                 
                 contours.append(SimpleContour(points: points, slicePosition: z))
             }
         }
         
         return contours
+    }
+    
+    /// Extract nested contour sequences from ROI contour item
+    private static func extractNestedContourSequences(from contourItem: Data, roiNumber: Int) -> [SimpleContour] {
+        var contours: [SimpleContour] = []
+        var offset = 0
+        
+        print("         🔍 Scanning for nested contour sequences in \(contourItem.count)-byte item...")
+        
+        // Look for sequence item tags (FFFE,E000) which contain individual contours
+        while offset + 8 <= contourItem.count {
+            let group = contourItem.safeReadUInt16(at: offset)
+            let element = contourItem.safeReadUInt16(at: offset + 2)
+            
+            if group == 0xFFFE && element == 0xE000 {
+                // Found nested sequence item
+                let length = contourItem.safeReadUInt32(at: offset + 4)
+                print("         📦 Found nested sequence item at offset \(offset), length: \(length == 0xFFFFFFFF ? "undefined" : String(length))")
+                
+                offset += 8 // Skip item header
+                
+                if length == 0xFFFFFFFF {
+                    // Undefined length - find item delimiter
+                    let itemStart = offset
+                    var foundDelimiter = false
+                    
+                    while offset + 8 <= contourItem.count {
+                        let delimGroup = contourItem.safeReadUInt16(at: offset)
+                        let delimElement = contourItem.safeReadUInt16(at: offset + 2)
+                        
+                        if delimGroup == 0xFFFE && delimElement == 0xE00D {
+                            // Item delimiter
+                            let nestedData = contourItem.subdata(in: itemStart..<offset)
+                            if let extractedContour = extractSingleContourFromData(nestedData, roiNumber: roiNumber) {
+                                contours.append(extractedContour)
+                            }
+                            offset += 8 // Skip delimiter
+                            foundDelimiter = true
+                            break
+                        } else if delimGroup == 0xFFFE && delimElement == 0xE0DD {
+                            // Sequence delimiter
+                            let nestedData = contourItem.subdata(in: itemStart..<offset)
+                            if let extractedContour = extractSingleContourFromData(nestedData, roiNumber: roiNumber) {
+                                contours.append(extractedContour)
+                            }
+                            foundDelimiter = true
+                            break
+                        } else {
+                            offset += 2
+                        }
+                    }
+                    
+                    if !foundDelimiter {
+                        // No delimiter found, use rest of data
+                        let nestedData = contourItem.subdata(in: itemStart..<contourItem.count)
+                        if let extractedContour = extractSingleContourFromData(nestedData, roiNumber: roiNumber) {
+                            contours.append(extractedContour)
+                        }
+                        break
+                    }
+                } else if length > 0 && length < 10000 && offset + Int(length) <= contourItem.count {
+                    // Explicit length
+                    let nestedData = contourItem.subdata(in: offset..<offset + Int(length))
+                    if let extractedContour = extractSingleContourFromData(nestedData, roiNumber: roiNumber) {
+                        contours.append(extractedContour)
+                    }
+                    offset += Int(length)
+                } else {
+                    offset += 8
+                }
+            } else {
+                offset += 2
+            }
+        }
+        
+        return contours
+    }
+    
+    /// Extract single contour from nested contour data
+    private static func extractSingleContourFromData(_ data: Data, roiNumber: Int) -> SimpleContour? {
+        print("           📍 Extracting single contour from \(data.count)-byte nested data...")
+        
+        // Look for Contour Data tag (3006,0050) in the nested data
+        if let contourPointsData = findEnhancedFloatArrayInData(data, group: 0x3006, element: 0x0050) {
+            print("           ✅ Found contour data: \(contourPointsData.count) coordinates")
+            
+            // Convert flat array to 3D points (x,y,z triplets)
+            var points: [SIMD3<Float>] = []
+            var zPosition: Float = 0.0
+            
+            for i in stride(from: 0, to: contourPointsData.count - 2, by: 3) {
+                let x = contourPointsData[i]
+                let y = contourPointsData[i + 1]
+                let z = contourPointsData[i + 2]
+                
+                points.append(SIMD3<Float>(x, y, z))
+                zPosition = z
+            }
+            
+            if !points.isEmpty {
+                print("           ✅ Extracted \(points.count) real contour points at Z=\(zPosition)")
+                return SimpleContour(points: points, slicePosition: zPosition)
+            }
+        } else {
+            print("           ⚠️ No contour data found in nested item")
+        }
+        
+        return nil
     }
     
     /// Extract real contour data from contour sequence item
