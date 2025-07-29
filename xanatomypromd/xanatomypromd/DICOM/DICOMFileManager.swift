@@ -113,7 +113,30 @@ class DICOMFileManager {
     /// Get only RTStruct files
     static func getRTStructFiles() -> [URL] {
         let (_, rtStructFiles, _) = discoverDICOMFiles()
-        return rtStructFiles
+        
+        // Also check Resources/TestData directory for test files
+        var allRTStructFiles = rtStructFiles
+        
+        // Check TestData subdirectory in Resources
+        if let testDataPath = Bundle.main.path(forResource: "TestData", ofType: nil) {
+            let testURL = URL(fileURLWithPath: testDataPath)
+            do {
+                let testFiles = try FileManager.default.contentsOfDirectory(at: testURL, includingPropertiesForKeys: nil)
+                let testRTStructFiles = testFiles.filter { $0.lastPathComponent.lowercased().contains("rtstruct") }
+                allRTStructFiles.append(contentsOf: testRTStructFiles)
+                
+                if !testRTStructFiles.isEmpty {
+                    print("   🧪 Found test RTStruct files:")
+                    for file in testRTStructFiles {
+                        print("      - \(file.lastPathComponent)")
+                    }
+                }
+            } catch {
+                print("   ⚠️ Could not access TestData directory: \(error)")
+            }
+        }
+        
+        return allRTStructFiles
     }
     
     /// Get all DICOM files (backwards compatibility)
