@@ -388,22 +388,3 @@ extension VolumeData {
         }
     }
 }
-
-// MARK: - MPR Plane Definition
-
-public enum MPRPlane: String, CaseIterable {
-    case axial = "Axial"
-    case sagittal = "Sagittal"
-    case coronal = "Coronal"
-    
-    public var description: String {
-        switch self {
-        case .axial:
-            return "Axial (Horizontal)"
-        case .sagittal:
-            return "Sagittal (Side View)"
-        case .coronal:
-            return "Coronal (Front View)"
-        }
-    }
-}

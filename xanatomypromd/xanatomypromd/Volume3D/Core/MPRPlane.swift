@@ -23,7 +23,7 @@ public enum MPRPlane: String, CaseIterable {
     }
     
     /// Medical abbreviation
-    public var abbreviation: String {
+    var abbreviation: String {
         switch self {
         case .axial: return "AX"
         case .sagittal: return "SAG"
@@ -32,7 +32,7 @@ public enum MPRPlane: String, CaseIterable {
     }
     
     /// Vector indicating the normal direction for the plane
-    public var normalVector: SIMD3<Float> {
+    var normalVector: SIMD3<Float> {
         switch self {
         case .axial:
             return SIMD3<Float>(0, 0, 1)  // Z-axis (superior-inferior)
@@ -44,7 +44,7 @@ public enum MPRPlane: String, CaseIterable {
     }
     
     /// Primary axis for slice navigation
-    public var sliceAxis: Int {
+    var sliceAxis: Int {
         switch self {
         case .axial: return 2    // Z-axis
         case .sagittal: return 0 // X-axis  
@@ -53,7 +53,7 @@ public enum MPRPlane: String, CaseIterable {
     }
     
     /// Get the two axes that define the 2D plane
-    public var planeAxes: (Int, Int) {
+    var planeAxes: (Int, Int) {
         switch self {
         case .axial:
             return (0, 1)  // X, Y

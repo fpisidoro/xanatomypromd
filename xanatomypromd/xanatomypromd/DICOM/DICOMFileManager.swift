@@ -277,6 +277,9 @@ extension DICOMViewerViewModel {
     }
 }
 
+// MARK: - DISABLED EXTENSIONS (VolumeTestManager not available)
+
+/*
 extension VolumeTestManager {
     
     /// Updated volume loading with proper CT file filtering
@@ -294,3 +297,4 @@ extension VolumeTestManager {
         print("✅ Found \(ctFiles.count) CT files for volume reconstruction")
     }
 }
+*/

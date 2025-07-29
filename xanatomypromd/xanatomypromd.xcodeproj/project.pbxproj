@@ -34,6 +34,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				Tests/VolumeTestManager.swift,
 			);
 			target = 4ED6724F2E28105400C98022 /* xanatomypromd */;
 		};

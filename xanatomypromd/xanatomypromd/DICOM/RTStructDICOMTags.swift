@@ -14,7 +14,6 @@ extension DICOMTag {
     
     // MARK: - Referenced Frame of Reference
     public static let referencedFrameOfReferenceSequence = DICOMTag(group: 0x3006, element: 0x0010)
-    public static let frameOfReferenceUID = DICOMTag(group: 0x0020, element: 0x0052)
     public static let rtReferencedStudySequence = DICOMTag(group: 0x3006, element: 0x0012)
     public static let rtReferencedSeriesSequence = DICOMTag(group: 0x3006, element: 0x0014)
     

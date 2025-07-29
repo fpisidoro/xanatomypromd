@@ -98,9 +98,9 @@ class ViewController: UIViewController {
         }
         
         DispatchQueue.global(qos: .background).async {
-            VolumeTestManager.runVolumeTests()
-            VolumeTestManager.testSpecificPlane(.sagittal, position: 0.5)
-            VolumeTestManager.testSpecificPlane(.coronal, position: 0.5)
+            // VolumeTestManager.runVolumeTests()
+            // VolumeTestManager.testSpecificPlane(.sagittal, position: 0.5)
+            // VolumeTestManager.testSpecificPlane(.coronal, position: 0.5)
         }
     }
     

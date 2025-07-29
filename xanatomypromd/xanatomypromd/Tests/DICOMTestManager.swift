@@ -492,10 +492,10 @@ class DICOMTestManager {
     }
     
     private static func identifyWindowPreset(center: Double, width: Double) -> String {
-        let presets = CTWindowPresets.all
+        let presets = CTWindowPresets.allPresets
         
         for preset in presets {
-            if abs(preset.center - center) < 50 && abs(preset.width - width) < 100 {
+            if abs(Double(preset.center) - center) < 50 && abs(Double(preset.width) - width) < 100 {
                 return preset.name
             }
         }

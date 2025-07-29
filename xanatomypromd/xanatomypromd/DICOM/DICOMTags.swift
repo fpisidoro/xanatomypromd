@@ -78,41 +78,6 @@ extension DICOMTag {
     
     // Frame of Reference
     public static let frameOfReferenceUID = DICOMTag(group: 0x0020, element: 0x0052)
-    
-    // RTStruct-Specific Tags
-    public static let structureSetLabel = DICOMTag(group: 0x3006, element: 0x0002)
-    public static let structureSetName = DICOMTag(group: 0x3006, element: 0x0004)
-    public static let structureSetDescription = DICOMTag(group: 0x3006, element: 0x0006)
-    public static let structureSetDate = DICOMTag(group: 0x3006, element: 0x0008)
-    public static let structureSetTime = DICOMTag(group: 0x3006, element: 0x0009)
-    
-    // Structure Set ROI Sequence
-    public static let structureSetROISequence = DICOMTag(group: 0x3006, element: 0x0020)
-    public static let roiNumber = DICOMTag(group: 0x3006, element: 0x0022)
-    public static let roiName = DICOMTag(group: 0x3006, element: 0x0026)
-    public static let roiDescription = DICOMTag(group: 0x3006, element: 0x0028)
-    public static let roiGenerationAlgorithm = DICOMTag(group: 0x3006, element: 0x0036)
-    
-    // ROI Contour Sequence
-    public static let roiContourSequence = DICOMTag(group: 0x3006, element: 0x0039)
-    public static let contourSequence = DICOMTag(group: 0x3006, element: 0x0040)
-    public static let contourGeometricType = DICOMTag(group: 0x3006, element: 0x0042)
-    public static let numberOfContourPoints = DICOMTag(group: 0x3006, element: 0x0046)
-    public static let contourData = DICOMTag(group: 0x3006, element: 0x0050)
-    public static let referencedROINumber = DICOMTag(group: 0x3006, element: 0x0084)
-    public static let roiDisplayColor = DICOMTag(group: 0x3006, element: 0x002A)
-    
-    // RT ROI Observations Sequence
-    public static let rtROIObservationsSequence = DICOMTag(group: 0x3006, element: 0x0080)
-    public static let observationNumber = DICOMTag(group: 0x3006, element: 0x0082)
-    public static let referencedROINumber2 = DICOMTag(group: 0x3006, element: 0x0084)
-    public static let roiObservationLabel = DICOMTag(group: 0x3006, element: 0x0085)
-    public static let rtROIInterpretedType = DICOMTag(group: 0x3006, element: 0x00A4)
-    public static let roiInterpreter = DICOMTag(group: 0x3006, element: 0x00A6)
-    
-    // Referenced SOP Instance
-    public static let referencedSOPInstanceUID = DICOMTag(group: 0x0008, element: 0x1155)
-    public static let referencedSOPClassUID = DICOMTag(group: 0x0008, element: 0x1150)
 }
 
 // MARK: - Tag Groups for Filtering
@@ -160,62 +125,4 @@ public struct TransferSyntax {
     public static let jpegBaseline = "1.2.840.10008.1.2.4.50"
     public static let jpegLossless = "1.2.840.10008.1.2.4.70"
     public static let rle = "1.2.840.10008.1.2.5"
-}
-
-// MARK: - Standard CT Window Presets
-
-public struct CTWindowPresets {
-    public struct WindowLevel {
-        public let center: Double
-        public let width: Double
-        public let name: String
-        
-        public init(center: Double, width: Double, name: String) {
-            self.center = center
-            self.width = width
-            self.name = name
-        }
-    }
-    
-    public static let bone = WindowLevel(center: 400, width: 1500, name: "Bone")
-    public static let lung = WindowLevel(center: -500, width: 1500, name: "Lung")
-    public static let softTissue = WindowLevel(center: 40, width: 350, name: "Soft Tissue")
-    public static let brain = WindowLevel(center: 35, width: 80, name: "Brain")
-    public static let liver = WindowLevel(center: 60, width: 160, name: "Liver")
-    
-    public static let all: [WindowLevel] = [bone, lung, softTissue, brain, liver]
-}
-
-// MARK: - FIXED: Make WindowLevel Hashable and Equatable
-
-extension CTWindowPresets.WindowLevel: Hashable, Equatable {
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(center)
-        hasher.combine(width)
-        hasher.combine(name)
-    }
-    
-    public static func == (lhs: CTWindowPresets.WindowLevel, rhs: CTWindowPresets.WindowLevel) -> Bool {
-        return lhs.center == rhs.center && lhs.width == rhs.width && lhs.name == rhs.name
-    }
-}
-
-// MARK: - FIXED: Add missing DICOMDataset extension
-
-extension DICOMDataset {
-    public func getImagePosition() -> SIMD3<Double>? {
-        guard let positionString = getString(tag: DICOMTag.imagePositionPatient) else {
-            return nil
-        }
-        
-        let components = positionString.components(separatedBy: "\\")
-        guard components.count >= 3,
-              let x = Double(components[0]),
-              let y = Double(components[1]),
-              let z = Double(components[2]) else {
-            return nil
-        }
-        
-        return SIMD3<Double>(x, y, z)
-    }
 }

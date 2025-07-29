@@ -2,6 +2,8 @@ import Foundation
 import Metal
 import simd
 
+// MARK: - Temporary Fix: Comment out MPRPlane usage
+
 // MARK: - ROI Integration Test
 // Simple test implementation to verify RTStruct parsing and ROI display
 // WITHOUT breaking the existing CT viewer functionality
@@ -40,7 +42,7 @@ public class ROITestImplementation {
                 print("📂 Found test RTStruct file, attempting to parse...")
                 
                 let dicomData = try Data(contentsOf: testRTStructURL)
-                let dicomDataset = try DICOMParser.parseDICOM(data: dicomData)
+                let dicomDataset = try DICOMParser.parse(dicomData)
                 
                 // Try simple parsing
                 if let simpleData = MinimalRTStructParser.parseSimpleRTStruct(from: dicomDataset) {
@@ -109,7 +111,7 @@ public class ROITestImplementation {
     
     /// Test ROI overlay generation for different planes
     public func testROIDisplay(
-        plane: MPRPlane,
+        plane: MPRPlaneType,
         slicePosition: Float,
         volumeOrigin: SIMD3<Float>,
         volumeSpacing: SIMD3<Float>
@@ -156,7 +158,8 @@ public class ROITestImplementation {
     // MARK: - Interactive ROI Testing
     
     /// Test ROI selection functionality
-    public func testROISelection() {
+    @MainActor
+    public func testROISelection() async {
         guard let rtStructData = rtStructData else {
             print("❌ No RTStruct data loaded")
             return
@@ -231,7 +234,7 @@ public class ROITestImplementation {
         }
         
         // Test 2: ROI Selection
-        testROISelection()
+        await testROISelection()
         
         // Test 3: Volume compatibility (using typical CT volume parameters)
         let volumeOrigin = SIMD3<Float>(0, 0, 0)
@@ -245,7 +248,7 @@ public class ROITestImplementation {
         )
         
         // Test 4: ROI Display for different planes
-        let testSlicePositions: [(MPRPlane, Float)] = [
+        let testSlicePositions: [(MPRPlaneType, Float)] = [
             (.axial, 100.0),      // Middle axial slice
             (.sagittal, 256.0),   // Middle sagittal slice  
             (.coronal, 256.0)     // Middle coronal slice

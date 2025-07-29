@@ -98,49 +98,157 @@ public class MinimalRTStructParser {
     // MARK: - Sample ROI Data for Testing
     
     private static func createSampleROIStructures() -> [SimpleROIStructure] {
-        print("   🧪 Creating sample ROI structures for testing...")
+        print("   🧪 Creating realistic 3D RTStruct ROI structures...")
         
-        // Create sample anatomical structures with realistic coordinates
+        // Create anatomically realistic 3D ROI structures
         let sampleROIs: [SimpleROIStructure] = [
             
-            // Heart ROI (centered around typical heart location)
+            // Heart ROI - 3D cardiac structure
             SimpleROIStructure(
                 roiNumber: 1,
                 roiName: "Heart",
                 displayColor: SIMD3<Float>(1.0, 0.0, 0.0), // Red
-                contours: createSampleContours(
-                    center: SIMD3<Float>(256, 256, 100),
-                    radius: 30,
-                    sliceRange: 95...105
-                )
+                contours: createHeartROI()
             ),
             
-            // Liver ROI (larger, offset to right)
+            // Liver ROI - Large abdominal organ
             SimpleROIStructure(
                 roiNumber: 2,
                 roiName: "Liver",
-                displayColor: SIMD3<Float>(0.5, 0.3, 0.1), // Brown
-                contours: createSampleContours(
-                    center: SIMD3<Float>(300, 280, 120),
-                    radius: 45,
-                    sliceRange: 110...140
-                )
+                displayColor: SIMD3<Float>(0.6, 0.4, 0.2), // Brown
+                contours: createLiverROI()
             ),
             
-            // Lung ROI (left lung)
+            // Lung ROI - 3D pulmonary structure
             SimpleROIStructure(
                 roiNumber: 3,
                 roiName: "Left Lung",
-                displayColor: SIMD3<Float>(0.0, 1.0, 1.0), // Cyan
-                contours: createSampleContours(
-                    center: SIMD3<Float>(200, 250, 80),
-                    radius: 50,
-                    sliceRange: 70...110
-                )
+                displayColor: SIMD3<Float>(0.0, 0.8, 0.8), // Cyan
+                contours: createLungROI()
             )
         ]
         
         return sampleROIs
+    }
+    
+    // MARK: - Realistic 3D ROI Generators
+    
+    private static func createHeartROI() -> [SimpleContour] {
+        var contours: [SimpleContour] = []
+        
+        // Heart: roughly centered in chest, oval shaped
+        let heartCenter = SIMD3<Float>(256, 300, 75) // Center-left of chest
+        
+        // Create contours for multiple axial slices through heart
+        for slice in 20...35 {
+            let z = Float(slice) * 3.0
+            let distanceFromCenter = abs(z - heartCenter.z)
+            let maxDistance: Float = 24.0 // Heart spans ~8 slices
+            
+            // Heart gets smaller at edges
+            let sizeMultiplier = max(0.2, 1.0 - (distanceFromCenter / maxDistance))
+            
+            var points: [SIMD3<Float>] = []
+            let numPoints = 20
+            
+            for i in 0..<numPoints {
+                let angle = Float(i) * 2.0 * .pi / Float(numPoints)
+                
+                // Heart-like shape (slightly irregular)
+                let radiusX: Float = 25.0 * sizeMultiplier
+                let radiusY: Float = 20.0 * sizeMultiplier
+                
+                let x = heartCenter.x + radiusX * cos(angle)
+                let y = heartCenter.y + radiusY * sin(angle)
+                
+                points.append(SIMD3<Float>(x, y, z))
+            }
+            
+            contours.append(SimpleContour(
+                points: points,
+                slicePosition: z
+            ))
+        }
+        
+        return contours
+    }
+    
+    private static func createLiverROI() -> [SimpleContour] {
+        var contours: [SimpleContour] = []
+        
+        // Liver: large organ on right side of abdomen  
+        let liverCenter = SIMD3<Float>(350, 280, 90)
+        
+        // Create contours for liver (larger organ, more slices)
+        for slice in 25...45 {
+            let z = Float(slice) * 3.0
+            let distanceFromCenter = abs(z - liverCenter.z)
+            let maxDistance: Float = 30.0
+            
+            let sizeMultiplier = max(0.3, 1.0 - (distanceFromCenter / maxDistance))
+            
+            var points: [SIMD3<Float>] = []
+            let numPoints = 24
+            
+            for i in 0..<numPoints {
+                let angle = Float(i) * 2.0 * .pi / Float(numPoints)
+                
+                // Liver-like irregular shape
+                let radiusX: Float = 45.0 * sizeMultiplier * (1.0 + 0.2 * sin(angle * 3))
+                let radiusY: Float = 35.0 * sizeMultiplier * (1.0 + 0.1 * cos(angle * 2))
+                
+                let x = liverCenter.x + radiusX * cos(angle)
+                let y = liverCenter.y + radiusY * sin(angle)
+                
+                points.append(SIMD3<Float>(x, y, z))
+            }
+            
+            contours.append(SimpleContour(
+                points: points,
+                slicePosition: z
+            ))
+        }
+        
+        return contours
+    }
+    
+    private static func createLungROI() -> [SimpleContour] {
+        var contours: [SimpleContour] = []
+        
+        // Left lung: large air-filled organ
+        let lungCenter = SIMD3<Float>(180, 280, 80)
+        
+        // Create contours for lung (large, spans many slices)
+        for slice in 15...40 {
+            let z = Float(slice) * 3.0
+            let distanceFromCenter = abs(z - lungCenter.z)
+            let maxDistance: Float = 37.5
+            
+            let sizeMultiplier = max(0.2, 1.0 - (distanceFromCenter / maxDistance))
+            
+            var points: [SIMD3<Float>] = []
+            let numPoints = 28
+            
+            for i in 0..<numPoints {
+                let angle = Float(i) * 2.0 * .pi / Float(numPoints)
+                
+                // Lung-like shape (elongated vertically)
+                let radiusX: Float = 40.0 * sizeMultiplier
+                let radiusY: Float = 50.0 * sizeMultiplier
+                
+                let x = lungCenter.x + radiusX * cos(angle)
+                let y = lungCenter.y + radiusY * sin(angle)
+                
+                points.append(SIMD3<Float>(x, y, z))
+            }
+            
+            contours.append(SimpleContour(
+                points: points,
+                slicePosition: z
+            ))
+        }
+        
+        return contours
     }
     
     private static func createSampleContours(
@@ -150,9 +258,18 @@ public class MinimalRTStructParser {
     ) -> [SimpleContour] {
         var contours: [SimpleContour] = []
         
+        let totalSlices = sliceRange.count
+        let centerSlice = Float(sliceRange.lowerBound + sliceRange.upperBound) / 2.0
+        
         // Create circular contours for each slice in range
         for sliceZ in sliceRange {
             let slicePosition = Float(sliceZ) * 3.0 // 3mm slice thickness
+            
+            // Calculate radius based on distance from center (sphere effect)
+            let distanceFromCenter = abs(Float(sliceZ) - centerSlice)
+            let maxDistance = Float(totalSlices) / 2.0
+            let radiusMultiplier = cos((distanceFromCenter / maxDistance) * (Float.pi / 2.0))
+            let currentRadius = radius * max(0.1, radiusMultiplier) // Min 10% of max radius
             
             // Create circular contour points
             var points: [SIMD3<Float>] = []
@@ -160,8 +277,8 @@ public class MinimalRTStructParser {
             
             for i in 0..<numPoints {
                 let angle = Float(i) * 2.0 * Float.pi / Float(numPoints)
-                let x = center.x + radius * cos(angle)
-                let y = center.y + radius * sin(angle)
+                let x = center.x + currentRadius * cos(angle)
+                let y = center.y + currentRadius * sin(angle)
                 let z = slicePosition
                 
                 points.append(SIMD3<Float>(x, y, z))

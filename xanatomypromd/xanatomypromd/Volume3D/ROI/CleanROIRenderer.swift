@@ -2,6 +2,8 @@ import Foundation
 import Metal
 import simd
 
+// MARK: - Temporary Fix: Comment out MPRPlane usage
+
 // MARK: - Simple ROI Display System
 // Clean, minimal ROI overlay implementation that doesn't break existing CT viewer
 // Follows separation of concerns principle from handover lessons learned
@@ -257,7 +259,6 @@ public class SimpleROIRenderer {
 // MARK: - ROI Display Manager
 // Clean interface for managing ROI display without breaking existing system
 
-@MainActor
 public class CleanROIManager: ObservableObject {
     
     // MARK: - Published State
