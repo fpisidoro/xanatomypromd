@@ -628,7 +628,8 @@ public class MinimalRTStructParser {
                             let centerX: Float = 256.0
                             let centerY: Float = 256.0  
                             // Use realistic Z coordinates that fit within the 53-slice scan (0-159mm range)
-                            let baseZ: Float = Float(60 + (roiNumber % 100) * 15) // Z=60, 75, 90mm
+                            let roiIndex = (roiNumber % 100) % 3 // Convert to 0, 1, 2
+                            let baseZ: Float = Float(60 + roiIndex * 20) // Z=60, 80, 100mm
                             let radius: Float = Float(30 + (roiNumber % 100) * 10)
                             
                             var testPoints: [SIMD3<Float>] = []
