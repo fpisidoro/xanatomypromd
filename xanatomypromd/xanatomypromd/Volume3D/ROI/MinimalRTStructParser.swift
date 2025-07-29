@@ -400,13 +400,14 @@ public class MinimalRTStructParser {
         }
         
         let fullData = RTStructData(
-            structureSetName: simpleData.structureSetName ?? "Unknown Structure Set",
-            structureSetDescription: "Loaded from RTStruct DICOM file",
             patientName: simpleData.patientName,
             studyInstanceUID: "Unknown",
             seriesInstanceUID: "Unknown",
-            frameOfReferenceUID: "Unknown",
-            roiStructures: fullROIStructures
+            structureSetLabel: simpleData.structureSetName,
+            structureSetName: simpleData.structureSetName ?? "Unknown Structure Set",
+            structureSetDescription: "Loaded from RTStruct DICOM file",
+            roiStructures: fullROIStructures,
+            referencedFrameOfReferenceUID: "Unknown"
         )
         
         print("✅ Conversion complete: \(fullROIStructures.count) ROI structures")

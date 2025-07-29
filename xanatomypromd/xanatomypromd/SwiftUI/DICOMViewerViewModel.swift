@@ -273,13 +273,14 @@ class DICOMViewerViewModel: ObservableObject {
         ]
         
         return RTStructData(
-            structureSetName: "Test Structure Set",
-            structureSetDescription: "Generated test data for ROI visualization",
             patientName: "Test Patient",
             studyInstanceUID: "Test.Study.UID",
             seriesInstanceUID: "Test.Series.UID",
-            frameOfReferenceUID: "Test.Frame.UID",
-            roiStructures: testROIStructures
+            structureSetLabel: "Test Structure Set",
+            structureSetName: "Test Structure Set",
+            structureSetDescription: "Generated test data for ROI visualization",
+            roiStructures: testROIStructures,
+            referencedFrameOfReferenceUID: "Test.Frame.UID"
         )
     }
 
