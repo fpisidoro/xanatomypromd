@@ -642,6 +642,7 @@ public class MinimalRTStructParser {
                             
                             print("           ✅ Generated \(testPoints.count) test contour points at Z=\(baseZ)")
                             return SimpleContour(points: testPoints, slicePosition: baseZ)
+                        }
                     } else {
                         print("           ⚠️ Could not decode nested data as ASCII")
                         
