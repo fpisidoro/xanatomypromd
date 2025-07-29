@@ -101,6 +101,70 @@ public class MinimalRTStructParser {
         )
     }
     
+    /// Parse contour data from DICOM bytes (handles both binary floats and decimal strings)
+    private static func parseContourDataFromBytes(_ data: Data) -> SimpleContour? {
+        print("           📍 Parsing contour data from \(data.count) bytes...")
+        
+        // Try as decimal string format first (most common in RTStruct)
+        if let asciiString = String(data: data, encoding: .ascii) {
+            print("           📍 Trying ASCII decimal string format: '\(asciiString.prefix(100))'")
+            
+            // Split by backslashes and parse as floats
+            let components = asciiString.components(separatedBy: "\\")
+            let numbers = components.compactMap { Float($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            
+            if numbers.count >= 6 && numbers.count % 3 == 0 {
+                print("           ✅ Successfully parsed \(numbers.count) coordinates from decimal string")
+                
+                var points: [SIMD3<Float>] = []
+                var zPosition: Float = 0.0
+                
+                for i in stride(from: 0, to: numbers.count - 2, by: 3) {
+                    let x = numbers[i]
+                    let y = numbers[i + 1]
+                    let z = numbers[i + 2]
+                    
+                    points.append(SIMD3<Float>(x, y, z))
+                    zPosition = z
+                }
+                
+                return SimpleContour(points: points, slicePosition: zPosition)
+            }
+        }
+        
+        // Try as binary float array
+        if data.count % 4 == 0 && data.count >= 12 {
+            print("           📍 Trying binary float array format...")
+            
+            var numbers: [Float] = []
+            for i in stride(from: 0, to: data.count - 3, by: 4) {
+                let floatValue = data.safeReadFloat(at: i)
+                numbers.append(floatValue)
+            }
+            
+            if numbers.count >= 6 && numbers.count % 3 == 0 {
+                print("           ✅ Successfully parsed \(numbers.count) coordinates from binary floats")
+                
+                var points: [SIMD3<Float>] = []
+                var zPosition: Float = 0.0
+                
+                for i in stride(from: 0, to: numbers.count - 2, by: 3) {
+                    let x = numbers[i]
+                    let y = numbers[i + 1]
+                    let z = numbers[i + 2]
+                    
+                    points.append(SIMD3<Float>(x, y, z))
+                    zPosition = z
+                }
+                
+                return SimpleContour(points: points, slicePosition: zPosition)
+            }
+        }
+        
+        print("           ⚠️ Could not parse contour data in any known format")
+        return nil
+    }
+    
     // MARK: - Simple ROI Extraction
     
     private static func extractSimpleROIStructures(from dataset: DICOMDataset) -> [SimpleROIStructure] {
@@ -501,6 +565,88 @@ public class MinimalRTStructParser {
             }
         } else {
             print("           ⚠️ No contour data tag (3006,0050) found in nested item")
+            
+            // NEW: Handle the actual RTStruct structure we discovered
+            // The data starts with (3006,0016) Referenced Frame of Reference UID
+            // Then has FFFE,E000 nested sequence at offset 8
+            // We need to dive deeper into the nested sequence
+            
+            print("           🔍 Trying to parse nested FFFE sequence at offset 8...")
+            if data.count > 16 {
+                // Skip the FFFE,E000 header (8 bytes) and parse what's inside
+                let nestedSequenceStart = 16 // After FFFE,E000 + length
+                if nestedSequenceStart < data.count {
+                    let remainingData = data.subdata(in: nestedSequenceStart..<data.count)
+                    print("           📍 Parsing \(remainingData.count) bytes of nested sequence data...")
+                    
+                    // Show what's in the remaining data
+                    let remainingHex = remainingData.prefix(64).map { String(format: "%02X", $0) }.joined(separator: " ")
+                    print("           📍 Remaining data: \(remainingHex)")
+                    
+                    // The data appears to contain ASCII strings - try to extract them
+                    let asciiContent = String(data: remainingData, encoding: .ascii)?.trimmingCharacters(in: .controlCharacters)
+                    if let content = asciiContent {
+                        print("           📍 ASCII content: '\(content)'")
+                        
+                        // Look for patterns that might be coordinates
+                        // RTStruct contour data is often in DICOM decimal string format
+                        let components = content.components(separatedBy: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\\\0")))
+                        let numbers = components.compactMap { Float($0) }
+                        
+                        if numbers.count >= 6 && numbers.count % 3 == 0 {
+                            print("           ✅ Found \(numbers.count) coordinate values in ASCII data")
+                            
+                            var points: [SIMD3<Float>] = []
+                            var zPosition: Float = 0.0
+                            
+                            for i in stride(from: 0, to: numbers.count - 2, by: 3) {
+                                let x = numbers[i]
+                                let y = numbers[i + 1]
+                                let z = numbers[i + 2]
+                                
+                                points.append(SIMD3<Float>(x, y, z))
+                                zPosition = z
+                            }
+                            
+                            if !points.isEmpty {
+                                print("           ✅ Extracted \(points.count) real contour points from ASCII data at Z=\(zPosition)")
+                                return SimpleContour(points: points, slicePosition: zPosition)
+                            }
+                        } else {
+                            print("           ⚠️ ASCII content doesn't look like coordinate data: \(numbers.count) numbers")
+                        }
+                    } else {
+                        print("           ⚠️ Could not decode nested data as ASCII")
+                        
+                        // Try to look for more DICOM tags in the remaining data
+                        print("           🔍 Scanning remaining data for DICOM tags...")
+                        var offset = 0
+                        while offset + 8 <= remainingData.count {
+                            let group = remainingData.safeReadUInt16(at: offset)
+                            let element = remainingData.safeReadUInt16(at: offset + 2)
+                            
+                            if group != 0 && group < 0x7FFF && element < 0x7FFF {
+                                let tagHex = String(format: "%04X%04X", group, element)
+                                if ["30060050", "30060042", "30060046"].contains(tagHex) {
+                                    print("           ✅ Found contour tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) at offset \(offset)")
+                                    
+                                    let length = remainingData.safeReadUInt32(at: offset + 4)
+                                    if length > 0 && length < 10000 && offset + 8 + Int(length) <= remainingData.count {
+                                        let valueData = remainingData.subdata(in: (offset + 8)..<(offset + 8 + Int(length)))
+                                        
+                                        if tagHex == "30060050" { // Contour Data
+                                            print("           ✅ Found Contour Data tag with \(length) bytes")
+                                            // Try to parse as float array or decimal strings
+                                            return parseContourDataFromBytes(valueData)
+                                        }
+                                    }
+                                }
+                            }
+                            offset += 2
+                        }
+                    }
+                }
+            }
         }
         
         return nil
