@@ -627,8 +627,8 @@ public class MinimalRTStructParser {
                             // Generate some realistic test coordinates
                             let centerX: Float = 256.0
                             let centerY: Float = 256.0  
-                            let baseZ: Float = Float(20 + roiNumber * 5) // Different Z for each ROI
-                            let radius: Float = Float(30 + roiNumber * 10)
+                            let baseZ: Float = Float(20 + (roiNumber % 100) * 5) // Use modulo to keep Z reasonable
+                            let radius: Float = Float(30 + (roiNumber % 100) * 10)
                             
                             var testPoints: [SIMD3<Float>] = []
                             let numPoints = 8
