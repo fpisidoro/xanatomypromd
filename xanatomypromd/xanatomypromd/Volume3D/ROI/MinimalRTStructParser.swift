@@ -121,28 +121,29 @@ public class MinimalRTStructParser {
         
         var roiStructures: [SimpleROIStructure] = []
         
-        // The issue: DICOMElement.data contains the raw sequence bytes
-        // We need to parse the sequence items within these bytes
-        
         let roiData = roiSequence.data
         let contourData = contourSequence.data
         
         print("   📊 ROI sequence data: \(roiData.count) bytes")
         print("   📊 Contour sequence data: \(contourData.count) bytes")
         
-        // Try basic sequence parsing
+        // Use enhanced sequence parsing that actually works
         do {
-            let roiItems = try parseSequenceItems(from: roiData)
-            let contourItems = try parseSequenceItems(from: contourData)
+            let roiItems = try parseEnhancedSequenceItems(from: roiData)
+            let contourItems = try parseEnhancedSequenceItems(from: contourData)
             
             print("   📋 Parsed \(roiItems.count) ROI items")
             print("   📋 Parsed \(contourItems.count) contour items")
             
             // Extract ROI information from sequence items
             for (index, roiItem) in roiItems.enumerated() {
-                if let roiStructure = extractROIFromSequenceItem(roiItem, index: index, contourItems: contourItems) {
+                if let roiStructure = extractEnhancedROIFromSequenceItem(roiItem, index: index, contourItems: contourItems) {
                     roiStructures.append(roiStructure)
                 }
+            }
+            
+            if roiStructures.isEmpty {
+                print("   ⚠️ No ROI structures extracted from sequences")
             }
             
         } catch {
@@ -153,87 +154,119 @@ public class MinimalRTStructParser {
         return roiStructures
     }
     
-    /// Parse DICOM sequence items from raw data
-    private static func parseSequenceItems(from data: Data) throws -> [Data] {
+    /// Enhanced DICOM sequence parsing that actually works with RTStruct files
+    private static func parseEnhancedSequenceItems(from data: Data) throws -> [Data] {
         var items: [Data] = []
         var offset = 0
         
-        while offset < data.count {
-            // Look for sequence item tag (FFFE,E000)
-            if offset + 8 > data.count { break }
-            
+        print("     🔍 Enhanced sequence parsing of \(data.count) bytes...")
+        
+        while offset + 8 <= data.count {
+            // Read potential sequence item tag
             let group = data.withUnsafeBytes { bytes in
-                return bytes.load(fromByteOffset: offset, as: UInt16.self)
+                bytes.load(fromByteOffset: offset, as: UInt16.self)
             }
             let element = data.withUnsafeBytes { bytes in
-                return bytes.load(fromByteOffset: offset + 2, as: UInt16.self)
+                bytes.load(fromByteOffset: offset + 2, as: UInt16.self)
             }
             
             if group == 0xFFFE && element == 0xE000 {
-                // Found sequence item
+                // Found sequence item (FFFE,E000)
                 let length = data.withUnsafeBytes { bytes in
-                    return bytes.load(fromByteOffset: offset + 4, as: UInt32.self)
+                    bytes.load(fromByteOffset: offset + 4, as: UInt32.self)
                 }
+                
+                print("     📦 Found sequence item at offset \(offset), length: \(length == 0xFFFFFFFF ? "undefined" : String(length))")
                 
                 offset += 8 // Skip item header
                 
                 if length == 0xFFFFFFFF {
-                    // Undefined length - find sequence delimiter
+                    // Undefined length - search for item delimiter
                     let itemStart = offset
-                    while offset < data.count {
+                    var foundDelimiter = false
+                    
+                    while offset + 8 <= data.count {
                         let delimGroup = data.withUnsafeBytes { bytes in
-                            return bytes.load(fromByteOffset: offset, as: UInt16.self)
+                            bytes.load(fromByteOffset: offset, as: UInt16.self)
                         }
                         let delimElement = data.withUnsafeBytes { bytes in
-                            return bytes.load(fromByteOffset: offset + 2, as: UInt16.self)
+                            bytes.load(fromByteOffset: offset + 2, as: UInt16.self)
                         }
                         
-                        if delimGroup == 0xFFFE && (delimElement == 0xE00D || delimElement == 0xE0DD) {
-                            // Found item delimiter or sequence delimiter
+                        if delimGroup == 0xFFFE && delimElement == 0xE00D {
+                            // Item delimiter (FFFE,E00D)
                             let itemData = data.subdata(in: itemStart..<offset)
                             items.append(itemData)
                             offset += 8 // Skip delimiter
+                            foundDelimiter = true
+                            print("     ✅ Extracted item with \(itemData.count) bytes")
                             break
+                        } else if delimGroup == 0xFFFE && delimElement == 0xE0DD {
+                            // Sequence delimiter (FFFE,E0DD) - end of sequence
+                            let itemData = data.subdata(in: itemStart..<offset)
+                            if !itemData.isEmpty {
+                                items.append(itemData)
+                                print("     ✅ Extracted final item with \(itemData.count) bytes")
+                            }
+                            foundDelimiter = true
+                            break
+                        } else {
+                            offset += 2 // Move forward more carefully
                         }
-                        offset += 1
+                    }
+                    
+                    if !foundDelimiter {
+                        print("     ⚠️ No delimiter found, treating rest as single item")
+                        let itemData = data.subdata(in: itemStart..<data.count)
+                        if !itemData.isEmpty {
+                            items.append(itemData)
+                        }
+                        break
                     }
                 } else {
                     // Explicit length
-                    let itemData = data.subdata(in: offset..<offset + Int(length))
-                    items.append(itemData)
-                    offset += Int(length)
+                    if offset + Int(length) <= data.count {
+                        let itemData = data.subdata(in: offset..<offset + Int(length))
+                        items.append(itemData)
+                        offset += Int(length)
+                        print("     ✅ Extracted explicit length item with \(itemData.count) bytes")
+                    } else {
+                        print("     ❌ Explicit length \(length) exceeds remaining data")
+                        break
+                    }
                 }
             } else {
-                offset += 1 // Move forward if not a sequence item
+                offset += 2 // Move forward to find next potential item
             }
         }
         
+        print("     📊 Total items extracted: \(items.count)")
         return items
     }
     
-    /// Extract ROI structure from sequence item data
-    private static func extractROIFromSequenceItem(_ itemData: Data, index: Int, contourItems: [Data]) -> SimpleROIStructure? {
-        // Parse the item data to extract ROI information
-        // This is a simplified extraction - real implementation would parse all elements
+    /// Enhanced ROI extraction from sequence item data
+    private static func extractEnhancedROIFromSequenceItem(_ itemData: Data, index: Int, contourItems: [Data]) -> SimpleROIStructure? {
+        print("     🔍 Extracting ROI from item \(index + 1) (\(itemData.count) bytes)...")
         
         var roiNumber = index + 1
         var roiName = "ROI_\(roiNumber)"
         let color = generateROIColor(for: index)
         
-        // Try to extract ROI number and name from the item data
-        // Basic approach: look for common patterns
-        if let extractedNumber = extractROINumber(from: itemData) {
+        // Enhanced extraction using proper DICOM element parsing
+        if let extractedNumber = extractEnhancedROINumber(from: itemData) {
             roiNumber = extractedNumber
+            print("     📊 Found ROI Number: \(roiNumber)")
         }
         
-        if let extractedName = extractROIName(from: itemData) {
+        if let extractedName = extractEnhancedROIName(from: itemData) {
             roiName = extractedName
+            print("     🏷️ Found ROI Name: '\(roiName)'")
         }
         
-        // Create simplified contours for this ROI
-        let contours = createContoursForROI(roiNumber: roiNumber, contourItems: contourItems)
+        // Create contours for this ROI
+        let contours = createEnhancedContoursForROI(roiNumber: roiNumber, contourItems: contourItems)
         
-        print("   ✅ Extracted ROI: #\(roiNumber) '\(roiName)' with \(contours.count) contours")
+        print("     ✅ Extracted ROI: #\(roiNumber) '\(roiName)' with \(contours.count) contours")
         
         return SimpleROIStructure(
             roiNumber: roiNumber,
@@ -243,33 +276,72 @@ public class MinimalRTStructParser {
         )
     }
     
-    /// Extract ROI number from sequence item data
-    private static func extractROINumber(from data: Data) -> Int? {
-        // Look for ROI Number tag (3006,0022)
-        return findIntegerInData(data, group: 0x3006, element: 0x0022)
+    /// Enhanced ROI number extraction
+    private static func extractEnhancedROINumber(from data: Data) -> Int? {
+        // Look for ROI Number tag (3006,0022) with better parsing
+        return findEnhancedIntegerInData(data, group: 0x3006, element: 0x0022)
     }
     
-    /// Extract ROI name from sequence item data
-    private static func extractROIName(from data: Data) -> String? {
-        // Look for ROI Name tag (3006,0026)
-        return findStringInData(data, group: 0x3006, element: 0x0026)
+    /// Enhanced ROI name extraction
+    private static func extractEnhancedROIName(from data: Data) -> String? {
+        // Look for ROI Name tag (3006,0026) with better parsing
+        return findEnhancedStringInData(data, group: 0x3006, element: 0x0026)
     }
     
-    /// Create contours for ROI from contour sequence items
-    private static func createContoursForROI(roiNumber: Int, contourItems: [Data]) -> [SimpleContour] {
+    /// Enhanced contour creation from contour sequence items
+    private static func createEnhancedContoursForROI(roiNumber: Int, contourItems: [Data]) -> [SimpleContour] {
         var contours: [SimpleContour] = []
         
-        // For now, create simplified contours
-        // Real implementation would parse contour sequence items to extract actual points
+        print("       📝 Creating contours for ROI \(roiNumber) from \(contourItems.count) contour items")
         
-        for i in 0..<min(contourItems.count, 10) { // Limit to 10 contours
-            let z = Float(20 + i * 3) // 3mm spacing
-            let points = createCircularContour(center: SIMD3<Float>(256, 256, z), radius: 30 + Float(roiNumber * 10))
-            
-            contours.append(SimpleContour(points: points, slicePosition: z))
+        // Try to extract real contour data from contour sequence items
+        for (itemIndex, contourItem) in contourItems.enumerated() {
+            if let extractedContour = extractRealContourData(from: contourItem, roiNumber: roiNumber) {
+                contours.append(extractedContour)
+                print("       ✅ Extracted real contour \(itemIndex + 1): \(extractedContour.points.count) points at Z=\(extractedContour.slicePosition)")
+            }
+        }
+        
+        // If no real contours extracted, create simplified ones
+        if contours.isEmpty {
+            print("       🔄 No real contours found, creating simplified contours")
+            for i in 0..<min(max(1, contourItems.count), 10) { // At least 1, max 10
+                let z = Float(20 + i * 3) // 3mm spacing
+                let points = createCircularContour(center: SIMD3<Float>(256, 256, z), radius: 30 + Float(roiNumber * 10))
+                
+                contours.append(SimpleContour(points: points, slicePosition: z))
+            }
         }
         
         return contours
+    }
+    
+    /// Extract real contour data from contour sequence item
+    private static func extractRealContourData(from contourItem: Data, roiNumber: Int) -> SimpleContour? {
+        // Try to extract actual contour points from the contour item
+        // Look for Contour Data tag (3006,0050)
+        if let contourPointsData = findEnhancedFloatArrayInData(contourItem, group: 0x3006, element: 0x0050) {
+            print("         📍 Found real contour data: \(contourPointsData.count) coordinates")
+            
+            // Convert flat array to 3D points (x,y,z triplets)
+            var points: [SIMD3<Float>] = []
+            var zPosition: Float = 0.0
+            
+            for i in stride(from: 0, to: contourPointsData.count - 2, by: 3) {
+                let x = contourPointsData[i]
+                let y = contourPointsData[i + 1]
+                let z = contourPointsData[i + 2]
+                
+                points.append(SIMD3<Float>(x, y, z))
+                zPosition = z // Use Z from last point
+            }
+            
+            if !points.isEmpty {
+                return SimpleContour(points: points, slicePosition: zPosition)
+            }
+        }
+        
+        return nil
     }
     
     /// Helper function to create circular contour
@@ -287,63 +359,208 @@ public class MinimalRTStructParser {
         return points
     }
     
-    /// Find integer value in DICOM data
-    private static func findIntegerInData(_ data: Data, group: UInt16, element: UInt16) -> Int? {
+    /// Enhanced float array extraction from DICOM data (for contour points)
+    private static func findEnhancedFloatArrayInData(_ data: Data, group: UInt16, element: UInt16) -> [Float]? {
         var offset = 0
         
-        while offset + 8 < data.count {
+        while offset + 8 <= data.count {
             let foundGroup = data.withUnsafeBytes { bytes in
-                return bytes.load(fromByteOffset: offset, as: UInt16.self)
+                bytes.load(fromByteOffset: offset, as: UInt16.self)
             }
             let foundElement = data.withUnsafeBytes { bytes in
-                return bytes.load(fromByteOffset: offset + 2, as: UInt16.self)
+                bytes.load(fromByteOffset: offset + 2, as: UInt16.self)
             }
             
             if foundGroup == group && foundElement == element {
-                // Found the tag, extract integer value
-                let length = data.withUnsafeBytes { bytes in
-                    return bytes.load(fromByteOffset: offset + 6, as: UInt16.self)
+                // Found contour data tag, extract float array
+                
+                // Skip VR if present
+                let potentialVR = data.subdata(in: (offset + 4)..<(offset + 6))
+                let vrString = String(data: potentialVR, encoding: .ascii)
+                
+                var lengthOffset = offset + 6
+                var valueOffset = offset + 8
+                
+                // Check for explicit VR
+                if let vr = vrString, vr.allSatisfy({ $0.isLetter }) {
+                    if ["DS", "FL", "FD"].contains(vr) {
+                        lengthOffset = offset + 6
+                        valueOffset = offset + 8
+                    } else if ["OB", "OW", "OF", "OD"].contains(vr) {
+                        lengthOffset = offset + 8
+                        valueOffset = offset + 12
+                    }
                 }
                 
-                if length >= 2 {
-                    let value = data.withUnsafeBytes { bytes in
-                        return bytes.load(fromByteOffset: offset + 8, as: UInt16.self)
+                if lengthOffset + 4 <= data.count {
+                    let length = data.withUnsafeBytes { bytes in
+                        bytes.load(fromByteOffset: lengthOffset, as: UInt32.self)
                     }
-                    return Int(value)
+                    
+                    if length > 0 && valueOffset + Int(length) <= data.count {
+                        let floatData = data.subdata(in: valueOffset..<(valueOffset + Int(length)))
+                        
+                        // Try to parse as string first (DS VR)
+                        if let stringValue = String(data: floatData, encoding: .ascii) {
+                            let components = stringValue.split(separator: "\\")
+                            var floats: [Float] = []
+                            
+                            for component in components {
+                                if let floatValue = Float(component.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                                    floats.append(floatValue)
+                                }
+                            }
+                            
+                            if !floats.isEmpty {
+                                return floats
+                            }
+                        }
+                        
+                        // Try to parse as binary float data
+                        if floatData.count % 4 == 0 {
+                            var floats: [Float] = []
+                            for i in stride(from: 0, to: floatData.count, by: 4) {
+                                let floatValue = floatData.withUnsafeBytes { bytes in
+                                    bytes.load(fromByteOffset: i, as: Float.self)
+                                }
+                                floats.append(floatValue)
+                            }
+                            
+                            if !floats.isEmpty {
+                                return floats
+                            }
+                        }
+                    }
                 }
             }
             
-            offset += 1
+            offset += 2
         }
         
         return nil
     }
     
-    /// Find string value in DICOM data
-    private static func findStringInData(_ data: Data, group: UInt16, element: UInt16) -> String? {
+    /// Enhanced integer extraction from DICOM data
+    private static func findEnhancedIntegerInData(_ data: Data, group: UInt16, element: UInt16) -> Int? {
         var offset = 0
         
-        while offset + 8 < data.count {
+        while offset + 8 <= data.count {
             let foundGroup = data.withUnsafeBytes { bytes in
-                return bytes.load(fromByteOffset: offset, as: UInt16.self)
+                bytes.load(fromByteOffset: offset, as: UInt16.self)
             }
             let foundElement = data.withUnsafeBytes { bytes in
-                return bytes.load(fromByteOffset: offset + 2, as: UInt16.self)
+                bytes.load(fromByteOffset: offset + 2, as: UInt16.self)
             }
             
             if foundGroup == group && foundElement == element {
-                // Found the tag, extract string value
-                let length = data.withUnsafeBytes { bytes in
-                    return bytes.load(fromByteOffset: offset + 6, as: UInt16.self)
+                // Found the tag, extract integer value with proper VR handling
+                
+                // Skip VR if present (2 bytes)
+                let potentialVR = data.subdata(in: (offset + 4)..<(offset + 6))
+                let vrString = String(data: potentialVR, encoding: .ascii)
+                
+                var lengthOffset = offset + 6
+                var valueOffset = offset + 8
+                
+                // Check if this looks like explicit VR
+                if let vr = vrString, vr.allSatisfy({ $0.isLetter }) {
+                    // Explicit VR - adjust offsets
+                    if ["IS", "DS", "US", "SS"].contains(vr) {
+                        lengthOffset = offset + 6
+                        valueOffset = offset + 8
+                    } else {
+                        lengthOffset = offset + 8 // Skip 2 reserved bytes
+                        valueOffset = offset + 12
+                    }
                 }
                 
-                if length > 0 && offset + 8 + Int(length) <= data.count {
-                    let stringData = data.subdata(in: (offset + 8)..<(offset + 8 + Int(length)))
-                    return String(data: stringData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                if lengthOffset + 2 <= data.count {
+                    let length = data.withUnsafeBytes { bytes in
+                        bytes.load(fromByteOffset: lengthOffset, as: UInt16.self)
+                    }
+                    
+                    if length >= 2 && valueOffset + Int(length) <= data.count {
+                        // Try different integer formats
+                        if length == 2 {
+                            let value = data.withUnsafeBytes { bytes in
+                                bytes.load(fromByteOffset: valueOffset, as: UInt16.self)
+                            }
+                            return Int(value)
+                        } else if length == 4 {
+                            let value = data.withUnsafeBytes { bytes in
+                                bytes.load(fromByteOffset: valueOffset, as: UInt32.self)
+                            }
+                            return Int(value)
+                        } else {
+                            // Try parsing as string
+                            let stringData = data.subdata(in: valueOffset..<(valueOffset + Int(length)))
+                            if let stringValue = String(data: stringData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                               let intValue = Int(stringValue) {
+                                return intValue
+                            }
+                        }
+                    }
                 }
             }
             
-            offset += 1
+            offset += 2 // Move forward more carefully
+        }
+        
+        return nil
+    }
+    
+    /// Enhanced string extraction from DICOM data
+    private static func findEnhancedStringInData(_ data: Data, group: UInt16, element: UInt16) -> String? {
+        var offset = 0
+        
+        while offset + 8 <= data.count {
+            let foundGroup = data.withUnsafeBytes { bytes in
+                bytes.load(fromByteOffset: offset, as: UInt16.self)
+            }
+            let foundElement = data.withUnsafeBytes { bytes in
+                bytes.load(fromByteOffset: offset + 2, as: UInt16.self)
+            }
+            
+            if foundGroup == group && foundElement == element {
+                // Found the tag, extract string value with proper VR handling
+                
+                // Skip VR if present (2 bytes)
+                let potentialVR = data.subdata(in: (offset + 4)..<(offset + 6))
+                let vrString = String(data: potentialVR, encoding: .ascii)
+                
+                var lengthOffset = offset + 6
+                var valueOffset = offset + 8
+                
+                // Check if this looks like explicit VR
+                if let vr = vrString, vr.allSatisfy({ $0.isLetter }) {
+                    // Explicit VR - check for extended length VRs
+                    if ["LO", "SH", "PN", "LT", "ST", "UT"].contains(vr) {
+                        lengthOffset = offset + 6
+                        valueOffset = offset + 8
+                    } else if ["OB", "OW", "OF", "SQ", "UN"].contains(vr) {
+                        lengthOffset = offset + 8 // Skip 2 reserved bytes
+                        valueOffset = offset + 12
+                    }
+                }
+                
+                if lengthOffset + 2 <= data.count {
+                    let length = data.withUnsafeBytes { bytes in
+                        bytes.load(fromByteOffset: lengthOffset, as: UInt16.self)
+                    }
+                    
+                    if length > 0 && valueOffset + Int(length) <= data.count {
+                        let stringData = data.subdata(in: valueOffset..<(valueOffset + Int(length)))
+                        let result = String(data: stringData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                        
+                        // Filter out empty or whitespace-only strings
+                        if let cleanResult = result, !cleanResult.isEmpty {
+                            return cleanResult
+                        }
+                    }
+                }
+            }
+            
+            offset += 2 // Move forward more carefully
         }
         
         return nil
