@@ -264,6 +264,11 @@ public class MinimalRTStructParser {
     private static func extractEnhancedROIFromSequenceItem(_ itemData: Data, index: Int, contourItems: [Data]) -> SimpleROIStructure? {
         print("     🔍 Extracting ROI from item \(index + 1) (\(itemData.count) bytes)...")
         
+        // Debug: Show first 64 bytes of the item data in hex
+        let previewBytes = itemData.prefix(min(64, itemData.count))
+        let hexString = previewBytes.map { String(format: "%02X", $0) }.joined(separator: " ")
+        print("     🔍 Item data preview: \(hexString)")
+        
         var roiNumber = index + 1
         var roiName = "ROI_\(roiNumber)"
         let color = generateROIColor(for: index)
@@ -272,11 +277,15 @@ public class MinimalRTStructParser {
         if let extractedNumber = extractEnhancedROINumber(from: itemData) {
             roiNumber = extractedNumber
             print("     📊 Found ROI Number: \(roiNumber)")
+        } else {
+            print("     ⚠️ Could not extract ROI Number from item data")
         }
         
         if let extractedName = extractEnhancedROIName(from: itemData) {
             roiName = extractedName
             print("     🏷️ Found ROI Name: '\(roiName)'")
+        } else {
+            print("     ⚠️ Could not extract ROI Name from item data")
         }
         
         // Create contours for this ROI
@@ -295,12 +304,14 @@ public class MinimalRTStructParser {
     /// Enhanced ROI number extraction
     private static func extractEnhancedROINumber(from data: Data) -> Int? {
         // Look for ROI Number tag (3006,0022) with better parsing
+        print("       🔍 Searching for ROI Number tag (3006,0022)...")
         return findEnhancedIntegerInData(data, group: 0x3006, element: 0x0022)
     }
     
     /// Enhanced ROI name extraction
     private static func extractEnhancedROIName(from data: Data) -> String? {
         // Look for ROI Name tag (3006,0026) with better parsing
+        print("       🔍 Searching for ROI Name tag (3006,0026)...")
         return findEnhancedStringInData(data, group: 0x3006, element: 0x0026)
     }
     
@@ -452,11 +463,20 @@ public class MinimalRTStructParser {
     private static func findEnhancedIntegerInData(_ data: Data, group: UInt16, element: UInt16) -> Int? {
         var offset = 0
         
+        print("         🔍 Scanning \(data.count) bytes for tag (\(String(format: "%04X", group)),\(String(format: "%04X", element)))...")
+        
         while offset + 8 <= data.count {
             let foundGroup = data.safeReadUInt16(at: offset)
             let foundElement = data.safeReadUInt16(at: offset + 2)
             
+            // Debug: Show tags we're finding
+            if offset % 20 == 0 { // Log every 10th tag to avoid spam
+                print("         🔍 At offset \(offset): found tag (\(String(format: "%04X", foundGroup)),\(String(format: "%04X", foundElement)))")
+            }
+            
             if foundGroup == group && foundElement == element {
+                print("         ✅ Found target tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) at offset \(offset)")
+                
                 // Found the tag, extract integer value with proper VR handling
                 
                 // Skip VR if present (2 bytes)
@@ -468,6 +488,7 @@ public class MinimalRTStructParser {
                 
                 // Check if this looks like explicit VR
                 if let vr = vrString, vr.allSatisfy({ $0.isLetter }) {
+                    print("         📝 Found VR: \(vr)")
                     // Explicit VR - adjust offsets
                     if ["IS", "DS", "US", "SS"].contains(vr) {
                         lengthOffset = offset + 6
@@ -480,20 +501,24 @@ public class MinimalRTStructParser {
                 
                 if lengthOffset + 2 <= data.count {
                     let length = data.safeReadUInt16(at: lengthOffset)
+                    print("         📊 Length: \(length) bytes")
                     
                     if length >= 2 && valueOffset + Int(length) <= data.count {
                         // Try different integer formats
                         if length == 2 {
                             let value = data.safeReadUInt16(at: valueOffset)
+                            print("         ✅ Extracted UInt16 value: \(value)")
                             return Int(value)
                         } else if length == 4 {
                             let value = data.safeReadUInt32(at: valueOffset)
+                            print("         ✅ Extracted UInt32 value: \(value)")
                             return Int(value)
                         } else {
                             // Try parsing as string
                             let stringData = data.subdata(in: valueOffset..<(valueOffset + Int(length)))
                             if let stringValue = String(data: stringData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines),
                                let intValue = Int(stringValue) {
+                                print("         ✅ Extracted string-encoded value: \(intValue)")
                                 return intValue
                             }
                         }
@@ -504,6 +529,7 @@ public class MinimalRTStructParser {
             offset += 2 // Move forward more carefully
         }
         
+        print("         ❌ Target tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) not found")
         return nil
     }
     
