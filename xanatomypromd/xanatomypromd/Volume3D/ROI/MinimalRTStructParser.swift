@@ -477,33 +477,15 @@ public class MinimalRTStructParser {
             if foundGroup == group && foundElement == element {
                 print("         ✅ Found target tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) at offset \(offset)")
                 
-                // Found the tag, extract integer value with proper VR handling
-                
-                // Skip VR if present (2 bytes)
-                let potentialVR = data.subdata(in: (offset + 4)..<(offset + 6))
-                let vrString = String(data: potentialVR, encoding: .ascii)
-                
-                var lengthOffset = offset + 6
-                var valueOffset = offset + 8
-                
-                // Check if this looks like explicit VR
-                if let vr = vrString, vr.allSatisfy({ $0.isLetter }) {
-                    print("         📝 Found VR: \(vr)")
-                    // Explicit VR - adjust offsets
-                    if ["IS", "DS", "US", "SS"].contains(vr) {
-                        lengthOffset = offset + 6
-                        valueOffset = offset + 8
-                    } else {
-                        lengthOffset = offset + 8 // Skip 2 reserved bytes
-                        valueOffset = offset + 12
-                    }
-                }
-                
-                if lengthOffset + 2 <= data.count {
-                    let length = data.safeReadUInt16(at: lengthOffset)
-                    print("         📊 Length: \(length) bytes")
+                // These are sequence items - likely implicit VR
+                // Structure: Tag(4) + Length(4) + Value(length)
+                if offset + 8 <= data.count {
+                    let length = data.safeReadUInt32(at: offset + 4) // Read as 32-bit length
+                    print("         📊 Length (32-bit): \(length) bytes")
                     
-                    if length >= 2 && valueOffset + Int(length) <= data.count {
+                    let valueOffset = offset + 8
+                    
+                    if length > 0 && length < 1000 && valueOffset + Int(length) <= data.count {
                         // Try different integer formats
                         if length == 2 {
                             let value = data.safeReadUInt16(at: valueOffset)
@@ -516,12 +498,17 @@ public class MinimalRTStructParser {
                         } else {
                             // Try parsing as string
                             let stringData = data.subdata(in: valueOffset..<(valueOffset + Int(length)))
+                            let hexString = stringData.map { String(format: "%02X", $0) }.joined(separator: " ")
+                            print("         🔍 String data hex: \(hexString)")
+                            
                             if let stringValue = String(data: stringData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines),
                                let intValue = Int(stringValue) {
-                                print("         ✅ Extracted string-encoded value: \(intValue)")
+                                print("         ✅ Extracted string-encoded value: \(intValue) from '\(stringValue)'")
                                 return intValue
                             }
                         }
+                    } else {
+                        print("         ⚠️ Invalid length or bounds: length=\(length), remaining=\(data.count - valueOffset)")
                     }
                 }
             }
@@ -537,43 +524,44 @@ public class MinimalRTStructParser {
     private static func findEnhancedStringInData(_ data: Data, group: UInt16, element: UInt16) -> String? {
         var offset = 0
         
+        print("         🔍 Scanning \(data.count) bytes for tag (\(String(format: "%04X", group)),\(String(format: "%04X", element)))...")
+        
         while offset + 8 <= data.count {
             let foundGroup = data.safeReadUInt16(at: offset)
             let foundElement = data.safeReadUInt16(at: offset + 2)
             
+            // Debug: Show tags we're finding
+            if offset % 20 == 0 {
+                print("         🔍 At offset \(offset): found tag (\(String(format: "%04X", foundGroup)),\(String(format: "%04X", foundElement)))")
+            }
+            
             if foundGroup == group && foundElement == element {
-                // Found the tag, extract string value with proper VR handling
+                print("         ✅ Found target tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) at offset \(offset)")
                 
-                // Skip VR if present (2 bytes)
-                let potentialVR = data.subdata(in: (offset + 4)..<(offset + 6))
-                let vrString = String(data: potentialVR, encoding: .ascii)
-                
-                var lengthOffset = offset + 6
-                var valueOffset = offset + 8
-                
-                // Check if this looks like explicit VR
-                if let vr = vrString, vr.allSatisfy({ $0.isLetter }) {
-                    // Explicit VR - check for extended length VRs
-                    if ["LO", "SH", "PN", "LT", "ST", "UT"].contains(vr) {
-                        lengthOffset = offset + 6
-                        valueOffset = offset + 8
-                    } else if ["OB", "OW", "OF", "SQ", "UN"].contains(vr) {
-                        lengthOffset = offset + 8 // Skip 2 reserved bytes
-                        valueOffset = offset + 12
-                    }
-                }
-                
-                if lengthOffset + 2 <= data.count {
-                    let length = data.safeReadUInt16(at: lengthOffset)
+                // These are sequence items - likely implicit VR
+                // Structure: Tag(4) + Length(4) + Value(length)
+                if offset + 8 <= data.count {
+                    let length = data.safeReadUInt32(at: offset + 4) // Read as 32-bit length
+                    print("         📊 Length (32-bit): \(length) bytes")
                     
-                    if length > 0 && valueOffset + Int(length) <= data.count {
+                    let valueOffset = offset + 8
+                    
+                    if length > 0 && length < 1000 && valueOffset + Int(length) <= data.count {
                         let stringData = data.subdata(in: valueOffset..<(valueOffset + Int(length)))
+                        let hexString = stringData.map { String(format: "%02X", $0) }.joined(separator: " ")
+                        print("         🔍 String data hex: \(hexString)")
+                        
                         let result = String(data: stringData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines)
                         
                         // Filter out empty or whitespace-only strings
                         if let cleanResult = result, !cleanResult.isEmpty {
+                            print("         ✅ Extracted string value: '\(cleanResult)'")
                             return cleanResult
+                        } else {
+                            print("         ⚠️ String extraction failed or empty")
                         }
+                    } else {
+                        print("         ⚠️ Invalid length or bounds: length=\(length), remaining=\(data.count - valueOffset)")
                     }
                 }
             }
@@ -581,6 +569,7 @@ public class MinimalRTStructParser {
             offset += 2 // Move forward more carefully
         }
         
+        print("         ❌ Target tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) not found")
         return nil
     }
     
