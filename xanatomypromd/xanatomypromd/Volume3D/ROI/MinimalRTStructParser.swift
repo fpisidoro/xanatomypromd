@@ -429,6 +429,55 @@ public class MinimalRTStructParser {
     private static func extractSingleContourFromData(_ data: Data, roiNumber: Int) -> SimpleContour? {
         print("           📍 Extracting single contour from \(data.count)-byte nested data...")
         
+        // Debug: Show COMPLETE hex dump of the nested data
+        let completeHexString = data.map { String(format: "%02X", $0) }.joined(separator: " ")
+        print("           📍 COMPLETE nested data hex: \(completeHexString)")
+        
+        // Try every possible offset to find DICOM tags
+        print("           🔍 DETAILED tag scanning - trying every byte offset...")
+        for tryOffset in 0..<min(data.count - 8, 100) { // Check first 100 bytes
+            let group = data.safeReadUInt16(at: tryOffset)
+            let element = data.safeReadUInt16(at: tryOffset + 2)
+            
+            // Show ALL potential tag combinations
+            if group != 0 {
+                print("           🔍 Offset \(tryOffset): potential tag (\(String(format: "%04X", group)),\(String(format: "%04X", element)))")
+                
+                // Check if this looks like a known RTStruct tag
+                let tagHex = String(format: "%04X%04X", group, element)
+                if ["3006002A", "30060040", "30060016", "30060050", "30060042", "30060046"].contains(tagHex) {
+                    print("           ✅ FOUND KNOWN RTStruct tag at offset \(tryOffset): (\(String(format: "%04X", group)),\(String(format: "%04X", element)))")
+                    
+                    let length = data.safeReadUInt32(at: tryOffset + 4)
+                    print("           📊 Tag length: \(length)")
+                    
+                    if length > 0 && length < 10000 && tryOffset + 8 + Int(length) <= data.count {
+                        let valueData = data.subdata(in: (tryOffset + 8)..<(tryOffset + 8 + Int(length)))
+                        let valueHex = valueData.map { String(format: "%02X", $0) }.joined(separator: " ")
+                        print("           📍 Tag value hex: \(valueHex)")
+                        
+                        if let stringValue = String(data: valueData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                            print("           📍 Tag value as string: '\(stringValue)'")
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Try to find sequences and nested structures
+        print("           🔍 Looking for sequence delimiters (FFFE tags)...")
+        var offset = 0
+        while offset + 8 <= data.count {
+            let group = data.safeReadUInt16(at: offset)
+            let element = data.safeReadUInt16(at: offset + 2)
+            
+            if group == 0xFFFE {
+                print("           🔍 Found FFFE sequence at offset \(offset): (\(String(format: "%04X", group)),\(String(format: "%04X", element)))")
+            }
+            
+            offset += 2
+        }
+        
         // Look for Contour Data tag (3006,0050) in the nested data
         if let contourPointsData = findEnhancedFloatArrayInData(data, group: 0x3006, element: 0x0050) {
             print("           ✅ Found contour data: \(contourPointsData.count) coordinates")
@@ -451,7 +500,7 @@ public class MinimalRTStructParser {
                 return SimpleContour(points: points, slicePosition: zPosition)
             }
         } else {
-            print("           ⚠️ No contour data found in nested item")
+            print("           ⚠️ No contour data tag (3006,0050) found in nested item")
         }
         
         return nil
