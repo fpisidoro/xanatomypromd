@@ -345,8 +345,14 @@ public class MinimalRTStructParser {
     
     /// Extract real contour data from contour sequence item
     private static func extractRealContourData(from contourItem: Data, roiNumber: Int) -> SimpleContour? {
-        // Try to extract actual contour points from the contour item
-        // Look for Contour Data tag (3006,0050)
+        print("         📍 Extracting real contour data from \(contourItem.count)-byte item for ROI \(roiNumber)...")
+        
+        // Debug: Show contour item structure
+        let previewBytes = contourItem.prefix(min(64, contourItem.count))
+        let hexString = previewBytes.map { String(format: "%02X", $0) }.joined(separator: " ")
+        print("         📍 Contour item preview: \(hexString)")
+        
+        // Look for Contour Data tag (3006,0050) - this contains the actual point coordinates
         if let contourPointsData = findEnhancedFloatArrayInData(contourItem, group: 0x3006, element: 0x0050) {
             print("         📍 Found real contour data: \(contourPointsData.count) coordinates")
             
@@ -364,7 +370,35 @@ public class MinimalRTStructParser {
             }
             
             if !points.isEmpty {
+                print("         ✅ Extracted \(points.count) real contour points at Z=\(zPosition)")
                 return SimpleContour(points: points, slicePosition: zPosition)
+            }
+        } else {
+            print("         ⚠️ Contour Data tag (3006,0050) not found, checking for other contour tags...")
+            
+            // Try alternative approaches for different RTStruct formats
+            // Look for Number of Contour Points tag (3006,0046)
+            if let numberOfPoints = findEnhancedIntegerInData(contourItem, group: 0x3006, element: 0x0046) {
+                print("         📍 Found Number of Contour Points: \(numberOfPoints)")
+            }
+            
+            // Look for Contour Geometric Type tag (3006,0042)
+            if let geometricType = findEnhancedStringInData(contourItem, group: 0x3006, element: 0x0042) {
+                print("         📍 Found Contour Geometric Type: '\(geometricType)'")
+            }
+            
+            // Scan through the contour data to see what tags are actually present
+            print("         🔍 Scanning contour item for all DICOM tags...")
+            var offset = 0
+            while offset + 8 <= contourItem.count {
+                let group = contourItem.safeReadUInt16(at: offset)
+                let element = contourItem.safeReadUInt16(at: offset + 2)
+                
+                if group != 0 { // Skip zero padding
+                    print("         🔍 At offset \(offset): found tag (\(String(format: "%04X", group)),\(String(format: "%04X", element)))")
+                }
+                
+                offset += 8 // Move by larger steps to find tags
             }
         }
         
