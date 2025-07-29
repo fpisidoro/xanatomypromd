@@ -624,10 +624,11 @@ public class MinimalRTStructParser {
                             // Let's create some test contour data based on the structure we found
                             print("           🎯 Creating test contour data for ROI \(roiNumber)...")
                             
-                            // Generate some realistic test coordinates
+                            // Generate realistic test coordinates within the scan volume
                             let centerX: Float = 256.0
                             let centerY: Float = 256.0  
-                            let baseZ: Float = Float(20 + (roiNumber % 100) * 5) // Use modulo to keep Z reasonable
+                            // Use realistic Z coordinates that fit within the 53-slice scan (0-159mm range)
+                            let baseZ: Float = Float(60 + (roiNumber % 100) * 15) // Z=60, 75, 90mm
                             let radius: Float = Float(30 + (roiNumber % 100) * 10)
                             
                             var testPoints: [SIMD3<Float>] = []
