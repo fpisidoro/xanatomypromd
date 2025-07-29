@@ -1,6 +1,32 @@
 import Foundation
 import simd
 
+// MARK: - Safe Data Reading Extension
+// Prevents memory alignment crashes when reading binary data
+
+extension Data {
+    /// Safely read UInt16 from data at offset
+    func safeReadUInt16(at offset: Int) -> UInt16 {
+        guard offset + 2 <= count else { return 0 }
+        let bytes = self.subdata(in: offset..<offset + 2)
+        return bytes.withUnsafeBytes { $0.load(as: UInt16.self) }
+    }
+    
+    /// Safely read UInt32 from data at offset
+    func safeReadUInt32(at offset: Int) -> UInt32 {
+        guard offset + 4 <= count else { return 0 }
+        let bytes = self.subdata(in: offset..<offset + 4)
+        return bytes.withUnsafeBytes { $0.load(as: UInt32.self) }
+    }
+    
+    /// Safely read Float from data at offset
+    func safeReadFloat(at offset: Int) -> Float {
+        guard offset + 4 <= count else { return 0.0 }
+        let bytes = self.subdata(in: offset..<offset + 4)
+        return bytes.withUnsafeBytes { $0.load(as: Float.self) }
+    }
+}
+
 // MARK: - Minimal Working RTStruct Parser
 // Simplified parser for testing ROI functionality without breaking existing code
 
@@ -162,19 +188,13 @@ public class MinimalRTStructParser {
         print("     🔍 Enhanced sequence parsing of \(data.count) bytes...")
         
         while offset + 8 <= data.count {
-            // Read potential sequence item tag
-            let group = data.withUnsafeBytes { bytes in
-                bytes.load(fromByteOffset: offset, as: UInt16.self)
-            }
-            let element = data.withUnsafeBytes { bytes in
-                bytes.load(fromByteOffset: offset + 2, as: UInt16.self)
-            }
+            // Read potential sequence item tag using safe data reading
+            let group = data.safeReadUInt16(at: offset)
+            let element = data.safeReadUInt16(at: offset + 2)
             
             if group == 0xFFFE && element == 0xE000 {
                 // Found sequence item (FFFE,E000)
-                let length = data.withUnsafeBytes { bytes in
-                    bytes.load(fromByteOffset: offset + 4, as: UInt32.self)
-                }
+                let length = data.safeReadUInt32(at: offset + 4)
                 
                 print("     📦 Found sequence item at offset \(offset), length: \(length == 0xFFFFFFFF ? "undefined" : String(length))")
                 
@@ -186,12 +206,8 @@ public class MinimalRTStructParser {
                     var foundDelimiter = false
                     
                     while offset + 8 <= data.count {
-                        let delimGroup = data.withUnsafeBytes { bytes in
-                            bytes.load(fromByteOffset: offset, as: UInt16.self)
-                        }
-                        let delimElement = data.withUnsafeBytes { bytes in
-                            bytes.load(fromByteOffset: offset + 2, as: UInt16.self)
-                        }
+                        let delimGroup = data.safeReadUInt16(at: offset)
+                        let delimElement = data.safeReadUInt16(at: offset + 2)
                         
                         if delimGroup == 0xFFFE && delimElement == 0xE00D {
                             // Item delimiter (FFFE,E00D)
@@ -364,12 +380,8 @@ public class MinimalRTStructParser {
         var offset = 0
         
         while offset + 8 <= data.count {
-            let foundGroup = data.withUnsafeBytes { bytes in
-                bytes.load(fromByteOffset: offset, as: UInt16.self)
-            }
-            let foundElement = data.withUnsafeBytes { bytes in
-                bytes.load(fromByteOffset: offset + 2, as: UInt16.self)
-            }
+            let foundGroup = data.safeReadUInt16(at: offset)
+            let foundElement = data.safeReadUInt16(at: offset + 2)
             
             if foundGroup == group && foundElement == element {
                 // Found contour data tag, extract float array
@@ -393,9 +405,7 @@ public class MinimalRTStructParser {
                 }
                 
                 if lengthOffset + 4 <= data.count {
-                    let length = data.withUnsafeBytes { bytes in
-                        bytes.load(fromByteOffset: lengthOffset, as: UInt32.self)
-                    }
+                    let length = data.safeReadUInt32(at: lengthOffset)
                     
                     if length > 0 && valueOffset + Int(length) <= data.count {
                         let floatData = data.subdata(in: valueOffset..<(valueOffset + Int(length)))
@@ -420,9 +430,7 @@ public class MinimalRTStructParser {
                         if floatData.count % 4 == 0 {
                             var floats: [Float] = []
                             for i in stride(from: 0, to: floatData.count, by: 4) {
-                                let floatValue = floatData.withUnsafeBytes { bytes in
-                                    bytes.load(fromByteOffset: i, as: Float.self)
-                                }
+                                let floatValue = floatData.safeReadFloat(at: i)
                                 floats.append(floatValue)
                             }
                             
@@ -445,12 +453,8 @@ public class MinimalRTStructParser {
         var offset = 0
         
         while offset + 8 <= data.count {
-            let foundGroup = data.withUnsafeBytes { bytes in
-                bytes.load(fromByteOffset: offset, as: UInt16.self)
-            }
-            let foundElement = data.withUnsafeBytes { bytes in
-                bytes.load(fromByteOffset: offset + 2, as: UInt16.self)
-            }
+            let foundGroup = data.safeReadUInt16(at: offset)
+            let foundElement = data.safeReadUInt16(at: offset + 2)
             
             if foundGroup == group && foundElement == element {
                 // Found the tag, extract integer value with proper VR handling
@@ -475,21 +479,15 @@ public class MinimalRTStructParser {
                 }
                 
                 if lengthOffset + 2 <= data.count {
-                    let length = data.withUnsafeBytes { bytes in
-                        bytes.load(fromByteOffset: lengthOffset, as: UInt16.self)
-                    }
+                    let length = data.safeReadUInt16(at: lengthOffset)
                     
                     if length >= 2 && valueOffset + Int(length) <= data.count {
                         // Try different integer formats
                         if length == 2 {
-                            let value = data.withUnsafeBytes { bytes in
-                                bytes.load(fromByteOffset: valueOffset, as: UInt16.self)
-                            }
+                            let value = data.safeReadUInt16(at: valueOffset)
                             return Int(value)
                         } else if length == 4 {
-                            let value = data.withUnsafeBytes { bytes in
-                                bytes.load(fromByteOffset: valueOffset, as: UInt32.self)
-                            }
+                            let value = data.safeReadUInt32(at: valueOffset)
                             return Int(value)
                         } else {
                             // Try parsing as string
@@ -514,12 +512,8 @@ public class MinimalRTStructParser {
         var offset = 0
         
         while offset + 8 <= data.count {
-            let foundGroup = data.withUnsafeBytes { bytes in
-                bytes.load(fromByteOffset: offset, as: UInt16.self)
-            }
-            let foundElement = data.withUnsafeBytes { bytes in
-                bytes.load(fromByteOffset: offset + 2, as: UInt16.self)
-            }
+            let foundGroup = data.safeReadUInt16(at: offset)
+            let foundElement = data.safeReadUInt16(at: offset + 2)
             
             if foundGroup == group && foundElement == element {
                 // Found the tag, extract string value with proper VR handling
@@ -544,9 +538,7 @@ public class MinimalRTStructParser {
                 }
                 
                 if lengthOffset + 2 <= data.count {
-                    let length = data.withUnsafeBytes { bytes in
-                        bytes.load(fromByteOffset: lengthOffset, as: UInt16.self)
-                    }
+                    let length = data.safeReadUInt16(at: lengthOffset)
                     
                     if length > 0 && valueOffset + Int(length) <= data.count {
                         let stringData = data.subdata(in: valueOffset..<(valueOffset + Int(length)))
