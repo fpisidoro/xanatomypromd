@@ -249,7 +249,7 @@ struct CrosshairLine: View {
             path.move(to: startPoint)
             path.addLine(to: endPoint)
             
-            // Create gradient that fades near center (like MIM)
+            // Create gradient that fades near the INTERSECTION POINT (not line center)
             let gradient = createCrosshairGradient()
             
             // Draw the line with gradient stroke
@@ -267,15 +267,32 @@ struct CrosshairLine: View {
     }
     
     private func createCrosshairGradient() -> Gradient {
-        // Create fade pattern: dense at edges, faded in center (like MIM crosshairs)
+        // Calculate where the intersection point falls along this line (0.0 to 1.0)
+        let lineLength = distance(from: startPoint, to: endPoint)
+        let centerDistance = isHorizontal ? 
+            distance(from: startPoint, to: CGPoint(x: centerPoint.x, y: startPoint.y)) :
+            distance(from: startPoint, to: CGPoint(x: startPoint.x, y: centerPoint.y))
+        
+        let centerRatio = lineLength > 0 ? centerDistance / lineLength : 0.5
+        
+        // Create fade pattern centered on the intersection point
+        let fadeWidth: Double = 0.1 // Width of fade zone (10% of line length)
+        let fadeStart = max(0, centerRatio - fadeWidth)
+        let fadeEnd = min(1, centerRatio + fadeWidth)
+        
         return Gradient(stops: [
-            .init(color: .green, location: 0.0),      // Dense at start
-            .init(color: .green, location: 0.3),      // Still visible
-            .init(color: .green.opacity(0.1), location: 0.45),  // Fade starts
-            .init(color: .green.opacity(0.0), location: 0.5),   // Invisible at center
-            .init(color: .green.opacity(0.1), location: 0.55),  // Fade ends
-            .init(color: .green, location: 0.7),      // Visible again
-            .init(color: .green, location: 1.0)       // Dense at end
+            .init(color: .green, location: 0.0),                    // Dense at start
+            .init(color: .green, location: fadeStart),              // Dense until fade zone
+            .init(color: .green.opacity(0.1), location: centerRatio), // Transparent at intersection
+            .init(color: .green, location: fadeEnd),                // Dense after fade zone
+            .init(color: .green, location: 1.0)                     // Dense at end
         ])
+    }
+    
+    // Helper function to calculate distance between two points
+    private func distance(from point1: CGPoint, to point2: CGPoint) -> Double {
+        let dx = point2.x - point1.x
+        let dy = point2.y - point1.y
+        return sqrt(dx * dx + dy * dy)
     }
 }
