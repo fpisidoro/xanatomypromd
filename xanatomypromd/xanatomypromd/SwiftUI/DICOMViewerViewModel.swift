@@ -2,8 +2,8 @@ import Foundation
 import SwiftUI
 import simd
 
-// MARK: - Simple DICOM Viewer ViewModel
-// Minimal ViewModel to support the clean DICOMViewerView
+// MARK: - DICOM Viewer ViewModel with Volume Loading
+// Loads actual DICOM volume data for CT rendering
 
 @MainActor
 class DICOMViewerViewModel: ObservableObject {
@@ -14,11 +14,18 @@ class DICOMViewerViewModel: ObservableObject {
     @Published var currentSlice: Int = 0
     @Published var totalSlices: Int = 53
     @Published var seriesInfo: DICOMSeriesInfo?
+    @Published var volumeData: VolumeData? // NEW: Volume data for CT rendering
     
     // MARK: - Data Properties
     
     private var dicomFiles: [URL] = []
     private var rtStructData: RTStructData?
+    
+    // MARK: - Volume Data Access
+    
+    func getVolumeData() -> VolumeData? {
+        return volumeData
+    }
     
     // MARK: - RTStruct Data Access
     
@@ -33,7 +40,119 @@ class DICOMViewerViewModel: ObservableObject {
         print("📊 DICOMViewerViewModel initialized")
     }
     
-    // MARK: - Test ROI Contour Generators
+    // MARK: - DICOM Loading with Volume Data
+    
+    func loadDICOMSeries() async {
+        print("📂 Loading DICOM series with volume data...")
+        isLoading = true
+        
+        do {
+            // STEP 1: Load DICOM files
+            let dicomFileURLs = try loadDICOMFiles()
+            print("   📁 Found \(dicomFileURLs.count) DICOM files")
+            
+            // STEP 2: Parse DICOM datasets
+            var datasets: [(DICOMDataset, Int)] = []
+            
+            for (index, fileURL) in dicomFileURLs.enumerated() {
+                do {
+                    let data = try Data(contentsOf: fileURL)
+                    let dataset = try DICOMParser.parse(data)
+                    datasets.append((dataset, index))
+                    print("   ✅ Parsed DICOM file \(index + 1)/\(dicomFileURLs.count)")
+                } catch {
+                    print("   ❌ Failed to parse \(fileURL.lastPathComponent): \(error)")
+                }
+            }
+            
+            // STEP 3: Build 3D volume from datasets
+            if !datasets.isEmpty {
+                print("   🔄 Building 3D volume from \(datasets.count) slices...")
+                volumeData = try VolumeData(from: datasets)
+                totalSlices = volumeData?.dimensions.z ?? 53
+                print("   ✅ Volume built: \(volumeData?.dimensions ?? SIMD3<Int>(0,0,0))")
+            } else {
+                print("   ⚠️ No valid DICOM datasets - using fallback")
+                volumeData = nil
+                totalSlices = 53
+            }
+            
+            // STEP 4: Set up series info
+            if let firstDataset = datasets.first?.0 {
+                seriesInfo = createSeriesInfo(from: firstDataset)
+            } else {
+                seriesInfo = createFallbackSeriesInfo()
+            }
+            
+            // STEP 5: Load RTStruct data
+            if rtStructData == nil {
+                rtStructData = loadRealRTStructData()
+            }
+            
+            isLoading = false
+            print("✅ DICOM series with volume data loaded successfully")
+            
+        } catch {
+            print("❌ Error loading DICOM series: \(error)")
+            // Fallback to test data
+            volumeData = nil
+            seriesInfo = createFallbackSeriesInfo()
+            rtStructData = loadRealRTStructData()
+            isLoading = false
+        }
+    }
+    
+    // MARK: - DICOM File Loading
+    
+    private func loadDICOMFiles() throws -> [URL] {
+        // Get DICOM files from bundle
+        let dicomFiles = DICOMFileManager.getDICOMFiles()
+        
+        // Filter out RTStruct files for volume building
+        let ctFiles = dicomFiles.filter { url in
+            !url.lastPathComponent.contains("rtstruct") &&
+            url.pathExtension.lowercased() == "dcm"
+        }
+        
+        // Sort by filename to maintain slice order
+        let sortedFiles = ctFiles.sorted { url1, url2 in
+            url1.lastPathComponent < url2.lastPathComponent
+        }
+        
+        guard !sortedFiles.isEmpty else {
+            throw VolumeLoadingError.noDICOMFiles
+        }
+        
+        return sortedFiles
+    }
+    
+    // MARK: - Series Info Creation
+    
+    private func createSeriesInfo(from dataset: DICOMDataset) -> DICOMSeriesInfo {
+        return DICOMSeriesInfo(
+            patientName: dataset.patientName ?? "Unknown Patient",
+            studyDescription: dataset.studyDescription ?? "CT Study",
+            seriesDescription: dataset.seriesDescription ?? "Axial CT",
+            seriesNumber: Int(dataset.seriesNumber ?? "1"),
+            instanceCount: totalSlices,
+            studyDate: dataset.studyDate ?? "Unknown",
+            modality: dataset.modality ?? "CT"
+        )
+    }
+    
+    private func createFallbackSeriesInfo() -> DICOMSeriesInfo {
+        return DICOMSeriesInfo(
+            patientName: "Test Patient XAPMD",
+            studyDescription: "Chest CT",
+            seriesDescription: "Axial CT",
+            seriesNumber: 1,
+            instanceCount: totalSlices,
+            studyDate: "20250128",
+            modality: "CT"
+        )
+    }
+    
+    // MARK: - Test ROI Contour Generators (Keep existing)
     
     private func createTestHeartContours() -> [ROIContour] {
         var contours: [ROIContour] = []
@@ -148,36 +267,9 @@ class DICOMViewerViewModel: ObservableObject {
         return contours
     }
     
-    // MARK: - DICOM Loading
-    
-    func loadDICOMSeries() async {
-        print("📂 Loading DICOM series...")
-        
-        // Simulate loading process
-        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
-        
-        // Set up basic series info
-        seriesInfo = DICOMSeriesInfo(
-            patientName: "Test Patient XAPMD",
-            studyDescription: "Chest CT",
-            seriesDescription: "Axial CT",
-            seriesNumber: 1,
-            instanceCount: 53,
-            studyDate: "20250128",
-            modality: "CT"
-        )
-        
-        isLoading = false
-        print("✅ DICOM series loaded")
-    }
-    
     // MARK: - RTStruct Data
     
     func getRTStructData() -> RTStructData? {
-        // Load RTStruct data if available
-        if rtStructData == nil {
-            rtStructData = loadRealRTStructData() // Load from actual RTStruct files
-        }
         return rtStructData
     }
     
@@ -199,19 +291,6 @@ class DICOMViewerViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Utility Methods
-    
-    // TODO: Re-enable when MPRPlane import is resolved
-    // func getMaxSlicesForPlane(_ plane: MPRPlane) -> Int {
-    //     switch plane {
-    //     case .axial:
-    //         return 53  // Number of CT slices
-    //     case .sagittal:
-    //         return 512 // Image width  
-    //     case .coronal:
-    //         return 512 // Image height
-    //     }
-    // }
     // MARK: - Helper Functions
     
     private func loadRealRTStructData() -> RTStructData? {
@@ -290,10 +369,28 @@ class DICOMViewerViewModel: ObservableObject {
             referencedFrameOfReferenceUID: "Test.Frame.UID"
         )
     }
-
 }
 
-// MARK: - DICOM Series Info
+// MARK: - Volume Loading Errors
+
+enum VolumeLoadingError: Error, LocalizedError {
+    case noDICOMFiles
+    case invalidVolumeData
+    case parsingFailed
+    
+    var errorDescription: String? {
+        switch self {
+        case .noDICOMFiles:
+            return "No DICOM files found in bundle"
+        case .invalidVolumeData:
+            return "Invalid volume data structure"
+        case .parsingFailed:
+            return "Failed to parse DICOM files"
+        }
+    }
+}
+
+// MARK: - DICOM Series Info (Keep existing)
 
 struct DICOMSeriesInfo {
     let patientName: String?
