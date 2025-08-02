@@ -276,7 +276,7 @@ struct CrosshairLine: View {
         let centerRatio = lineLength > 0 ? centerDistance / lineLength : 0.5
         
         // Create pronounced fade pattern like MIM - more subtle overall with strong fade at intersection
-        let fadeWidth: Double = 0.3 // Much wider fade zone (30% of line length)
+        let fadeWidth: Double = 0.4 // Very wide fade zone (40% of line length)
         let fadeStart = max(0, centerRatio - fadeWidth)
         let fadeEnd = min(1, centerRatio + fadeWidth)
         
