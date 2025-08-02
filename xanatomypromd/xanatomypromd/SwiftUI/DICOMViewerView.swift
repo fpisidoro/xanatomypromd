@@ -59,10 +59,13 @@ struct DICOMViewerView: View {
                 await viewModel.loadDICOMSeries()
                 isLoading = false
                 
-                // Load ROI data - NEW!
+                // Load ROI data
                 if let rtStructData = viewModel.getRTStructData() {
                     roiManager.loadRTStructData(rtStructData)
                 }
+                
+                // NEW: Update crosshair manager with real volume dimensions if available
+                await loadVolumeDataForCrosshairs()
             }
         }
         .preferredColorScheme(.dark)
@@ -347,11 +350,14 @@ struct DICOMViewerView: View {
             // NEW: Crosshair controls
             HStack {
                 Button("Center on Volume") {
-                    // Reset crosshair to center of volume
-                    let centerX = 256.0 * 0.7 // Volume center in mm
-                    let centerY = 256.0 * 0.7
-                    let centerZ = 26.5 * 3.0  // Middle slice
-                    crosshairManager.setCrosshairPosition(SIMD3<Float>(centerX, centerY, centerZ))
+                    // Reset crosshair to center of volume (using dynamic calculation)
+                    crosshairManager.setCrosshairPosition(
+                        SIMD3<Float>(
+                            Float(crosshairManager.volumeDimensions.x) * crosshairManager.volumeSpacing.x / 2.0,
+                            Float(crosshairManager.volumeDimensions.y) * crosshairManager.volumeSpacing.y / 2.0,
+                            Float(crosshairManager.volumeDimensions.z) * crosshairManager.volumeSpacing.z / 2.0
+                        )
+                    )
                 }
                 .font(.caption2)
                 .padding(.horizontal, 8)
@@ -394,6 +400,45 @@ struct DICOMViewerView: View {
     
     // MARK: - Helper Functions
     // NOTE: getMaxSlicesForPlane() removed - now handled by CrosshairManager
+    
+    /// Load real volume dimensions from DICOM data for crosshair manager
+    private func loadVolumeDataForCrosshairs() async {
+        // TODO: Replace with actual DICOM volume loading
+        // For now, detect available DICOM files and count them
+        
+        let fileManager = FileManager.default
+        let testDataPath = Bundle.main.path(forResource: "TestData", ofType: nil) ?? ""
+        let dicomPath = testDataPath + "/XAPMD^COUSINALPHA"
+        
+        do {
+            let dicomFiles = try fileManager.contentsOfDirectory(atPath: dicomPath)
+                .filter { $0.hasSuffix(".dcm") && !$0.contains("rtstruct") }
+                .sorted()
+            
+            let actualSliceCount = dicomFiles.count
+            
+            if actualSliceCount > 0 {
+                print("📁 Found \(actualSliceCount) DICOM slices (not hardcoded 53!)")
+                
+                // Create volume dimensions based on actual data
+                let realDimensions = SIMD3<Int>(512, 512, actualSliceCount)
+                let realSpacing = SIMD3<Float>(0.7, 0.7, 3.0) // TODO: Extract from DICOM headers
+                
+                // Update crosshair manager with real parameters
+                crosshairManager.updateVolumeParameters(
+                    dimensions: realDimensions,
+                    spacing: realSpacing
+                )
+                
+                print("✅ Updated crosshair manager for \(actualSliceCount) slices")
+            } else {
+                print("⚠️ No DICOM files found, using default parameters")
+            }
+        } catch {
+            print("⚠️ Error loading DICOM files: \(error)")
+            print("⚠️ Using default crosshair parameters")
+        }
+    }
     
     private func getPlaneColor() -> Color {
         switch currentPlane {

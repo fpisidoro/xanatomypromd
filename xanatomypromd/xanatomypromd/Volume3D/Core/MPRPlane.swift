@@ -63,6 +63,20 @@ public enum MPRPlane: String, CaseIterable {
             return (0, 2)  // X, Z
         }
     }
+    
+    /// Create MPRPlane from string (for backwards compatibility)
+    public static func from(string: String) -> MPRPlane {
+        switch string.lowercased() {
+        case "axial":
+            return .axial
+        case "sagittal":
+            return .sagittal
+        case "coronal":
+            return .coronal
+        default:
+            return .axial
+        }
+    }
 }
 
 /// Window/Level presets for different tissue types
@@ -254,19 +268,5 @@ extension MPRPlane {
         let physicalHeight = Float(sliceDimensions.y) * sliceSpacing.y
         
         return physicalWidth / physicalHeight
-    }
-    
-    /// Create MPRPlane from string (for backwards compatibility)
-    public static func from(string: String) -> MPRPlane {
-        switch string.lowercased() {
-        case "axial":
-            return .axial
-        case "sagittal":
-            return .sagittal
-        case "coronal":
-            return .coronal
-        default:
-            return .axial
-        }
     }
 }

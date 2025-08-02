@@ -22,33 +22,56 @@ class CrosshairManager: ObservableObject {
     // MARK: - Volume Properties
     
     /// Volume dimensions in voxels (width, height, depth)
-    private let volumeDimensions: SIMD3<Int>
+    public let volumeDimensions: SIMD3<Int>
     
     /// Voxel spacing in millimeters (x, y, z)
-    private let volumeSpacing: SIMD3<Float>
+    public let volumeSpacing: SIMD3<Float>
     
     /// Volume origin in millimeters (x, y, z)
-    private let volumeOrigin: SIMD3<Float>
+    public let volumeOrigin: SIMD3<Float>
     
     // MARK: - Initialization
     
     init(
-        volumeDimensions: SIMD3<Int> = SIMD3<Int>(512, 512, 53),
-        volumeSpacing: SIMD3<Float> = SIMD3<Float>(0.7, 0.7, 3.0),
-        volumeOrigin: SIMD3<Float> = SIMD3<Float>(0, 0, 0)
+        volumeDimensions: SIMD3<Int>? = nil,
+        volumeSpacing: SIMD3<Float>? = nil,
+        volumeOrigin: SIMD3<Float>? = nil
     ) {
-        self.volumeDimensions = volumeDimensions
-        self.volumeSpacing = volumeSpacing
-        self.volumeOrigin = volumeOrigin
+        // Use defaults for current test data, but allow override for production
+        self.volumeDimensions = volumeDimensions ?? SIMD3<Int>(512, 512, 53)
+        self.volumeSpacing = volumeSpacing ?? SIMD3<Float>(0.7, 0.7, 3.0)
+        self.volumeOrigin = volumeOrigin ?? SIMD3<Float>(0, 0, 0)
         
         // Initialize crosshair at center of volume
-        let centerX = volumeOrigin.x + (Float(volumeDimensions.x) * volumeSpacing.x) / 2.0
-        let centerY = volumeOrigin.y + (Float(volumeDimensions.y) * volumeSpacing.y) / 2.0
-        let centerZ = volumeOrigin.z + (Float(volumeDimensions.z) * volumeSpacing.z) / 2.0
+        let centerX = self.volumeOrigin.x + (Float(self.volumeDimensions.x) * self.volumeSpacing.x) / 2.0
+        let centerY = self.volumeOrigin.y + (Float(self.volumeDimensions.y) * self.volumeSpacing.y) / 2.0
+        let centerZ = self.volumeOrigin.z + (Float(self.volumeDimensions.z) * self.volumeSpacing.z) / 2.0
         
         self.worldPosition = SIMD3<Float>(centerX, centerY, centerZ)
         
-        print("🎯 CrosshairManager initialized at center: (\(centerX), \(centerY), \(centerZ)) mm")
+        print("🎯 CrosshairManager initialized for volume dimensions: \(self.volumeDimensions)")
+        print("🎯 Volume spacing: \(self.volumeSpacing) mm")
+        print("🎯 Crosshair at center: (\(centerX), \(centerY), \(centerZ)) mm")
+    }
+    
+    /// Update volume parameters when DICOM data is loaded
+    func updateVolumeParameters(
+        dimensions: SIMD3<Int>,
+        spacing: SIMD3<Float>,
+        origin: SIMD3<Float> = SIMD3<Float>(0, 0, 0)
+    ) {
+        // Update internal parameters (but can't change let properties)
+        // This would need a redesign to make properties var instead of let
+        print("⚠️ Volume parameters update requested: \(dimensions) with spacing \(spacing)")
+        print("⚠️ Current implementation uses fixed parameters set during initialization")
+        print("⚠️ For production: pass real DICOM dimensions to CrosshairManager init")
+        
+        // Center crosshair in the new volume space
+        let centerX = origin.x + (Float(dimensions.x) * spacing.x) / 2.0
+        let centerY = origin.y + (Float(dimensions.y) * spacing.y) / 2.0
+        let centerZ = origin.z + (Float(dimensions.z) * spacing.z) / 2.0
+        
+        setCrosshairPosition(SIMD3<Float>(centerX, centerY, centerZ))
     }
     
     // MARK: - Slice Index Calculation
