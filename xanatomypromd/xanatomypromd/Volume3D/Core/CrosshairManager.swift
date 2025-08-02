@@ -283,7 +283,7 @@ struct CrosshairLine: View {
         return Gradient(stops: [
             .init(color: .green.opacity(0.6), location: 0.0),       // Less conspicuous at start
             .init(color: .green.opacity(0.6), location: fadeStart), // Subtle until fade zone
-            .init(color: .green.opacity(0.02), location: centerRatio), // Nearly invisible at intersection (2%)
+            .init(color: .green.opacity(0.0), location: centerRatio), // Completely invisible at intersection (0%)
             .init(color: .green.opacity(0.6), location: fadeEnd),   // Subtle after fade zone
             .init(color: .green.opacity(0.6), location: 1.0)        // Less conspicuous at end
         ])
