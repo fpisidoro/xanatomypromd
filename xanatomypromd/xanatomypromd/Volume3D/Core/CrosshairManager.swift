@@ -276,14 +276,14 @@ struct CrosshairLine: View {
         let centerRatio = lineLength > 0 ? centerDistance / lineLength : 0.5
         
         // Create pronounced fade pattern like MIM - more subtle overall with strong fade at intersection
-        let fadeWidth: Double = 0.15 // Wider fade zone (15% of line length)
+        let fadeWidth: Double = 0.3 // Much wider fade zone (30% of line length)
         let fadeStart = max(0, centerRatio - fadeWidth)
         let fadeEnd = min(1, centerRatio + fadeWidth)
         
         return Gradient(stops: [
             .init(color: .green.opacity(0.6), location: 0.0),       // Less conspicuous at start
             .init(color: .green.opacity(0.6), location: fadeStart), // Subtle until fade zone
-            .init(color: .green.opacity(0.05), location: centerRatio), // Almost invisible at intersection
+            .init(color: .green.opacity(0.02), location: centerRatio), // Nearly invisible at intersection (2%)
             .init(color: .green.opacity(0.6), location: fadeEnd),   // Subtle after fade zone
             .init(color: .green.opacity(0.6), location: 1.0)        // Less conspicuous at end
         ])
