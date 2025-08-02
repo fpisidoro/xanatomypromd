@@ -17,7 +17,7 @@ class CrosshairManager: ObservableObject {
     @Published var isVisible: Bool = true
     
     /// Crosshair opacity
-    @Published var opacity: Float = 0.8
+    @Published var opacity: Float = 0.5 // Reduced opacity for subtler appearance like MIM
     
     // MARK: - Volume Properties
     
@@ -260,7 +260,7 @@ struct CrosshairLine: View {
                     startPoint: startPoint,
                     endPoint: endPoint
                 ),
-                style: StrokeStyle(lineWidth: 1.5, lineCap: .round)
+                style: StrokeStyle(lineWidth: 1.0, lineCap: .round) // Thinner like MIM
             )
         }
         .opacity(opacity)
@@ -275,17 +275,17 @@ struct CrosshairLine: View {
         
         let centerRatio = lineLength > 0 ? centerDistance / lineLength : 0.5
         
-        // Create fade pattern centered on the intersection point
-        let fadeWidth: Double = 0.1 // Width of fade zone (10% of line length)
+        // Create pronounced fade pattern like MIM - more subtle overall with strong fade at intersection
+        let fadeWidth: Double = 0.15 // Wider fade zone (15% of line length)
         let fadeStart = max(0, centerRatio - fadeWidth)
         let fadeEnd = min(1, centerRatio + fadeWidth)
         
         return Gradient(stops: [
-            .init(color: .green, location: 0.0),                    // Dense at start
-            .init(color: .green, location: fadeStart),              // Dense until fade zone
-            .init(color: .green.opacity(0.1), location: centerRatio), // Transparent at intersection
-            .init(color: .green, location: fadeEnd),                // Dense after fade zone
-            .init(color: .green, location: 1.0)                     // Dense at end
+            .init(color: .green.opacity(0.6), location: 0.0),       // Less conspicuous at start
+            .init(color: .green.opacity(0.6), location: fadeStart), // Subtle until fade zone
+            .init(color: .green.opacity(0.05), location: centerRatio), // Almost invisible at intersection
+            .init(color: .green.opacity(0.6), location: fadeEnd),   // Subtle after fade zone
+            .init(color: .green.opacity(0.6), location: 1.0)        // Less conspicuous at end
         ])
     }
     
