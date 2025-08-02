@@ -11,14 +11,19 @@ import Metal
 struct DICOMViewerView: View {
     @StateObject private var viewModel = DICOMViewerViewModel()
     @StateObject private var roiManager = CleanROIManager() // ROI display management
+    @StateObject private var crosshairManager = CrosshairManager() // NEW: 3D crosshair coordination
     @State private var selectedWindowingPreset: CTWindowPresets.WindowLevel = CTWindowPresets.softTissue
-    @State private var currentPlane: String = "axial" // MPRPlane = .axial
-    @State private var currentSlice = 0
+    @State private var currentPlane: MPRPlane = .axial // Changed to use MPRPlane enum
     @State private var isLoading = true
     @State private var dragOffset: CGSize = .zero
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
     @State private var showROITest = false
+    
+    // NEW: Computed property for current slice based on crosshair position
+    private var currentSlice: Int {
+        return crosshairManager.getSliceIndex(for: currentPlane)
+    }
     
     // Test ROI integration (optional) - DISABLED
     // @StateObject private var roiTest = ROITestImplementation()
@@ -80,13 +85,19 @@ struct DICOMViewerView: View {
             
             // Plane and slice info
             VStack(alignment: .trailing, spacing: 4) {
-                Text("\(currentPlane.capitalized)") // currentPlane.displayName
+                Text(currentPlane.displayName)
                     .font(.headline)
                     .foregroundColor(.white)
                 
-                Text("Slice \(currentSlice + 1)/\(getMaxSlicesForPlane())")
+                Text("Slice \(currentSlice + 1)/\(crosshairManager.getMaxSlices(for: currentPlane))")
                     .font(.caption)
                     .foregroundColor(.gray)
+                
+                // NEW: Show crosshair coordinates
+                Text(crosshairManager.getDebugInfo())
+                    .font(.caption2)
+                    .foregroundColor(.green)
+                    .multilineTextAlignment(.trailing)
             }
         }
         .padding(.horizontal)
@@ -105,17 +116,24 @@ struct DICOMViewerView: View {
                         .padding(.top)
                 }
             } else {
-                // Simple approach: Background + ROI overlay
+                // Enhanced approach: Background + ROI overlay + Crosshairs
                 ZStack {
                     // Background color to show current plane
                     Rectangle()
                         .fill(getPlaneColor())
                     
-                    // Simple ROI overlay on top
+                    // Simple ROI overlay
                     SimpleROIOverlay(
                         roiManager: roiManager,
                         currentSlice: currentSlice,
-                        currentPlane: MPRPlane.from(string: currentPlane),
+                        currentPlane: currentPlane,
+                        viewSize: CGSize(width: 400, height: 400)
+                    )
+                    
+                    // NEW: Crosshair overlay on top
+                    CrosshairOverlayView(
+                        crosshairManager: crosshairManager,
+                        plane: currentPlane,
                         viewSize: CGSize(width: 400, height: 400)
                     )
                     
@@ -208,11 +226,11 @@ struct DICOMViewerView: View {
                 .foregroundColor(.gray)
             
             HStack(spacing: 20) {
-                // Temporarily hardcoded plane options
-                ForEach(["axial", "sagittal", "coronal"], id: \.self) { plane in
-                    Button(plane.capitalized) {
+                // NEW: Use MPRPlane enum properly
+                ForEach(MPRPlane.allCases, id: \.self) { plane in
+                    Button(plane.displayName) {
                         currentPlane = plane
-                        currentSlice = 0  // Reset to first slice when changing planes
+                        // NO LONGER RESET SLICE - crosshair maintains position!
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
@@ -263,6 +281,8 @@ struct DICOMViewerView: View {
                             ForEach(roiManager.getROIStructures(), id: \.roiNumber) { roi in
                                 Button(roi.roiName) {
                                     roiManager.toggleROI(roi.roiNumber)
+                                    // NEW: Center crosshair on selected ROI
+                                    crosshairManager.centerOnROI(roi)
                                 }
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
@@ -299,28 +319,50 @@ struct DICOMViewerView: View {
             
             HStack {
                 Button("←") {
-                    if currentSlice > 0 {
-                        currentSlice -= 1
-                    }
+                    let newSlice = max(0, currentSlice - 1)
+                    crosshairManager.updateFromSliceScroll(plane: currentPlane, sliceIndex: newSlice)
                 }
                 .disabled(currentSlice <= 0)
                 
                 Slider(
                     value: Binding(
                         get: { Double(currentSlice) },
-                        set: { currentSlice = Int($0) }
+                        set: { newSlice in
+                            crosshairManager.updateFromSliceScroll(plane: currentPlane, sliceIndex: Int(newSlice))
+                        }
                     ),
-                    in: 0...Double(getMaxSlicesForPlane() - 1),
+                    in: 0...Double(crosshairManager.getMaxSlices(for: currentPlane) - 1),
                     step: 1
                 )
                 .accentColor(.blue)
                 
                 Button("→") {
-                    if currentSlice < getMaxSlicesForPlane() - 1 {
-                        currentSlice += 1
-                    }
+                    let maxSlices = crosshairManager.getMaxSlices(for: currentPlane)
+                    let newSlice = min(maxSlices - 1, currentSlice + 1)
+                    crosshairManager.updateFromSliceScroll(plane: currentPlane, sliceIndex: newSlice)
                 }
-                .disabled(currentSlice >= getMaxSlicesForPlane() - 1)
+                .disabled(currentSlice >= crosshairManager.getMaxSlices(for: currentPlane) - 1)
+            }
+            
+            // NEW: Crosshair controls
+            HStack {
+                Button("Center on Volume") {
+                    // Reset crosshair to center of volume
+                    let centerX = 256.0 * 0.7 // Volume center in mm
+                    let centerY = 256.0 * 0.7
+                    let centerZ = 26.5 * 3.0  // Middle slice
+                    crosshairManager.setCrosshairPosition(SIMD3<Float>(centerX, centerY, centerZ))
+                }
+                .font(.caption2)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.green.opacity(0.3))
+                .foregroundColor(.white)
+                .cornerRadius(4)
+                
+                Toggle("Show Crosshairs", isOn: $crosshairManager.isVisible)
+                    .toggleStyle(SwitchToggleStyle(tint: .green))
+                    .font(.caption2)
             }
         }
     }
@@ -351,22 +393,16 @@ struct DICOMViewerView: View {
     }
     
     // MARK: - Helper Functions
-    
-    private func getMaxSlicesForPlane() -> Int {
-        // return viewModel.getMaxSlicesForPlane(currentPlane) // DISABLED - method commented out
-        return 53  // Hardcoded for now
-    }
+    // NOTE: getMaxSlicesForPlane() removed - now handled by CrosshairManager
     
     private func getPlaneColor() -> Color {
         switch currentPlane {
-        case "axial":
+        case .axial:
             return Color.blue.opacity(0.3)
-        case "sagittal":
+        case .sagittal:
             return Color.red.opacity(0.3)
-        case "coronal":
+        case .coronal:
             return Color.green.opacity(0.3)
-        default:
-            return Color.gray.opacity(0.3)
         }
     }
 }

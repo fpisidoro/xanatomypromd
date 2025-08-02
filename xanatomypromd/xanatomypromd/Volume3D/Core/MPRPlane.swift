@@ -255,4 +255,18 @@ extension MPRPlane {
         
         return physicalWidth / physicalHeight
     }
+    
+    /// Create MPRPlane from string (for backwards compatibility)
+    public static func from(string: String) -> MPRPlane {
+        switch string.lowercased() {
+        case "axial":
+            return .axial
+        case "sagittal":
+            return .sagittal
+        case "coronal":
+            return .coronal
+        default:
+            return .axial
+        }
+    }
 }
