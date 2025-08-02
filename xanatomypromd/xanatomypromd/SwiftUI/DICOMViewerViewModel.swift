@@ -106,24 +106,14 @@ class DICOMViewerViewModel: ObservableObject {
     
     private func loadDICOMFiles() throws -> [URL] {
         // Get DICOM files from bundle
-        let dicomFiles = DICOMFileManager.getDICOMFiles()
+        let dicomFiles = DICOMFileManager.getCTImageFiles()
         
-        // Filter out RTStruct files for volume building
-        let ctFiles = dicomFiles.filter { url in
-            !url.lastPathComponent.contains("rtstruct") &&
-            url.pathExtension.lowercased() == "dcm"
-        }
-        
-        // Sort by filename to maintain slice order
-        let sortedFiles = ctFiles.sorted { url1, url2 in
-            url1.lastPathComponent < url2.lastPathComponent
-        }
-        
-        guard !sortedFiles.isEmpty else {
+        // Already filtered to CT files only - no need for additional filtering
+        guard !dicomFiles.isEmpty else {
             throw VolumeLoadingError.noDICOMFiles
         }
         
-        return sortedFiles
+        return dicomFiles
     }
     
     // MARK: - Series Info Creation
@@ -131,12 +121,12 @@ class DICOMViewerViewModel: ObservableObject {
     private func createSeriesInfo(from dataset: DICOMDataset) -> DICOMSeriesInfo {
         return DICOMSeriesInfo(
             patientName: dataset.patientName ?? "Unknown Patient",
-            studyDescription: dataset.studyDescription ?? "CT Study",
-            seriesDescription: dataset.seriesDescription ?? "Axial CT",
-            seriesNumber: Int(dataset.seriesNumber ?? "1"),
+            studyDescription: dataset.getString(tag: .studyDescription) ?? "CT Study",
+            seriesDescription: dataset.getString(tag: .seriesDescription) ?? "Axial CT",
+            seriesNumber: Int(dataset.getString(tag: .seriesNumber) ?? "1"),
             instanceCount: totalSlices,
             studyDate: dataset.studyDate ?? "Unknown",
-            modality: dataset.modality ?? "CT"
+            modality: dataset.getString(tag: .modality) ?? "CT"
         )
     }
     
