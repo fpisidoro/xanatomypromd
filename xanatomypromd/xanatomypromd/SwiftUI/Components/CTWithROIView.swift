@@ -89,7 +89,7 @@ struct CTWithROIView: UIViewRepresentable {
             // Load volume data into volume renderer if available
             if let volumeData = volumeData, let volumeRenderer = volumeRenderer {
                 do {
-                    try volumeRenderer.loadVolumeData(volumeData)
+                    try volumeRenderer.loadVolume(volumeData)
                     print("✅ Volume data loaded for CT rendering")
                 } catch {
                     print("❌ Failed to load volume data: \(error)")
@@ -162,28 +162,121 @@ struct CTWithROIView: UIViewRepresentable {
                 return
             }
             
-            do {
-                // Create MPR configuration for current slice
-                let normalizedSliceIndex = Float(currentSliceIndex) / Float(getMaxSlicesForPlane())
-                let mprConfig = MetalVolumeRenderer.MPRConfig(
-                    plane: currentPlane,
-                    sliceIndex: normalizedSliceIndex,
-                    windowCenter: currentWindowLevel.center,
-                    windowWidth: currentWindowLevel.width
-                )
-                
-                // Generate MPR slice texture
-                let ctTexture = try volumeRenderer.generateMPRSlice(config: mprConfig, outputSize: SIMD2<Int>(512, 512))
-                
-                // Render CT texture as background
-                renderCTTexture(ctTexture, renderEncoder: renderEncoder, viewSize: viewSize)
-                
-                print("✅ Rendered CT slice \(currentSliceIndex) for \(currentPlane.displayName)")
-                
-            } catch {
-                print("❌ Failed to generate CT slice: \(error)")
+            // For now, extract slice data directly from volume data
+            // TODO: Implement proper GPU MPR slice generation
+            let sliceData = extractSliceDataDirectly()
+            
+            if let (data, width, height) = sliceData {
+                // Convert slice data to Metal texture and render
+                if let ctTexture = createTextureFromSliceData(data, width: width, height: height) {
+                    renderCTTexture(ctTexture, renderEncoder: renderEncoder, viewSize: viewSize)
+                    print("✅ Rendered CT slice \(currentSliceIndex) for \(currentPlane.displayName)")
+                } else {
+                    print("❌ Failed to create texture from slice data")
+                    renderPlaceholder(renderEncoder: renderEncoder, viewSize: viewSize)
+                }
+            } else {
+                print("❌ Failed to extract slice data")
                 renderPlaceholder(renderEncoder: renderEncoder, viewSize: viewSize)
             }
+        }
+        
+        private func extractSliceDataDirectly() -> (data: [Int16], width: Int, height: Int)? {
+            guard let volumeData = currentVolumeData else { return nil }
+            
+            let normalizedSliceIndex = Float(currentSliceIndex) / Float(getMaxSlicesForPlane())
+            
+            switch currentPlane {
+            case .axial:
+                let zIndex = Int(normalizedSliceIndex * Float(volumeData.dimensions.z - 1))
+                let sliceData = extractAxialSlice(volumeData: volumeData, zIndex: zIndex)
+                return (data: sliceData, width: volumeData.dimensions.x, height: volumeData.dimensions.y)
+                
+            case .sagittal:
+                let xIndex = Int(normalizedSliceIndex * Float(volumeData.dimensions.x - 1))
+                let sliceData = extractSagittalSlice(volumeData: volumeData, xIndex: xIndex)
+                return (data: sliceData, width: volumeData.dimensions.y, height: volumeData.dimensions.z)
+                
+            case .coronal:
+                let yIndex = Int(normalizedSliceIndex * Float(volumeData.dimensions.y - 1))
+                let sliceData = extractCoronalSlice(volumeData: volumeData, yIndex: yIndex)
+                return (data: sliceData, width: volumeData.dimensions.x, height: volumeData.dimensions.z)
+            }
+        }
+        
+        private func extractAxialSlice(volumeData: VolumeData, zIndex: Int) -> [Int16] {
+            let dims = volumeData.dimensions
+            let sliceSize = dims.x * dims.y
+            let startIndex = zIndex * sliceSize
+            let endIndex = startIndex + sliceSize
+            
+            guard endIndex <= volumeData.voxelData.count else {
+                return Array(repeating: 0, count: sliceSize)
+            }
+            
+            return Array(volumeData.voxelData[startIndex..<endIndex])
+        }
+        
+        private func extractSagittalSlice(volumeData: VolumeData, xIndex: Int) -> [Int16] {
+            let dims = volumeData.dimensions
+            var sliceData: [Int16] = []
+            
+            for z in 0..<dims.z {
+                for y in 0..<dims.y {
+                    let volumeIndex = z * (dims.x * dims.y) + y * dims.x + xIndex
+                    if volumeIndex < volumeData.voxelData.count {
+                        sliceData.append(volumeData.voxelData[volumeIndex])
+                    } else {
+                        sliceData.append(0)
+                    }
+                }
+            }
+            
+            return sliceData
+        }
+        
+        private func extractCoronalSlice(volumeData: VolumeData, yIndex: Int) -> [Int16] {
+            let dims = volumeData.dimensions
+            var sliceData: [Int16] = []
+            
+            for z in 0..<dims.z {
+                for x in 0..<dims.x {
+                    let volumeIndex = z * (dims.x * dims.y) + yIndex * dims.x + x
+                    if volumeIndex < volumeData.voxelData.count {
+                        sliceData.append(volumeData.voxelData[volumeIndex])
+                    } else {
+                        sliceData.append(0)
+                    }
+                }
+            }
+            
+            return sliceData
+        }
+        
+        private func createTextureFromSliceData(_ data: [Int16], width: Int, height: Int) -> MTLTexture? {
+            guard let device = MTLCreateSystemDefaultDevice() else { return nil }
+            
+            let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .r16Sint, // Match the Int16 slice data
+                width: width,
+                height: height,
+                mipmapped: false
+            )
+            textureDescriptor.usage = [.shaderRead]
+            
+            guard let texture = device.makeTexture(descriptor: textureDescriptor) else { return nil }
+            
+            let region = MTLRegionMake2D(0, 0, width, height)
+            data.withUnsafeBytes { bytes in
+                texture.replace(
+                    region: region,
+                    mipmapLevel: 0,
+                    withBytes: bytes.baseAddress!,
+                    bytesPerRow: width * 2 // 2 bytes per Int16
+                )
+            }
+            
+            return texture
         }
         
         private func renderCTTexture(_ ctTexture: MTLTexture, renderEncoder: MTLRenderCommandEncoder, viewSize: CGSize) {
