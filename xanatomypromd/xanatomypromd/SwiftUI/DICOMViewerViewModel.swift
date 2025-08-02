@@ -22,10 +22,6 @@ class DICOMViewerViewModel: ObservableObject {
     
     // MARK: - RTStruct Data Access
     
-    func getRTStructData() -> RTStructData? {
-        return rtStructData
-    }
-    
     func setRTStructData(_ data: RTStructData) {
         rtStructData = data
         print("✅ RTStruct data loaded: \(data.roiStructures.count) ROI structures")

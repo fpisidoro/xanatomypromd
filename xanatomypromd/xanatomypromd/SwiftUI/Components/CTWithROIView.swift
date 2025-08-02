@@ -349,13 +349,7 @@ extension MPRPlane {
         }
     }
     
-    static func from(string: String) -> MPRPlane {
-        switch string.lowercased() {
-        case "sagittal": return .sagittal
-        case "coronal": return .coronal
-        default: return .axial
-        }
-    }
+    // NOTE: from(string:) method moved to main MPRPlane.swift file to avoid duplication
 }
 
 // MARK: - Preview
