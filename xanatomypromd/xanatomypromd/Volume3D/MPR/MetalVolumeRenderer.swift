@@ -283,7 +283,13 @@ public class MetalVolumeRenderer {
         }
         
         var params = MPRParams(
-            planeType: UInt32(config.plane.rawValue.hash % 3),  // Simple hash to ID
+            planeType: {
+                switch config.plane {
+                case .axial: return 0
+                case .sagittal: return 1
+                case .coronal: return 2
+                }
+            }(),
             slicePosition: config.sliceIndex,
             windowCenter: config.windowCenter,
             windowWidth: config.windowWidth,
