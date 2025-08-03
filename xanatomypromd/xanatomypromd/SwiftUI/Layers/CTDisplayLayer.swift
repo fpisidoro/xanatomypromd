@@ -2,9 +2,9 @@ import SwiftUI
 import MetalKit
 import Metal
 
-// MARK: - Layer 1: CT Display Layer (FIXED - Aspect Ratio Preserving)
-// AUTHORITATIVE layer that renders DICOM slices in true patient coordinates
-// FIXED: Now maintains correct aspect ratio in ALL orientations and screen sizes
+// MARK: - Layer 1: CT Display Layer (MEDICAL-ACCURATE)
+// AUTHORITATIVE layer that renders DICOM slices with EXACT physical spacing
+// MEDICAL PRINCIPLE: Accuracy > Screen Aesthetics - Never compromise DICOM data
 
 struct CTDisplayLayer: UIViewRepresentable {
     
@@ -32,9 +32,8 @@ struct CTDisplayLayer: UIViewRepresentable {
         mtkView.framebufferOnly = false
         mtkView.backgroundColor = UIColor.black
         
-        // FIXED: Remove contentMode - we handle aspect ratio in Metal rendering
-        // This allows the MTKView to fill the SwiftUI frame while we control
-        // the actual image aspect ratio in the shaders
+        // MEDICAL PRINCIPLE: Let MTKView fill SwiftUI frame
+        // We control accuracy in Metal rendering, not view sizing
         
         return mtkView
     }
@@ -53,17 +52,19 @@ struct CTDisplayLayer: UIViewRepresentable {
         Coordinator()
     }
     
-    // MARK: - CT Rendering Coordinator (FIXED - Aspect Ratio Preserving)
+    // MARK: - Medical-Accurate CT Rendering Coordinator
     
     class Coordinator: NSObject, MTKViewDelegate {
         
         private var volumeRenderer: MetalVolumeRenderer?
         private var displayPipelineState: MTLRenderPipelineState?
         
-        // FIXED: Dynamic vertex buffer for aspect-ratio preserving quads
+        // MEDICAL-ACCURATE: Vertex buffer with proper physical spacing
         private var vertexBuffer: MTLBuffer?
-        private var currentViewSize: CGSize = .zero
-        private var currentTextureSize: CGSize = .zero
+        private var lastViewSize: CGSize = .zero
+        private var lastTextureSize: CGSize = .zero
+        private var lastPlane: MPRPlane?
+        private var lastSpacing: SIMD3<Float>?
         
         // Current rendering state
         private var currentCoordinateSystem: DICOMCoordinateSystem?
@@ -84,16 +85,16 @@ struct CTDisplayLayer: UIViewRepresentable {
         private func setupRenderer() {
             do {
                 volumeRenderer = try MetalVolumeRenderer()
-                print("✅ CT Display Layer: Volume renderer initialized")
+                print("✅ CT Medical Display: Volume renderer initialized")
             } catch {
-                print("❌ CT Display Layer: Failed to initialize volume renderer: \(error)")
+                print("❌ CT Medical Display: Failed to initialize volume renderer: \(error)")
             }
         }
         
         private func setupDisplayPipeline() {
             guard let device = MTLCreateSystemDefaultDevice(),
                   let library = device.makeDefaultLibrary() else {
-                print("❌ CT Display Layer: Failed to create Metal device/library")
+                print("❌ CT Medical Display: Failed to create Metal device/library")
                 return
             }
             
@@ -104,36 +105,52 @@ struct CTDisplayLayer: UIViewRepresentable {
             
             do {
                 displayPipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
-                print("✅ CT Display Layer: Display pipeline created")
+                print("✅ CT Medical Display: Display pipeline created")
             } catch {
-                print("❌ CT Display Layer: Failed to create display pipeline: \(error)")
+                print("❌ CT Medical Display: Failed to create display pipeline: \(error)")
             }
         }
         
-        // FIXED: Create aspect-ratio preserving quad vertices
-        private func createAspectRatioPreservingQuad(
+        // MEDICAL-ACCURATE: Create quad using PHYSICAL DICOM spacing
+        private func createMedicalAccurateQuad(
             textureSize: CGSize,
             viewSize: CGSize,
+            plane: MPRPlane,
+            dicomSpacing: SIMD3<Float>,
             device: MTLDevice
         ) {
-            // Calculate aspect ratios
-            let textureAspect = Float(textureSize.width / textureSize.height)
+            // CRITICAL: Calculate PHYSICAL dimensions using DICOM spacing
+            let physicalDimensions = calculatePhysicalDimensions(
+                textureSize: textureSize,
+                plane: plane,
+                spacing: dicomSpacing
+            )
+            
+            // Calculate aspect ratio from PHYSICAL dimensions (not pixels)
+            let physicalAspect = physicalDimensions.width / physicalDimensions.height
             let viewAspect = Float(viewSize.width / viewSize.height)
             
-            // Calculate proper quad size to maintain aspect ratio
+            print("🏥 MEDICAL ACCURACY:")
+            print("   📐 Texture pixels: \(Int(textureSize.width))×\(Int(textureSize.height))")
+            print("   📏 Physical size: \(String(format: "%.1f", physicalDimensions.width))mm × \(String(format: "%.1f", physicalDimensions.height))mm")
+            print("   📊 Physical aspect: \(String(format: "%.3f", physicalAspect)) (medical)")
+            print("   📱 View aspect: \(String(format: "%.3f", viewAspect)) (screen)")
+            print("   🎯 DICOM spacing: \(dicomSpacing)")
+            
+            // Calculate proper quad size to maintain MEDICAL accuracy
             let quadSize: (width: Float, height: Float)
             
-            if textureAspect > viewAspect {
-                // Texture is wider than view - letterbox top/bottom
-                quadSize = (1.0, viewAspect / textureAspect)
-                print("🔍 CT Aspect: Letterboxing top/bottom - textureAspect=\(String(format: "%.2f", textureAspect)), viewAspect=\(String(format: "%.2f", viewAspect))")
+            if physicalAspect > viewAspect {
+                // Image is physically wider - letterbox top/bottom
+                quadSize = (1.0, viewAspect / physicalAspect)
+                print("   📱 Medical Letterbox: TOP/BOTTOM (preserving width)")
             } else {
-                // Texture is taller than view - letterbox left/right
-                quadSize = (textureAspect / viewAspect, 1.0)
-                print("🔍 CT Aspect: Letterboxing left/right - textureAspect=\(String(format: "%.2f", textureAspect)), viewAspect=\(String(format: "%.2f", viewAspect))")
+                // Image is physically taller - letterbox left/right
+                quadSize = (physicalAspect / viewAspect, 1.0)
+                print("   📱 Medical Letterbox: LEFT/RIGHT (preserving height)")
             }
             
-            // Create vertices for properly sized quad (not full-screen)
+            // Create vertices for medically accurate quad
             let quadVertices: [Float] = [
                 // Positions                                    // Texture coordinates
                 -quadSize.width, -quadSize.height,             0.0, 1.0,  // Bottom left
@@ -142,14 +159,50 @@ struct CTDisplayLayer: UIViewRepresentable {
                  quadSize.width,  quadSize.height,             1.0, 0.0   // Top right
             ]
             
-            print("🔍 CT Aspect: Quad size = \(String(format: "%.3f", quadSize.width))×\(String(format: "%.3f", quadSize.height))")
-            print("🔍 CT Aspect: Texture = \(Int(textureSize.width))×\(Int(textureSize.height)), View = \(Int(viewSize.width))×\(Int(viewSize.height))")
+            print("   ✅ Medical quad: \(String(format: "%.3f", quadSize.width))×\(String(format: "%.3f", quadSize.height)) (screen fraction)")
             
             vertexBuffer = device.makeBuffer(
                 bytes: quadVertices,
                 length: quadVertices.count * MemoryLayout<Float>.size,
                 options: []
             )
+            
+            // Update tracking variables
+            lastViewSize = viewSize
+            lastTextureSize = textureSize
+            lastPlane = plane
+            lastSpacing = dicomSpacing
+        }
+        
+        // MEDICAL-CRITICAL: Calculate physical dimensions using DICOM spacing
+        private func calculatePhysicalDimensions(
+            textureSize: CGSize,
+            plane: MPRPlane,
+            spacing: SIMD3<Float>
+        ) -> (width: Float, height: Float) {
+            
+            let pixelWidth = Float(textureSize.width)
+            let pixelHeight = Float(textureSize.height)
+            
+            switch plane {
+            case .axial:
+                // XY plane: X × Y dimensions
+                let physicalWidth = pixelWidth * spacing.x   // pixels × mm/pixel
+                let physicalHeight = pixelHeight * spacing.y
+                return (physicalWidth, physicalHeight)
+                
+            case .sagittal:
+                // YZ plane: Y × Z dimensions  
+                let physicalWidth = pixelWidth * spacing.y   // Y dimension (anterior-posterior)
+                let physicalHeight = pixelHeight * spacing.z // Z dimension (superior-inferior)
+                return (physicalWidth, physicalHeight)
+                
+            case .coronal:
+                // XZ plane: X × Z dimensions
+                let physicalWidth = pixelWidth * spacing.x   // X dimension (left-right)
+                let physicalHeight = pixelHeight * spacing.z // Z dimension (superior-inferior)
+                return (physicalWidth, physicalHeight)
+            }
         }
         
         func updateRenderingParameters(
@@ -158,7 +211,7 @@ struct CTDisplayLayer: UIViewRepresentable {
             windowLevel: CTWindowLevel,
             volumeData: VolumeData?
         ) {
-            print("🔍 CT Display: updateRenderingParameters called")
+            print("🔍 CT Medical Display: updateRenderingParameters called")
             print("   Plane: \(plane), VolumeData: \(volumeData != nil ? "present" : "nil")")
             
             self.currentCoordinateSystem = coordinateSystem
@@ -168,16 +221,16 @@ struct CTDisplayLayer: UIViewRepresentable {
             // Load volume data into renderer if provided
             if let volumeData = volumeData {
                 if currentVolumeData == nil {
-                    print("🔍 CT Display: Loading volume data...")
+                    print("🔍 CT Medical Display: Loading volume data...")
                     do {
                         if volumeRenderer == nil {
                             volumeRenderer = try MetalVolumeRenderer()
                         }
                         try volumeRenderer?.loadVolume(volumeData)
                         self.currentVolumeData = volumeData
-                        print("✅ CT Display: Volume data loaded successfully")
+                        print("✅ CT Medical Display: Volume data loaded successfully")
                     } catch {
-                        print("❌ CT Display: Failed to load volume data: \(error)")
+                        print("❌ CT Medical Display: Failed to load volume data: \(error)")
                     }
                 } else {
                     self.currentVolumeData = volumeData
@@ -188,30 +241,23 @@ struct CTDisplayLayer: UIViewRepresentable {
             cachedTexture = nil
             cacheKey = ""
             
-            print("🔍 CT Display: Parameters updated, cache cleared")
+            // MEDICAL-CRITICAL: Force vertex buffer regeneration for plane changes
+            if plane != lastPlane {
+                vertexBuffer = nil
+                print("🔍 CT Medical: Plane changed, forcing vertex buffer regeneration")
+            }
+            
+            print("🔍 CT Medical Display: Parameters updated, cache cleared")
         }
         
         // MARK: - MTKViewDelegate
         
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-            print("🔍 CT Aspect: Drawable size changed to \(Int(size.width))×\(Int(size.height))")
-            currentViewSize = size
+            print("🔍 CT Medical: Drawable size changed to \(Int(size.width))×\(Int(size.height))")
             
-            // Force vertex buffer regeneration on next draw
+            // MEDICAL-CRITICAL: Force vertex buffer regeneration on size changes
             vertexBuffer = nil
-        }
-        
-        private func getImageDimensions(for plane: MPRPlane, volumeData: VolumeData) -> (width: Int, height: Int) {
-            let dims = volumeData.dimensions
-            
-            switch plane {
-            case .axial:
-                return (dims.x, dims.y)  // 512x512
-            case .sagittal:
-                return (dims.y, dims.z)  // 512x53
-            case .coronal:
-                return (dims.x, dims.z)  // 512x53
-            }
+            lastViewSize = .zero // Reset to force recalculation
         }
         
         func draw(in view: MTKView) {
@@ -221,8 +267,7 @@ struct CTDisplayLayer: UIViewRepresentable {
                 return
             }
             
-            // Update current view size
-            currentViewSize = view.drawableSize
+            let currentViewSize = view.drawableSize
             
             // Get current slice from coordinate system
             guard let coordinateSystem = currentCoordinateSystem else {
@@ -261,10 +306,13 @@ struct CTDisplayLayer: UIViewRepresentable {
                     guard let self = self else { return }
                     self.cachedTexture = mprTexture
                     
-                    // FIXED: Update current texture size for aspect ratio calculation
+                    // MEDICAL-CRITICAL: Force vertex buffer regeneration for new texture
                     if let texture = mprTexture {
-                        self.currentTextureSize = CGSize(width: texture.width, height: texture.height)
-                        print("🔍 CT Aspect: New texture size = \(texture.width)×\(texture.height)")
+                        let newTextureSize = CGSize(width: texture.width, height: texture.height)
+                        if newTextureSize != self.lastTextureSize {
+                            self.vertexBuffer = nil
+                            print("🔍 CT Medical: Texture size changed, forcing vertex buffer regeneration")
+                        }
                     }
                     
                     // Trigger redraw on main thread
@@ -281,13 +329,27 @@ struct CTDisplayLayer: UIViewRepresentable {
                 return
             }
             
-            // FIXED: Update texture size and regenerate vertex buffer if needed
+            // MEDICAL-CRITICAL: Regenerate vertex buffer if needed
             let textureSize = CGSize(width: mprTexture.width, height: mprTexture.height)
-            if currentTextureSize != textureSize || vertexBuffer == nil {
-                currentTextureSize = textureSize
-                createAspectRatioPreservingQuad(
+            let needsRegeneration = (
+                vertexBuffer == nil ||
+                currentViewSize != lastViewSize ||
+                textureSize != lastTextureSize ||
+                currentPlane != lastPlane ||
+                currentVolumeData?.spacing != lastSpacing
+            )
+            
+            if needsRegeneration {
+                guard let volumeData = currentVolumeData else {
+                    displayLoadingState(drawable: drawable, commandQueue: commandQueue)
+                    return
+                }
+                
+                createMedicalAccurateQuad(
                     textureSize: textureSize,
                     viewSize: currentViewSize,
+                    plane: currentPlane,
+                    dicomSpacing: volumeData.spacing,
                     device: device
                 )
             }
@@ -295,7 +357,7 @@ struct CTDisplayLayer: UIViewRepresentable {
             displayTexture(mprTexture, drawable: drawable, commandQueue: commandQueue)
         }
         
-        // MARK: - Rendering Methods (FIXED - Using Dynamic Vertex Buffer)
+        // MARK: - Rendering Methods (MEDICAL-ACCURATE)
         
         private func displayTexture(_ texture: MTLTexture, drawable: CAMetalDrawable, commandQueue: MTLCommandQueue) {
             let commandBuffer = commandQueue.makeCommandBuffer()
@@ -308,7 +370,7 @@ struct CTDisplayLayer: UIViewRepresentable {
             
             guard let renderEncoder = commandBuffer?.makeRenderCommandEncoder(descriptor: renderPassDescriptor),
                   let pipelineState = displayPipelineState,
-                  let vertexBuffer = vertexBuffer else {  // FIXED: Use dynamic vertex buffer
+                  let vertexBuffer = vertexBuffer else {
                 commandBuffer?.present(drawable)
                 commandBuffer?.commit()
                 return
