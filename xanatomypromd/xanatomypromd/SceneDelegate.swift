@@ -40,15 +40,15 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
     
     private func setupPureSwiftUI(_ windowScene: UIWindowScene) {
-        // Pure SwiftUI approach - recommended for new projects
-        let contentView = DICOMViewerView()
+        // Pure SwiftUI approach - using new layered architecture
+        let contentView = XAnatomyProMainView()
             .preferredColorScheme(.dark)
             .statusBarHidden(true)
         
         window?.rootViewController = UIHostingController(rootView: contentView)
         window?.makeKeyAndVisible()
         
-        print("📱 Pure SwiftUI integration initialized")
+        print("📱 Clean layered architecture initialized")
     }
     
     private func setupHybridApproach(_ windowScene: UIWindowScene) {
