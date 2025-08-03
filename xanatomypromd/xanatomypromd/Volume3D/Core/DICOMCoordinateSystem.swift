@@ -2,130 +2,309 @@ import Foundation
 import SwiftUI
 import simd
 
-// MARK: - DICOM Coordinate System Authority
-// THE single source of truth for all spatial transformations in the app
-// All layers MUST use this for coordinate conversions to ensure alignment
+// MARK: - Universal DICOM Coordinate System (Scan-Agnostic)
+// THE SINGLE source of truth for ALL spatial transformations in the app
+// Works with ANY scan: 53-slice test, 500+ slice production, any dimensions/spacing
 
 @MainActor
 class DICOMCoordinateSystem: ObservableObject {
     
-    // MARK: - DICOM Volume Properties (Authoritative)
+    // MARK: - Dynamic DICOM Volume Properties (Adapts to Any Scan)
     
-    /// Volume origin in patient coordinates (mm) - from DICOM ImagePositionPatient
-    @Published var volumeOrigin: SIMD3<Float>
+    /// Volume data source - contains ALL scan-specific parameters
+    private var volumeData: VolumeData?
     
-    /// Voxel spacing in mm (x, y, z) - from DICOM PixelSpacing + SliceThickness
-    @Published var volumeSpacing: SIMD3<Float>
-    
-    /// Volume dimensions in voxels (width, height, depth) - from DICOM matrix
-    @Published var volumeDimensions: SIMD3<Int>
-    
-    /// Current 3D world position in patient coordinates (mm)
+    /// Current 3D world position in DICOM patient coordinates (mm)
     @Published var currentWorldPosition: SIMD3<Float>
     
-    // MARK: - Initialization
+    // MARK: - Computed Properties (Always Current)
     
-    init(
-        volumeOrigin: SIMD3<Float> = SIMD3<Float>(0, 0, 0),
-        volumeSpacing: SIMD3<Float> = SIMD3<Float>(0.7, 0.7, 3.0),
-        volumeDimensions: SIMD3<Int> = SIMD3<Int>(512, 512, 53)
-    ) {
-        self.volumeOrigin = volumeOrigin
-        self.volumeSpacing = volumeSpacing
-        self.volumeDimensions = volumeDimensions
-        
-        // Initialize at center of volume
-        let centerX = volumeOrigin.x + (Float(volumeDimensions.x) * volumeSpacing.x) / 2.0
-        let centerY = volumeOrigin.y + (Float(volumeDimensions.y) * volumeSpacing.y) / 2.0
-        let centerZ = volumeOrigin.z + (Float(volumeDimensions.z) * volumeSpacing.z) / 2.0
-        
-        self.currentWorldPosition = SIMD3<Float>(centerX, centerY, centerZ)
-        
-        print("🏥 DICOM Coordinate System initialized:")
-        print("   Origin: \(volumeOrigin) mm")
-        print("   Spacing: \(volumeSpacing) mm")
-        print("   Dimensions: \(volumeDimensions) voxels")
-        print("   Center: \(currentWorldPosition) mm")
+    /// Volume origin in patient coordinates (mm) - dynamic based on loaded scan
+    var volumeOrigin: SIMD3<Float> {
+        return volumeData?.origin ?? SIMD3<Float>(0, 0, 0)
     }
     
-    /// Initialize coordinate system from loaded volume data
+    /// Voxel spacing in mm (x, y, z) - dynamic based on loaded scan
+    var volumeSpacing: SIMD3<Float> {
+        return volumeData?.spacing ?? SIMD3<Float>(1.0, 1.0, 1.0)
+    }
+    
+    /// Volume dimensions in voxels - dynamic based on loaded scan
+    var volumeDimensions: SIMD3<Int> {
+        return volumeData?.dimensions ?? SIMD3<Int>(512, 512, 53)
+    }
+    
+    /// Physical volume size in mm - computed from dimensions and spacing
+    var physicalVolumeSize: SIMD3<Float> {
+        return SIMD3<Float>(
+            Float(volumeDimensions.x) * volumeSpacing.x,
+            Float(volumeDimensions.y) * volumeSpacing.y,
+            Float(volumeDimensions.z) * volumeSpacing.z
+        )
+    }
+    
+    /// Volume bounds in world coordinates (min, max)
+    var volumeBounds: (min: SIMD3<Float>, max: SIMD3<Float>) {
+        let minBounds = volumeOrigin
+        let maxBounds = volumeOrigin + physicalVolumeSize
+        return (min: minBounds, max: maxBounds)
+    }
+    
+    // MARK: - Initialization (Scan-Agnostic)
+    
+    init() {
+        // Initialize at origin - will be updated when volume loads
+        self.currentWorldPosition = SIMD3<Float>(0, 0, 0)
+        
+        print("🏥 Universal DICOM Coordinate System initialized (no scan loaded)")
+    }
+    
+    /// Initialize coordinate system from ANY loaded volume data
     func initializeFromVolumeData(_ volumeData: VolumeData) {
-        // Update with real DICOM data
-        volumeOrigin = volumeData.origin
-        volumeSpacing = volumeData.spacing
-        volumeDimensions = volumeData.dimensions
+        self.volumeData = volumeData
         
-        // Calculate center position using real volume data
-        let centerX = volumeOrigin.x + (Float(volumeDimensions.x) * volumeSpacing.x) / 2.0
-        let centerY = volumeOrigin.y + (Float(volumeDimensions.y) * volumeSpacing.y) / 2.0
-        let centerZ = volumeOrigin.z + (Float(volumeDimensions.z) * volumeSpacing.z) / 2.0
+        // Calculate center position using real volume data (works for any scan)
+        let centerPosition = volumeOrigin + physicalVolumeSize / 2.0
+        self.currentWorldPosition = centerPosition
         
-        currentWorldPosition = SIMD3<Float>(centerX, centerY, centerZ)
-        
-        print("🔄 Coordinate system updated with real DICOM volume:")
-        print("   Real Origin: \(volumeOrigin) mm")
-        print("   Real Spacing: \(volumeSpacing) mm")
-        print("   Real Dimensions: \(volumeDimensions) voxels")
-        print("   New Center: \(currentWorldPosition) mm")
+        print("🔄 Coordinate system updated with scan data:")
+        print("   📊 Dimensions: \(volumeDimensions) voxels")
+        print("   📏 Spacing: \(volumeSpacing) mm/voxel")
+        print("   📍 Origin: \(volumeOrigin) mm")
+        print("   📐 Physical size: \(physicalVolumeSize) mm")
+        print("   🎯 Center position: \(currentWorldPosition) mm")
+        print("   🗺️ Bounds: \(volumeBounds.min) to \(volumeBounds.max)")
     }
     
-    // MARK: - AUTHORITATIVE Coordinate Transformations
+    // MARK: - AUTHORITATIVE Coordinate Transformations (Works with Any Scan)
     
-    /// Convert world position (mm) to slice index for given plane
-    func worldToSliceIndex(position: SIMD3<Float>, plane: MPRPlane) -> Int {
-        let axis = plane.sliceAxis
-        let coordinate = position[axis]
-        let sliceIndex = Int((coordinate - volumeOrigin[axis]) / volumeSpacing[axis])
-        let maxSlice = volumeDimensions[axis] - 1
-        return max(0, min(sliceIndex, maxSlice))
+    /// Convert world position (mm) to voxel coordinates (for any scan)
+    func worldToVoxel(_ worldPos: SIMD3<Float>) -> SIMD3<Float> {
+        return (worldPos - volumeOrigin) / volumeSpacing
     }
     
-    /// Convert slice index to world position (mm) for given plane
-    func sliceIndexToWorld(index: Int, plane: MPRPlane) -> Float {
-        let axis = plane.sliceAxis
-        let clampedIndex = max(0, min(index, volumeDimensions[axis] - 1))
-        return volumeOrigin[axis] + Float(clampedIndex) * volumeSpacing[axis]
+    /// Convert voxel coordinates to world position (mm) (for any scan)
+    func voxelToWorld(_ voxelPos: SIMD3<Float>) -> SIMD3<Float> {
+        return volumeOrigin + (voxelPos * volumeSpacing)
     }
     
-    /// Convert world position (mm) to screen coordinates for given plane and view size
-    func worldToScreen(position: SIMD3<Float>, plane: MPRPlane, viewSize: CGSize) -> CGPoint {
-        let axes = plane.planeAxes
-        let coord1 = position[axes.0]
-        let coord2 = position[axes.1]
+    /// Convert world position to normalized coordinates [0,1] (for any scan)
+    func worldToNormalized(_ worldPos: SIMD3<Float>) -> SIMD3<Float> {
+        let voxelPos = worldToVoxel(worldPos)
+        return SIMD3<Float>(
+            voxelPos.x / Float(volumeDimensions.x - 1),
+            voxelPos.y / Float(volumeDimensions.y - 1),
+            voxelPos.z / Float(volumeDimensions.z - 1)
+        )
+    }
+    
+    /// Convert normalized coordinates [0,1] to world position (for any scan)
+    func normalizedToWorld(_ normalizedPos: SIMD3<Float>) -> SIMD3<Float> {
+        let voxelPos = SIMD3<Float>(
+            normalizedPos.x * Float(volumeDimensions.x - 1),
+            normalizedPos.y * Float(volumeDimensions.y - 1),
+            normalizedPos.z * Float(volumeDimensions.z - 1)
+        )
+        return voxelToWorld(voxelPos)
+    }
+    
+    /// Get slice index for current position in given plane (for any scan)
+    func getCurrentSliceIndex(for plane: MPRPlane) -> Int {
+        let voxelPos = worldToVoxel(currentWorldPosition)
+        let sliceAxis = plane.sliceAxis
+        let sliceIndex = Int(round(voxelPos[sliceAxis]))
+        return max(0, min(sliceIndex, volumeDimensions[sliceAxis] - 1))
+    }
+    
+    /// Get maximum slices for given plane (for any scan)
+    func getMaxSlices(for plane: MPRPlane) -> Int {
+        return volumeDimensions[plane.sliceAxis]
+    }
+    
+    /// Convert world position to screen coordinates for given plane and view size
+    func worldToScreen(
+        position: SIMD3<Float>,
+        plane: MPRPlane,
+        viewSize: CGSize,
+        imageBounds: CGRect? = nil
+    ) -> CGPoint {
         
-        // Convert to normalized coordinates (0-1) within volume bounds
-        let norm1 = (coord1 - volumeOrigin[axes.0]) / (Float(volumeDimensions[axes.0]) * volumeSpacing[axes.0])
-        let norm2 = (coord2 - volumeOrigin[axes.1]) / (Float(volumeDimensions[axes.1]) * volumeSpacing[axes.1])
+        // Get 2D coordinates for this plane
+        let planeCoords = extractPlaneCoordinates(worldPos: position, plane: plane)
+        let normalizedCoords = normalizePlaneCoordinates(planeCoords: planeCoords, plane: plane)
+        
+        // Use provided image bounds or calculate them
+        let bounds = imageBounds ?? calculateImageBounds(plane: plane, viewSize: viewSize)
         
         // Convert to screen coordinates
-        let screenX = Double(norm1) * viewSize.width
-        let screenY = Double(norm2) * viewSize.height
+        let screenX = bounds.minX + (CGFloat(normalizedCoords.x) * bounds.width)
+        let screenY = bounds.minY + (CGFloat(normalizedCoords.y) * bounds.height)
         
         return CGPoint(x: screenX, y: screenY)
     }
     
     /// Convert screen coordinates to world position for given plane
-    func screenToWorld(screenPoint: CGPoint, plane: MPRPlane, viewSize: CGSize) -> SIMD3<Float> {
-        let axes = plane.planeAxes
+    func screenToWorld(
+        screenPoint: CGPoint,
+        plane: MPRPlane,
+        viewSize: CGSize,
+        imageBounds: CGRect? = nil
+    ) -> SIMD3<Float> {
         
-        // Convert screen to normalized coordinates
-        let norm1 = Float(screenPoint.x / viewSize.width)
-        let norm2 = Float(screenPoint.y / viewSize.height)
+        // Use provided image bounds or calculate them
+        let bounds = imageBounds ?? calculateImageBounds(plane: plane, viewSize: viewSize)
+        
+        // Check if point is within bounds
+        guard bounds.contains(screenPoint) else {
+            print("🎯 Screen point outside image bounds: \(screenPoint) not in \(bounds)")
+            return currentWorldPosition
+        }
+        
+        // Convert screen to normalized coordinates [0,1]
+        let normalizedX = Float((screenPoint.x - bounds.minX) / bounds.width)
+        let normalizedY = Float((screenPoint.y - bounds.minY) / bounds.height)
+        let normalizedCoords = SIMD2<Float>(normalizedX, normalizedY)
+        
+        // Convert to world coordinates for this plane
+        return convertPlaneToWorldCoordinates(
+            normalizedCoords: normalizedCoords,
+            plane: plane,
+            currentWorldPos: currentWorldPosition
+        )
+    }
+    
+    // MARK: - Plane-Specific Coordinate Helpers (Works with Any Scan)
+    
+    /// Extract 2D coordinates from 3D world position for given plane
+    private func extractPlaneCoordinates(worldPos: SIMD3<Float>, plane: MPRPlane) -> SIMD2<Float> {
+        switch plane {
+        case .axial:    // XY plane
+            return SIMD2<Float>(worldPos.x, worldPos.y)
+        case .sagittal: // YZ plane
+            return SIMD2<Float>(worldPos.y, worldPos.z)
+        case .coronal:  // XZ plane
+            return SIMD2<Float>(worldPos.x, worldPos.z)
+        }
+    }
+    
+    /// Normalize plane coordinates to [0,1] range
+    private func normalizePlaneCoordinates(planeCoords: SIMD2<Float>, plane: MPRPlane) -> SIMD2<Float> {
+        let voxelCoords = (planeCoords - getPlaneOrigin(plane: plane)) / getPlaneSpacing(plane: plane)
+        let planeDims = getPlaneDimensions(plane: plane)
+        
+        return SIMD2<Float>(
+            voxelCoords.x / Float(planeDims.x - 1),
+            voxelCoords.y / Float(planeDims.y - 1)
+        )
+    }
+    
+    /// Convert normalized plane coordinates back to 3D world position
+    private func convertPlaneToWorldCoordinates(
+        normalizedCoords: SIMD2<Float>,
+        plane: MPRPlane,
+        currentWorldPos: SIMD3<Float>
+    ) -> SIMD3<Float> {
+        
+        // Convert normalized to voxel coordinates
+        let planeDims = getPlaneDimensions(plane: plane)
+        let voxelCoords = SIMD2<Float>(
+            normalizedCoords.x * Float(planeDims.x - 1),
+            normalizedCoords.y * Float(planeDims.y - 1)
+        )
         
         // Convert to world coordinates
-        let coord1 = volumeOrigin[axes.0] + norm1 * Float(volumeDimensions[axes.0]) * volumeSpacing[axes.0]
-        let coord2 = volumeOrigin[axes.1] + norm2 * Float(volumeDimensions[axes.1]) * volumeSpacing[axes.1]
+        let planeOrigin = getPlaneOrigin(plane: plane)
+        let planeSpacing = getPlaneSpacing(plane: plane)
+        let worldCoords = planeOrigin + (voxelCoords * planeSpacing)
         
-        // Current position for the slice axis
-        let sliceCoord = currentWorldPosition[plane.sliceAxis]
+        // Build 3D world position
+        var newWorldPos = currentWorldPos
         
-        // Build 3D position
-        var worldPos = currentWorldPosition
-        worldPos[axes.0] = coord1
-        worldPos[axes.1] = coord2
-        worldPos[plane.sliceAxis] = sliceCoord
+        switch plane {
+        case .axial:    // XY plane - update X,Y, keep Z
+            newWorldPos.x = worldCoords.x
+            newWorldPos.y = worldCoords.y
+        case .sagittal: // YZ plane - update Y,Z, keep X
+            newWorldPos.y = worldCoords.x
+            newWorldPos.z = worldCoords.y
+        case .coronal:  // XZ plane - update X,Z, keep Y
+            newWorldPos.x = worldCoords.x
+            newWorldPos.z = worldCoords.y
+        }
         
-        return worldPos
+        return newWorldPos
+    }
+    
+    /// Get 2D origin for given plane
+    private func getPlaneOrigin(plane: MPRPlane) -> SIMD2<Float> {
+        switch plane {
+        case .axial:    return SIMD2<Float>(volumeOrigin.x, volumeOrigin.y)
+        case .sagittal: return SIMD2<Float>(volumeOrigin.y, volumeOrigin.z)
+        case .coronal:  return SIMD2<Float>(volumeOrigin.x, volumeOrigin.z)
+        }
+    }
+    
+    /// Get 2D spacing for given plane
+    private func getPlaneSpacing(plane: MPRPlane) -> SIMD2<Float> {
+        switch plane {
+        case .axial:    return SIMD2<Float>(volumeSpacing.x, volumeSpacing.y)
+        case .sagittal: return SIMD2<Float>(volumeSpacing.y, volumeSpacing.z)
+        case .coronal:  return SIMD2<Float>(volumeSpacing.x, volumeSpacing.z)
+        }
+    }
+    
+    /// Get 2D dimensions for given plane
+    private func getPlaneDimensions(plane: MPRPlane) -> SIMD2<Int> {
+        switch plane {
+        case .axial:    return SIMD2<Int>(volumeDimensions.x, volumeDimensions.y)
+        case .sagittal: return SIMD2<Int>(volumeDimensions.y, volumeDimensions.z)
+        case .coronal:  return SIMD2<Int>(volumeDimensions.x, volumeDimensions.z)
+        }
+    }
+    
+    // MARK: - Image Bounds Calculation (Medical Accurate)
+    
+    /// Calculate medical image bounds within view (same logic as CTDisplayLayer)
+    func calculateImageBounds(plane: MPRPlane, viewSize: CGSize) -> CGRect {
+        guard let volumeData = volumeData else {
+            return CGRect(origin: .zero, size: viewSize)
+        }
+        
+        // Get plane dimensions and calculate physical size
+        let planeDims = getPlaneDimensions(plane: plane)
+        let planeSpacing = getPlaneSpacing(plane: plane)
+        
+        let physicalWidth = Float(planeDims.x) * planeSpacing.x
+        let physicalHeight = Float(planeDims.y) * planeSpacing.y
+        
+        // Calculate aspect ratios
+        let physicalAspect = physicalWidth / physicalHeight
+        let viewAspect = Float(viewSize.width / viewSize.height)
+        
+        // Calculate letterbox bounds
+        let quadSize: (width: Float, height: Float)
+        
+        if physicalAspect > viewAspect {
+            // Image is physically wider - letterbox top/bottom
+            quadSize = (1.0, viewAspect / physicalAspect)
+        } else {
+            // Image is physically taller - letterbox left/right
+            quadSize = (physicalAspect / viewAspect, 1.0)
+        }
+        
+        // Convert to screen pixel bounds
+        let quadWidthPixels = CGFloat(quadSize.width) * viewSize.width
+        let quadHeightPixels = CGFloat(quadSize.height) * viewSize.height
+        
+        let quadX = (viewSize.width - quadWidthPixels) / 2.0
+        let quadY = (viewSize.height - quadHeightPixels) / 2.0
+        
+        return CGRect(
+            x: quadX,
+            y: quadY,
+            width: quadWidthPixels,
+            height: quadHeightPixels
+        )
     }
     
     // MARK: - Position Updates (Thread-Safe)
@@ -133,89 +312,95 @@ class DICOMCoordinateSystem: ObservableObject {
     /// Update world position - broadcasts to all layers
     func updateWorldPosition(_ newPosition: SIMD3<Float>) {
         // Clamp to volume bounds
-        let clampedX = max(volumeOrigin.x, min(newPosition.x, volumeOrigin.x + Float(volumeDimensions.x) * volumeSpacing.x))
-        let clampedY = max(volumeOrigin.y, min(newPosition.y, volumeOrigin.y + Float(volumeDimensions.y) * volumeSpacing.y))
-        let clampedZ = max(volumeOrigin.z, min(newPosition.z, volumeOrigin.z + Float(volumeDimensions.z) * volumeSpacing.z))
+        let bounds = volumeBounds
+        let clampedPosition = SIMD3<Float>(
+            max(bounds.min.x, min(newPosition.x, bounds.max.x)),
+            max(bounds.min.y, min(newPosition.y, bounds.max.y)),
+            max(bounds.min.z, min(newPosition.z, bounds.max.z))
+        )
         
-        currentWorldPosition = SIMD3<Float>(clampedX, clampedY, clampedZ)
+        currentWorldPosition = clampedPosition
         
-        // Validate coordinate alignment
-        validateCoordinateAlignment()
+        print("🎯 Position updated: \(clampedPosition) mm")
+        print("   📐 Slices: AX=\(getCurrentSliceIndex(for: .axial)), SAG=\(getCurrentSliceIndex(for: .sagittal)), COR=\(getCurrentSliceIndex(for: .coronal))")
     }
     
     /// Update position from slice scrolling in specific plane
     func updateFromSliceScroll(plane: MPRPlane, sliceIndex: Int) {
-        let newCoordinate = sliceIndexToWorld(index: sliceIndex, plane: plane)
-        let axis = plane.sliceAxis
+        let maxSlice = getMaxSlices(for: plane) - 1
+        let clampedIndex = max(0, min(sliceIndex, maxSlice))
         
+        // Convert slice index to voxel coordinate
+        let voxelCoord = Float(clampedIndex)
+        
+        // Convert to world coordinate
+        let sliceAxis = plane.sliceAxis
+        let worldCoord = volumeOrigin[sliceAxis] + (voxelCoord * volumeSpacing[sliceAxis])
+        
+        // Update position
         var newPosition = currentWorldPosition
-        newPosition[axis] = newCoordinate
+        newPosition[sliceAxis] = worldCoord
         
         updateWorldPosition(newPosition)
     }
     
-    // MARK: - Layer Queries (Used by all layers)
-    
-    /// Get current slice index for given plane
-    func getCurrentSliceIndex(for plane: MPRPlane) -> Int {
-        return worldToSliceIndex(position: currentWorldPosition, plane: plane)
-    }
-    
-    /// Get maximum slices for given plane
-    func getMaxSlices(for plane: MPRPlane) -> Int {
-        return volumeDimensions[plane.sliceAxis]
-    }
-    
-    /// Get current slice position in mm for given plane
-    func getCurrentSlicePosition(for plane: MPRPlane) -> Float {
-        return currentWorldPosition[plane.sliceAxis]
-    }
-    
-    // MARK: - Volume Bounds
+    // MARK: - Validation & Debugging
     
     /// Check if world position is within volume bounds
     func isWithinVolumeBounds(_ position: SIMD3<Float>) -> Bool {
-        let minBounds = volumeOrigin
-        let maxBounds = volumeOrigin + SIMD3<Float>(
-            Float(volumeDimensions.x) * volumeSpacing.x,
-            Float(volumeDimensions.y) * volumeSpacing.y,
-            Float(volumeDimensions.z) * volumeSpacing.z
-        )
-        
-        return position.x >= minBounds.x && position.x <= maxBounds.x &&
-               position.y >= minBounds.y && position.y <= maxBounds.y &&
-               position.z >= minBounds.z && position.z <= maxBounds.z
-    }
-    
-    // MARK: - Validation & Debugging
-    
-    /// Validate that all coordinate transformations are consistent
-    private func validateCoordinateAlignment() {
-        // Test round-trip conversions
-        for plane in [MPRPlane.axial, MPRPlane.sagittal, MPRPlane.coronal] {
-            let sliceIndex = getCurrentSliceIndex(for: plane)
-            let backToWorld = sliceIndexToWorld(index: sliceIndex, plane: plane)
-            let originalCoord = currentWorldPosition[plane.sliceAxis]
-            
-            let error = abs(backToWorld - originalCoord)
-            if error > volumeSpacing[plane.sliceAxis] * 0.1 { // 10% tolerance
-                print("⚠️ Coordinate alignment error in \(plane): \(error)mm")
-            }
-        }
+        let bounds = volumeBounds
+        return position.x >= bounds.min.x && position.x <= bounds.max.x &&
+               position.y >= bounds.min.y && position.y <= bounds.max.y &&
+               position.z >= bounds.min.z && position.z <= bounds.max.z
     }
     
     /// Get debug information for current state
     func getDebugInfo() -> String {
+        guard volumeData != nil else {
+            return "🏥 No volume data loaded"
+        }
+        
         let axialSlice = getCurrentSliceIndex(for: .axial)
         let sagittalSlice = getCurrentSliceIndex(for: .sagittal)
         let coronalSlice = getCurrentSliceIndex(for: .coronal)
         
         return """
         🏥 DICOM Coordinates: (\(String(format: "%.1f", currentWorldPosition.x)), \(String(format: "%.1f", currentWorldPosition.y)), \(String(format: "%.1f", currentWorldPosition.z))) mm
-        📐 Slice Indices: AX=\(axialSlice), SAG=\(sagittalSlice), COR=\(coronalSlice)
+        📐 Slice Indices: AX=\(axialSlice)/\(getMaxSlices(for: .axial)-1), SAG=\(sagittalSlice)/\(getMaxSlices(for: .sagittal)-1), COR=\(coronalSlice)/\(getMaxSlices(for: .coronal)-1)
         📏 Volume: \(volumeDimensions) @ \(volumeSpacing)mm spacing
+        📊 Physical size: \(physicalVolumeSize) mm
         """
     }
 }
 
+// MARK: - MPRPlane Extensions for Coordinate System
 
+extension MPRPlane {
+    
+    /// Get the slice axis index for this plane (0=X, 1=Y, 2=Z)
+    var sliceAxis: Int {
+        switch self {
+        case .axial:    return 2  // Z-axis (varies with axial slices)
+        case .sagittal: return 0  // X-axis (varies with sagittal slices)
+        case .coronal:  return 1  // Y-axis (varies with coronal slices)
+        }
+    }
+    
+    /// Get the in-plane axes for this plane
+    var planeAxes: (Int, Int) {
+        switch self {
+        case .axial:    return (0, 1)  // X,Y plane
+        case .sagittal: return (1, 2)  // Y,Z plane
+        case .coronal:  return (0, 2)  // X,Z plane
+        }
+    }
+    
+    /// Get display name for this plane
+    var displayName: String {
+        switch self {
+        case .axial:    return "Axial"
+        case .sagittal: return "Sagittal"
+        case .coronal:  return "Coronal"
+        }
+    }
+}
