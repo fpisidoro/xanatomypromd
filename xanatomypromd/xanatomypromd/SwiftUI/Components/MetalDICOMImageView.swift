@@ -106,11 +106,13 @@ struct MetalDICOMImageView: UIViewRepresentable {
             self.currentWindowingPreset = windowingPreset
             
             // Load volume data if available
-            if let volumeData = viewModel.getVolumeData(), let volumeRenderer = volumeRenderer {
-                do {
-                    try volumeRenderer.loadVolume(volumeData)
-                } catch {
-                    // Volume loading failed
+            Task { @MainActor in
+                if let volumeData = viewModel.getVolumeData(), let volumeRenderer = volumeRenderer {
+                    do {
+                        try volumeRenderer.loadVolume(volumeData)
+                    } catch {
+                        // Volume loading failed
+                    }
                 }
             }
             
@@ -119,11 +121,17 @@ struct MetalDICOMImageView: UIViewRepresentable {
         }
         
         private func updateAspectRatio() {
-            guard let volumeData = volumeRenderer?.volumeData,
-                  let device = MTLCreateSystemDefaultDevice() else {
-                return
+            Task { @MainActor in
+                guard let volumeData = volumeRenderer?.volumeData,
+                      let device = MTLCreateSystemDefaultDevice() else {
+                    return
+                }
+                
+                await performAspectRatioUpdate(volumeData: volumeData, device: device)
             }
-            
+        }
+        
+        private func performAspectRatioUpdate(volumeData: VolumeData, device: MTLDevice) async {
             // Calculate correct aspect ratio using physical spacing
             let dimensions = volumeData.dimensions
             let spacing = volumeData.spacing
