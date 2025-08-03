@@ -29,18 +29,16 @@ vertex VertexOut vertex_simple(const device float4* vertices [[buffer(0)]],
 }
 
 vertex VertexOut vertex_main(const device float4* vertices [[buffer(0)]],
-                            const device AspectRatioUniforms* aspectUniforms [[buffer(1)]],
+                            constant AspectRatioUniforms& aspectUniforms [[buffer(1)]],
                             uint vid [[vertex_id]]) {
     VertexOut out;
     
     float4 vertex = vertices[vid];
     float2 position = vertex.xy;
     
-    if (aspectUniforms != nullptr) {
-        position.x *= aspectUniforms->scaleX;
-        position.y *= aspectUniforms->scaleY;
-        position += aspectUniforms->offset;
-    }
+    position.x *= aspectUniforms.scaleX;
+    position.y *= aspectUniforms.scaleY;
+    position += aspectUniforms.offset;
     
     out.position = float4(position, 0.0, 1.0);
     out.texCoord = vertex.zw;
@@ -86,7 +84,6 @@ kernel void ct_windowing(texture2d<half, access::read> inputTexture [[texture(0)
     float hounsfield = pixelValue * rescaleSlope + rescaleIntercept;
     
     float windowMin = windowCenter - windowWidth / 2.0;
-    float windowMax = windowCenter + windowWidth / 2.0;
     
     float normalizedValue = clamp((hounsfield - windowMin) / windowWidth, 0.0, 1.0);
     
@@ -114,26 +111,20 @@ kernel void generate_mpr_slice(texture3d<float, access::sample> volumeTexture [[
     float2 normalizedPos = float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height());
     
     float3 texCoord;
-    switch (planeType) {
-        case 0:
-            texCoord = float3(normalizedPos.x, normalizedPos.y, slicePosition);
-            break;
-        case 1:
-            texCoord = float3(slicePosition, normalizedPos.x, normalizedPos.y);
-            break;
-        case 2:
-            texCoord = float3(normalizedPos.x, slicePosition, normalizedPos.y);
-            break;
-        default:
-            texCoord = float3(normalizedPos.x, normalizedPos.y, slicePosition);
-            break;
+    if (planeType == 0) {
+        texCoord = float3(normalizedPos.x, normalizedPos.y, slicePosition);
+    } else if (planeType == 1) {
+        texCoord = float3(slicePosition, normalizedPos.x, normalizedPos.y);
+    } else if (planeType == 2) {
+        texCoord = float3(normalizedPos.x, slicePosition, normalizedPos.y);
+    } else {
+        texCoord = float3(normalizedPos.x, normalizedPos.y, slicePosition);
     }
     
     float4 sampledValue = volumeTexture.sample(volumeSampler, texCoord);
     float hounsfield = sampledValue.r;
     
     float windowMin = windowCenter - windowWidth / 2.0;
-    float windowMax = windowCenter + windowWidth / 2.0;
     
     float normalizedValue = clamp((hounsfield - windowMin) / windowWidth, 0.0, 1.0);
     
@@ -158,19 +149,14 @@ kernel void generate_mpr_slice_manual(texture3d<half, access::read> volumeTextur
     float2 normalizedPos = float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height());
     
     float3 volumeCoord;
-    switch (planeType) {
-        case 0:
-            volumeCoord = float3(normalizedPos.x, normalizedPos.y, slicePosition) * float3(volumeDims);
-            break;
-        case 1:
-            volumeCoord = float3(slicePosition, normalizedPos.x, normalizedPos.y) * float3(volumeDims);
-            break;
-        case 2:
-            volumeCoord = float3(normalizedPos.x, slicePosition, normalizedPos.y) * float3(volumeDims);
-            break;
-        default:
-            volumeCoord = float3(normalizedPos.x, normalizedPos.y, slicePosition) * float3(volumeDims);
-            break;
+    if (planeType == 0) {
+        volumeCoord = float3(normalizedPos.x, normalizedPos.y, slicePosition) * float3(volumeDims);
+    } else if (planeType == 1) {
+        volumeCoord = float3(slicePosition, normalizedPos.x, normalizedPos.y) * float3(volumeDims);
+    } else if (planeType == 2) {
+        volumeCoord = float3(normalizedPos.x, slicePosition, normalizedPos.y) * float3(volumeDims);
+    } else {
+        volumeCoord = float3(normalizedPos.x, normalizedPos.y, slicePosition) * float3(volumeDims);
     }
     
     volumeCoord = clamp(volumeCoord, float3(0.0), float3(volumeDims) - 1.0);
@@ -200,7 +186,6 @@ kernel void generate_mpr_slice_manual(texture3d<half, access::read> volumeTextur
     float hounsfield = float(finalValue);
     
     float windowMin = windowCenter - windowWidth / 2.0;
-    float windowMax = windowCenter + windowWidth / 2.0;
     
     float normalizedValue = clamp((hounsfield - windowMin) / windowWidth, 0.0, 1.0);
     
