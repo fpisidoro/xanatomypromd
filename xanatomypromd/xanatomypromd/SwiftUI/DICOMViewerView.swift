@@ -67,6 +67,15 @@ struct DICOMViewerView: View {
             Task {
                 await viewModel.loadDICOMSeries()
                 isLoading = false
+                
+                // Initialize crosshair position when volume is loaded
+                if let volumeData = viewModel.getVolumeData() {
+                    crosshairManager.updateVolumeParameters(
+                        dimensions: volumeData.dimensions,
+                        spacing: volumeData.spacing,
+                        origin: volumeData.origin
+                    )
+                }
             }
         }
         .preferredColorScheme(.dark)
