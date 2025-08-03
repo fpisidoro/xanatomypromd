@@ -197,33 +197,4 @@ class DICOMCoordinateSystem: ObservableObject {
     }
 }
 
-// MARK: - MPR Plane Extensions for Coordinate System
 
-extension MPRPlane {
-    /// Get the slice axis (0=X, 1=Y, 2=Z) for this plane
-    var sliceAxis: Int {
-        switch self {
-        case .axial: return 2    // Z-axis (superior-inferior)
-        case .sagittal: return 0 // X-axis (left-right)
-        case .coronal: return 1  // Y-axis (anterior-posterior)
-        }
-    }
-    
-    /// Get the in-plane axes (X,Y axes) for this plane
-    var planeAxes: (Int, Int) {
-        switch self {
-        case .axial: return (0, 1)    // X-Y plane
-        case .sagittal: return (1, 2) // Y-Z plane
-        case .coronal: return (0, 2)  // X-Z plane
-        }
-    }
-    
-    /// Human-readable display name
-    var displayName: String {
-        switch self {
-        case .axial: return "Axial"
-        case .sagittal: return "Sagittal"
-        case .coronal: return "Coronal"
-        }
-    }
-}
