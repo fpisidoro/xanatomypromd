@@ -29,11 +29,14 @@ struct CTDisplayLayer: UIViewRepresentable {
         mtkView.device = MTLCreateSystemDefaultDevice()
         mtkView.delegate = context.coordinator
         mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
-        // Don't hardcode drawable size - let SwiftUI handle sizing
         mtkView.framebufferOnly = false
         mtkView.backgroundColor = UIColor.black
-        // Enable proper scaling for medical imaging
-        mtkView.contentScaleFactor = UIScreen.main.scale
+        
+        // CRITICAL: Maintain medical imaging accuracy
+        // Never stretch or distort - preserve true pixel aspect ratio
+        mtkView.contentMode = .scaleAspectFit  // Maintain aspect ratio, add letterboxing if needed
+        mtkView.contentScaleFactor = 1.0  // 1:1 pixel mapping
+        
         return mtkView
     }
     
@@ -161,7 +164,30 @@ struct CTDisplayLayer: UIViewRepresentable {
         // MARK: - MTKViewDelegate
         
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-            // Handle size changes if needed
+            // CRITICAL FOR MEDICAL IMAGING:
+            // Do NOT use frame size - use actual image dimensions to maintain pixel accuracy
+            guard let volumeData = currentVolumeData else { return }
+            
+            let imageDimensions = getImageDimensions(for: currentPlane, volumeData: volumeData)
+            let imageSize = CGSize(width: imageDimensions.width, height: imageDimensions.height)
+            
+            // Set drawable to match actual image pixels, not frame
+            view.drawableSize = imageSize
+            
+            print("📏 Medical Imaging: Drawable size set to actual image dimensions: \(imageSize)")
+        }
+        
+        private func getImageDimensions(for plane: MPRPlane, volumeData: VolumeData) -> (width: Int, height: Int) {
+            let dims = volumeData.dimensions
+            
+            switch plane {
+            case .axial:
+                return (dims.x, dims.y)  // 512x512
+            case .sagittal:
+                return (dims.y, dims.z)  // 512x53
+            case .coronal:
+                return (dims.x, dims.z)  // 512x53
+            }
         }
         
         func draw(in view: MTKView) {
