@@ -574,9 +574,9 @@ class XAnatomyDataManager: ObservableObject {
                 let data = try Data(contentsOf: firstFile)
                 let dataset = try DICOMParser.parse(data)
                 
-                let patientName = dataset.stringValue(for: DICOMTag.patientName) ?? "Unknown Patient"
-                let studyDate = dataset.stringValue(for: DICOMTag.studyDate) ?? "Unknown Date"
-                let modality = dataset.stringValue(for: DICOMTag.modality) ?? "CT"
+                let patientName = dataset.getString(tag: DICOMTag.patientName) ?? "Unknown Patient"
+                let studyDate = dataset.getString(tag: DICOMTag.studyDate) ?? "Unknown Date"
+                let modality = dataset.getString(tag: DICOMTag.modality) ?? "CT"
                 
                 patientInfo = PatientInfo(
                     name: patientName,
