@@ -17,77 +17,19 @@ struct AspectRatioUniforms {
 
 // MARK: - Combined CT + ROI Display View
 // SwiftUI wrapper that combines CT rendering with ROI overlays
-// FIXED: Now actually renders CT images instead of solid colors
-
 struct CTWithROIView: UIViewRepresentable {
     
     // MARK: - Configuration
-    
     let plane: MPRPlane
     let sliceIndex: Int
     let windowLevel: CTWindowPresets.WindowLevel
     let roiManager: CleanROIManager
-    let volumeData: VolumeData? // NEW: Pass volume data for actual CT rendering
+    let volumeData: VolumeData?
     
     // MARK: - UIViewRepresentable Implementation
     
     func makeUIView(context: Context) -> MTKView {
-        }
-        
-        // Helper method to create PixelData from slice data
-        private func createPixelData(from sliceData: [Int16], width: Int, height: Int) -> PixelData? {
-            let data = sliceData.withUnsafeBytes { bytes in
-                Data(bytes: bytes.baseAddress!, count: bytes.count)
-            }
-            
-            return PixelData(
-                data: data,
-                rows: height,
-                columns: width,
-                bitsAllocated: 16,
-                bitsStored: 16,
-                highBit: 15,
-                pixelRepresentation: 1  // Signed
-            )
-        }
-        
-        // Simple method to display a pre-processed texture
-        private func displayTexture(_ texture: MTLTexture, renderEncoder: MTLRenderCommandEncoder, viewSize: CGSize) {
-            guard let device = MTLCreateSystemDefaultDevice() else {
-                print("❌ No Metal device available")
-                return
-            }
-            
-            // Create simple display pipeline
-            guard let renderPipelineState = createDisplayPipelineState(device: device) else {
-                print("❌ Failed to create display pipeline state")
-                return
-            }
-            
-            // Create full-screen quad vertices
-            let quadVertices: [Float] = [
-                // Positions (NDC)    // Texture coordinates
-                -1.0, -1.0, 0.0, 1.0,  // Bottom left
-                 1.0, -1.0, 1.0, 1.0,  // Bottom right
-                -1.0,  1.0, 0.0, 0.0,  // Top left
-                 1.0,  1.0, 1.0, 0.0   // Top right
-            ]
-            
-            guard let vertexBuffer = device.makeBuffer(bytes: quadVertices, 
-                                                      length: quadVertices.count * MemoryLayout<Float>.size,
-                                                      options: []) else {
-                print("❌ Failed to create vertex buffer")
-                return
-            }
-            
-            // Set up render state and display the texture
-            renderEncoder.setRenderPipelineState(renderPipelineState)
-            renderEncoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-            renderEncoder.setFragmentTexture(texture, index: 0)
-            renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
-            
-            print("✅ CT texture displayed: \(texture.width)x\(texture.height)")
-        }let mtkView = MTKView()
+        let mtkView = MTKView()
         mtkView.device = MTLCreateSystemDefaultDevice()
         mtkView.delegate = context.coordinator
         mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
@@ -102,7 +44,7 @@ struct CTWithROIView: UIViewRepresentable {
             sliceIndex: sliceIndex,
             windowLevel: windowLevel,
             roiManager: roiManager,
-            volumeData: volumeData // NEW: Pass volume data
+            volumeData: volumeData
         )
         uiView.setNeedsDisplay()
     }
@@ -123,7 +65,7 @@ struct CTWithROIView: UIViewRepresentable {
         private var currentSliceIndex: Int = 0
         private var currentWindowLevel: CTWindowPresets.WindowLevel = CTWindowPresets.softTissue
         private var currentROIManager: CleanROIManager?
-        private var currentVolumeData: VolumeData? // NEW: Store volume data
+        private var currentVolumeData: VolumeData?
         
         override init() {
             super.init()
@@ -145,13 +87,13 @@ struct CTWithROIView: UIViewRepresentable {
             sliceIndex: Int,
             windowLevel: CTWindowPresets.WindowLevel,
             roiManager: CleanROIManager,
-            volumeData: VolumeData? // NEW: Accept volume data
+            volumeData: VolumeData?
         ) {
             currentPlane = plane
             currentSliceIndex = sliceIndex
             currentWindowLevel = windowLevel
             currentROIManager = roiManager
-            currentVolumeData = volumeData // NEW: Store volume data
+            currentVolumeData = volumeData
             
             // Load volume data into volume renderer if available
             if let volumeData = volumeData, let volumeRenderer = volumeRenderer {
@@ -180,7 +122,7 @@ struct CTWithROIView: UIViewRepresentable {
             // Create command buffer
             let commandBuffer = commandQueue.makeCommandBuffer()
             
-            // FIXED: Render actual CT image + ROI overlays
+            // Render actual CT image + ROI overlays
             renderCTWithROIOverlay(
                 drawable: drawable,
                 commandBuffer: commandBuffer,
@@ -221,56 +163,51 @@ struct CTWithROIView: UIViewRepresentable {
             renderEncoder.endEncoding()
         }
         
-        // Use existing MetalRenderer for simple slice display
+        // Helper method to create PixelData from slice data
+        private func createPixelData(from sliceData: [Int16], width: Int, height: Int) -> PixelData? {
+            let data = sliceData.withUnsafeBytes { bytes in
+                Data(bytes: bytes.baseAddress!, count: bytes.count)
+            }
+            
+            return PixelData(
+                data: data,
+                rows: height,
+                columns: width,
+                bitsAllocated: 16,
+                bitsStored: 16,
+                highBit: 15,
+                pixelRepresentation: 1  // Signed
+            )
+        }
+        
+        // Use existing MetalRenderer for slice display with proper MPR
         private func renderCTBackground(renderEncoder: MTLRenderCommandEncoder, viewSize: CGSize) {
-            guard let metalRenderer = metalRenderer,
+            guard let volumeRenderer = volumeRenderer,
                   let volumeData = currentVolumeData else {
-                print("⚠️ Metal renderer or volume data not available")
+                print("⚠️ Volume renderer or data not available")
                 return
             }
             
-            // Extract slice data using the existing VolumeData methods
-            let normalizedSliceIndex = Float(currentSliceIndex) / Float(getMaxSlicesForPlane())
+            // Calculate normalized slice position
+            let maxSlices = getMaxSlicesForPlane()
+            let normalizedSliceIndex = Float(currentSliceIndex) / Float(maxSlices - 1)
             
-            let pixelData: PixelData?
-            
-            switch currentPlane {
-            case .axial:
-                let z = normalizedSliceIndex * Float(volumeData.dimensions.z - 1)
-                let sliceData = volumeData.extractAxialSlice(atZ: z)
-                pixelData = createPixelData(from: sliceData, width: volumeData.dimensions.x, height: volumeData.dimensions.y)
-                
-            case .sagittal:
-                let x = normalizedSliceIndex * Float(volumeData.dimensions.x - 1)
-                let sliceData = volumeData.extractSagittalSlice(atX: x)
-                pixelData = createPixelData(from: sliceData, width: volumeData.dimensions.y, height: volumeData.dimensions.z)
-                
-            case .coronal:
-                let y = normalizedSliceIndex * Float(volumeData.dimensions.y - 1)
-                let sliceData = volumeData.extractCoronalSlice(atY: y)
-                pixelData = createPixelData(from: sliceData, width: volumeData.dimensions.x, height: volumeData.dimensions.z)
-            }
-            
-            guard let pixelData = pixelData else {
-                print("❌ Failed to extract slice data")
-                return
-            }
-            
-            // Use MetalRenderer to display the slice with proper windowing
             do {
-                let ctTexture = try metalRenderer.renderWithWindowing(
-                    pixelData: pixelData,
+                // Use MetalVolumeRenderer for hardware-accelerated MPR
+                let mprTexture = try volumeRenderer.generateMPRSlice(
+                    plane: currentPlane,
+                    position: normalizedSliceIndex,
                     windowLevel: currentWindowLevel
                 )
                 
-                // Display the windowed texture
-                displayTexture(ctTexture, renderEncoder: renderEncoder, viewSize: viewSize)
+                // Display the MPR texture with proper aspect ratio
+                displayMPRTexture(mprTexture, renderEncoder: renderEncoder, viewSize: viewSize)
                 
             } catch {
-                print("❌ Failed to render CT slice: \(error)")
+                print("❌ Failed to render MPR slice: \(error)")
+                renderPlaceholder(renderEncoder: renderEncoder, viewSize: viewSize)
             }
         }
-
         
         // Simple display method for already-processed MPR texture
         private func displayMPRTexture(_ mprTexture: MTLTexture, renderEncoder: MTLRenderCommandEncoder, viewSize: CGSize) {
@@ -285,7 +222,7 @@ struct CTWithROIView: UIViewRepresentable {
                 return
             }
             
-            // Create full-screen quad vertices
+            // Create full-screen quad vertices with proper aspect ratio
             let quadVertices: [Float] = [
                 // Positions (NDC)    // Texture coordinates
                 -1.0, -1.0, 0.0, 1.0,  // Bottom left
@@ -306,8 +243,6 @@ struct CTWithROIView: UIViewRepresentable {
             renderEncoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
             renderEncoder.setFragmentTexture(mprTexture, index: 0)
             renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
-            
-            print("✅ MPR texture displayed: \(mprTexture.width)x\(mprTexture.height)")
         }
         
         // MARK: - Create simple display pipeline state for already-processed textures
@@ -338,9 +273,6 @@ struct CTWithROIView: UIViewRepresentable {
         
         private func renderPlaceholder(renderEncoder: MTLRenderCommandEncoder, viewSize: CGSize) {
             // Show loading placeholder when volume data isn't available
-            // This replaces the old solid color backgrounds
-            
-            // Could render a simple "Loading CT..." texture here
             print("   📋 Showing placeholder - volume data not loaded")
         }
         
@@ -383,11 +315,10 @@ struct CTWithROIView: UIViewRepresentable {
             // Create texture from bitmap and render it
             if let overlayTexture = createTextureFromBitmap(bitmapData, width: width, height: height) {
                 renderOverlayTexture(overlayTexture, renderEncoder: renderEncoder)
-                print("✅ ROI overlay rendered on slice \(currentSliceIndex)")
             }
         }
         
-        // NEW: Calculate slice position in mm based on plane and index
+        // Calculate slice position in mm based on plane and index
         private func getSlicePositionInMM() -> Float {
             guard let volumeData = currentVolumeData else {
                 // Fallback for test data
@@ -412,7 +343,7 @@ struct CTWithROIView: UIViewRepresentable {
             }
         }
         
-        // NEW: Get relevant contours for current slice based on plane
+        // Get relevant contours for current slice based on plane
         private func getContoursForCurrentSlice(roi: ROIStructure, slicePosition: Float) -> [ROIContour] {
             switch currentPlane {
             case .axial:
@@ -447,7 +378,7 @@ struct CTWithROIView: UIViewRepresentable {
             }
         }
         
-        // [Keep existing ROI cross-section and drawing methods...]
+        // ROI cross-section and drawing methods
         private func createSagittalCrossSection(roi: ROIStructure, xPosition: Float) -> [ROIContour] {
             var crossSectionPoints: [SIMD3<Float>] = []
             
@@ -667,8 +598,8 @@ struct CTWithROIView: UIViewRepresentable {
         }
         
         private func renderOverlayTexture(_ overlayTexture: MTLTexture, renderEncoder: MTLRenderCommandEncoder) {
-            // TODO: Implement proper texture blending
-            print("   🎨 Created ROI overlay texture: \(overlayTexture.width)x\(overlayTexture.height)")
+            // TODO: Implement proper texture blending for ROI overlay
+            // For now, just log that overlay texture was created
         }
         
         private func projectContourToScreen(contour: ROIContour, viewSize: CGSize) -> [SIMD2<Float>] {

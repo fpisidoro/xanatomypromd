@@ -2,9 +2,7 @@ import SwiftUI
 import MetalKit
 import Metal
 
-// MARK: - Working Metal DICOM Image View (Restored)
-// This is the missing component that was working before
-
+// MARK: - Working Metal DICOM Image View (Fixed to use correct MetalVolumeRenderer API)
 struct MetalDICOMImageView: UIViewRepresentable {
     let viewModel: DICOMViewerViewModel
     let currentSlice: Int
@@ -89,15 +87,14 @@ struct MetalDICOMImageView: UIViewRepresentable {
             guard let device = view.device,
                   let commandQueue = device.makeCommandQueue(),
                   let drawable = view.currentDrawable,
-                  let volumeRenderer = volumeRenderer,
-                  let volumeData = currentViewModel?.getVolumeData() else {
+                  let volumeRenderer = volumeRenderer else {
                 return
             }
             
             // Create cache key for texture caching
             let newCacheKey = "\(currentPlane.rawValue)-\(currentSlice)-\(currentWindowingPreset.name)"
             
-            // Use existing working MetalVolumeRenderer.generateMPRSlice
+            // Generate new MPR slice if cache key changed
             if cacheKey != newCacheKey {
                 cacheKey = newCacheKey
                 
@@ -110,11 +107,12 @@ struct MetalDICOMImageView: UIViewRepresentable {
                     windowWidth: currentWindowingPreset.width
                 )
                 
-                // Generate MPR slice using the working pipeline
+                // Generate MPR slice using the correct API
                 volumeRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
                     guard let self = self else { return }
                     self.cachedTexture = mprTexture
                     
+                    // Trigger redraw on main thread
                     DispatchQueue.main.async {
                         view.setNeedsDisplay()
                     }
@@ -122,8 +120,11 @@ struct MetalDICOMImageView: UIViewRepresentable {
                 return
             }
             
-            // Display cached texture
-            guard let mprTexture = cachedTexture else { return }
+            // Display cached texture if available
+            guard let mprTexture = cachedTexture else { 
+                // Show black screen while loading
+                return 
+            }
             
             let commandBuffer = commandQueue.makeCommandBuffer()
             
