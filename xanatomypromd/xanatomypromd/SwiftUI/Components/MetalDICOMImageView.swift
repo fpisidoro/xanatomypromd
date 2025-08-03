@@ -70,7 +70,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
             }
             
             let pipelineDescriptor = MTLRenderPipelineDescriptor()
-            pipelineDescriptor.vertexFunction = library.makeFunction(name: "vertex_simple")
+            pipelineDescriptor.vertexFunction = library.makeFunction(name: "vertex_main")
             pipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragment_simple")
             pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
             
@@ -116,8 +116,8 @@ struct MetalDICOMImageView: UIViewRepresentable {
                 }
             }
             
-            // Update aspect ratio for current plane (simplified - using basic shader)
-            // updateAspectRatio()
+            // Update aspect ratio for current plane
+            updateAspectRatio()
         }
         
         private func updateAspectRatio() {
@@ -258,6 +258,11 @@ struct MetalDICOMImageView: UIViewRepresentable {
             
             renderEncoder.setRenderPipelineState(pipelineState)
             renderEncoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+            
+            // Apply aspect ratio correction if available
+            if let aspectBuffer = aspectRatioBuffer {
+                renderEncoder.setVertexBuffer(aspectBuffer, offset: 0, index: 1)
+            }
             
             renderEncoder.setFragmentTexture(texture, index: 0)
             renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
