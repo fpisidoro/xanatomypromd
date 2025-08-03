@@ -84,6 +84,7 @@ struct LayeredMPRView: View {
                     coordinateSystem: coordinateSystem,
                     plane: plane,
                     viewSize: viewSize,
+                    volumeData: volumeData,
                     appearance: crosshairAppearance,
                     allowInteraction: allowInteraction
                 )
