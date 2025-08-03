@@ -129,9 +129,9 @@ struct XAnatomyProMainView: View {
                         print("✅ Coordinate system initialized with volume dimensions: \(volumeData.dimensions)")
                     }
                 }
-                .onChange(of: dataManager.volumeData) { volumeData in
-                    // Update coordinate system when volume data changes
-                    if let volumeData = volumeData {
+                .onChange(of: dataManager.isVolumeLoaded) { isLoaded in
+                    // Update coordinate system when volume data becomes available
+                    if isLoaded, let volumeData = dataManager.volumeData {
                         coordinateSystem.initializeFromVolumeData(volumeData)
                         print("✅ Coordinate system updated with new volume data")
                     }
@@ -549,7 +549,7 @@ class XAnatomyDataManager: ObservableObject {
         loadingProgress = "Loading ROI structures..."
         
         // Try to load RTStruct file
-        if let rtStructURL = getRTStructFile() {
+        if getRTStructFile() != nil {
             do {
                 // This would use RTStruct parser when ready
                 // For now, just simulate
@@ -574,9 +574,9 @@ class XAnatomyDataManager: ObservableObject {
                 let data = try Data(contentsOf: firstFile)
                 let dataset = try DICOMParser.parse(data)
                 
-                let patientName = dataset.string(for: DICOMTag.patientName) ?? "Unknown Patient"
-                let studyDate = dataset.string(for: DICOMTag.studyDate) ?? "Unknown Date"
-                let modality = dataset.string(for: DICOMTag.modality) ?? "CT"
+                let patientName = dataset.stringValue(for: DICOMTag.patientName) ?? "Unknown Patient"
+                let studyDate = dataset.stringValue(for: DICOMTag.studyDate) ?? "Unknown Date"
+                let modality = dataset.stringValue(for: DICOMTag.modality) ?? "CT"
                 
                 patientInfo = PatientInfo(
                     name: patientName,
