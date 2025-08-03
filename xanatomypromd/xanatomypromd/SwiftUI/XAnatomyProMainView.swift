@@ -615,8 +615,11 @@ class XAnatomyDataManager: ObservableObject {
             )
             
             let dicomFiles = fileURLs.filter { url in
-                url.pathExtension.lowercased() == "dcm" ||
-                url.lastPathComponent.contains("2.16.840.1.114362")
+                let filename = url.lastPathComponent
+                return (url.pathExtension.lowercased() == "dcm" ||
+                        filename.contains("2.16.840.1.114362")) &&
+                       !filename.contains("rtstruct") &&
+                       !filename.contains("test_")
             }.sorted { $0.lastPathComponent < $1.lastPathComponent }
             
             print("📂 Found \(dicomFiles.count) DICOM files in bundle root")
