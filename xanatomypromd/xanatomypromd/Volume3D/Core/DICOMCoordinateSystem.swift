@@ -12,13 +12,13 @@ class DICOMCoordinateSystem: ObservableObject {
     // MARK: - DICOM Volume Properties (Authoritative)
     
     /// Volume origin in patient coordinates (mm) - from DICOM ImagePositionPatient
-    let volumeOrigin: SIMD3<Float>
+    @Published var volumeOrigin: SIMD3<Float>
     
     /// Voxel spacing in mm (x, y, z) - from DICOM PixelSpacing + SliceThickness
-    let volumeSpacing: SIMD3<Float>
+    @Published var volumeSpacing: SIMD3<Float>
     
     /// Volume dimensions in voxels (width, height, depth) - from DICOM matrix
-    let volumeDimensions: SIMD3<Int>
+    @Published var volumeDimensions: SIMD3<Int>
     
     /// Current 3D world position in patient coordinates (mm)
     @Published var currentWorldPosition: SIMD3<Float>
@@ -50,29 +50,23 @@ class DICOMCoordinateSystem: ObservableObject {
     
     /// Initialize coordinate system from loaded volume data
     func initializeFromVolumeData(_ volumeData: VolumeData) {
-        // Create new coordinate system with real DICOM data
-        let newOrigin = volumeData.origin
-        let newSpacing = volumeData.spacing
-        let newDimensions = volumeData.dimensions
-        
-        // Update properties (note: these are let properties, so we need to update via internal state)
-        // For now, we'll update the mutable current position and print the real values
+        // Update with real DICOM data
+        volumeOrigin = volumeData.origin
+        volumeSpacing = volumeData.spacing
+        volumeDimensions = volumeData.dimensions
         
         // Calculate center position using real volume data
-        let centerX = newOrigin.x + (Float(newDimensions.x) * newSpacing.x) / 2.0
-        let centerY = newOrigin.y + (Float(newDimensions.y) * newSpacing.y) / 2.0
-        let centerZ = newOrigin.z + (Float(newDimensions.z) * newSpacing.z) / 2.0
+        let centerX = volumeOrigin.x + (Float(volumeDimensions.x) * volumeSpacing.x) / 2.0
+        let centerY = volumeOrigin.y + (Float(volumeDimensions.y) * volumeSpacing.y) / 2.0
+        let centerZ = volumeOrigin.z + (Float(volumeDimensions.z) * volumeSpacing.z) / 2.0
         
         currentWorldPosition = SIMD3<Float>(centerX, centerY, centerZ)
         
         print("🔄 Coordinate system updated with real DICOM volume:")
-        print("   Real Origin: \(newOrigin) mm")
-        print("   Real Spacing: \(newSpacing) mm")
-        print("   Real Dimensions: \(newDimensions) voxels")
+        print("   Real Origin: \(volumeOrigin) mm")
+        print("   Real Spacing: \(volumeSpacing) mm")
+        print("   Real Dimensions: \(volumeDimensions) voxels")
         print("   New Center: \(currentWorldPosition) mm")
-        
-            // TODO: The coordinate system should be made mutable or recreated
-        // For now, this provides the center position update needed for proper alignment
     }
     
     // MARK: - AUTHORITATIVE Coordinate Transformations
