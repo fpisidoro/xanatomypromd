@@ -69,12 +69,14 @@ struct MetalDICOMImageView: UIViewRepresentable {
             self.currentPlane = currentPlane
             self.currentWindowingPreset = windowingPreset
             
-            // Load volume data if available
-            if let volumeData = viewModel.getVolumeData(), let volumeRenderer = volumeRenderer {
-                do {
-                    try volumeRenderer.loadVolume(volumeData)
-                } catch {
-                    print("❌ Failed to load volume: \(error)")
+            // Load volume data if available (async call to main actor)
+            Task { @MainActor in
+                if let volumeData = viewModel.getVolumeData(), let volumeRenderer = volumeRenderer {
+                    do {
+                        try volumeRenderer.loadVolume(volumeData)
+                    } catch {
+                        print("❌ Failed to load volume: \(error)")
+                    }
                 }
             }
         }
@@ -187,7 +189,8 @@ struct MetalDICOMImageView: UIViewRepresentable {
         }
         
         private func getMaxSlicesForPlane() -> Int {
-            guard let volumeData = currentViewModel?.getVolumeData() else {
+            // Use cached volume data from renderer instead of calling main actor
+            guard let volumeData = volumeRenderer?.volumeData else {
                 return 53 // Fallback
             }
             

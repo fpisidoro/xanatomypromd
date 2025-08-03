@@ -2,8 +2,6 @@ import Foundation
 import Metal
 import simd
 
-// MARK: - Temporary Fix: Comment out MPRPlane usage
-
 // MARK: - Simple ROI Display System
 // Clean, minimal ROI overlay implementation that doesn't break existing CT viewer
 // Follows separation of concerns principle from handover lessons learned
@@ -256,129 +254,20 @@ public class SimpleROIRenderer {
     }
 }
 
-// MARK: - ROI Display Manager
-// Clean interface for managing ROI display without breaking existing system
+// MARK: - ROI Display Manager Extensions
+// Extensions for SimpleROIRenderer to provide additional functionality
 
-public class CleanROIManager: ObservableObject {
-    
-    // MARK: - Published State
-    
-    @Published public var isROIVisible: Bool = true
-    @Published public var roiOpacity: Float = 0.5
-    @Published public var selectedROIs: Set<Int> = []
-    
-    // MARK: - Core Components
-    
-    private var roiRenderer: SimpleROIRenderer?
-    private var currentRTStructData: RTStructData?
-    
-    // MARK: - Initialization
-    
-    public init() {
-        setupRenderer()
-    }
-    
-    private func setupRenderer() {
-        do {
-            roiRenderer = try SimpleROIRenderer()
-            print("✅ CleanROIManager initialized")
-        } catch {
-            print("❌ Failed to initialize ROI renderer: \(error)")
-        }
-    }
-    
-    // MARK: - RTStruct Data Management
-    
-    /// Load RTStruct data for display
-    public func loadRTStructData(_ rtStructData: RTStructData) {
-        self.currentRTStructData = rtStructData
-        print("✅ Loaded RTStruct with \(rtStructData.roiStructures.count) ROIs")
-    }
-    
-    /// Get available ROI structures
-    public func getROIStructures() -> [ROIStructure] {
-        return currentRTStructData?.roiStructures ?? []
-    }
-    
-    /// Get ROI names for UI display
-    public func getROINames() -> [String] {
-        return getROIStructures().map { $0.roiName }
-    }
-    
-    // MARK: - ROI Overlay Generation
-    
-    /// Generate ROI overlay texture for a specific slice
-    public func generateROIOverlay(
-        plane: MPRPlane,
-        slicePosition: Float,
-        textureSize: SIMD2<Int>,
-        volumeOrigin: SIMD3<Float>,
-        volumeSpacing: SIMD3<Float>
-    ) -> MTLTexture? {
-        
-        guard let renderer = roiRenderer,
-              isROIVisible,
-              let rtStructData = currentRTStructData else {
-            return nil
-        }
-        
-        // Apply opacity to all visible ROIs
-        var adjustedROIs = rtStructData.roiStructures.map { roi in
-            ROIStructure(
-                roiNumber: roi.roiNumber,
-                roiName: roi.roiName,
-                roiDescription: roi.roiDescription,
-                roiGenerationAlgorithm: roi.roiGenerationAlgorithm,
-                displayColor: roi.displayColor,
-                isVisible: roi.isVisible && (selectedROIs.isEmpty || selectedROIs.contains(roi.roiNumber)),
-                opacity: roi.opacity * roiOpacity,
-                contours: roi.contours
-            )
-        }
-        
-        return renderer.createROIOverlay(
-            for: adjustedROIs,
-            plane: plane,
-            slicePosition: slicePosition,
-            textureSize: textureSize,
-            volumeOrigin: volumeOrigin,
-            volumeSpacing: volumeSpacing
-        )
-    }
-    
-    // MARK: - ROI Selection
-    
-    /// Toggle ROI selection
-    public func toggleROI(_ roiNumber: Int) {
-        if selectedROIs.contains(roiNumber) {
-            selectedROIs.remove(roiNumber)
-        } else {
-            selectedROIs.insert(roiNumber)
-        }
-    }
-    
-    /// Clear all selections (show all ROIs)
-    public func clearSelection() {
-        selectedROIs.removeAll()
-    }
-    
-    /// Select only one ROI
-    public func selectOnly(_ roiNumber: Int) {
-        selectedROIs = [roiNumber]
-    }
-    
-    // MARK: - ROI Information
+extension SimpleROIRenderer {
     
     /// Get ROI info for current slice
     public func getROIInfoForSlice(
+        roiStructures: [ROIStructure],
         plane: MPRPlane,
         slicePosition: Float
     ) -> [String] {
-        guard let rtStructData = currentRTStructData else { return [] }
-        
         var info: [String] = []
         
-        for roi in rtStructData.roiStructures {
+        for roi in roiStructures {
             let contoursOnSlice = roi.contours.filter { contour in
                 contour.intersectsSlice(slicePosition, plane: plane, tolerance: 2.0)
             }
