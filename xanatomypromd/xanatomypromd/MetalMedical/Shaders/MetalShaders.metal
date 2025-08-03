@@ -17,3 +17,61 @@ fragment float4 fragment_simple(VertexOut in [[stage_in]], texture2d<float> inpu
     constexpr sampler textureSampler(mag_filter::linear, min_filter::linear);
     return inputTexture.sample(textureSampler, in.texCoord);
 }
+
+// MPR Shader Parameters
+struct MPRParams {
+    uint planeType;           // 0=axial, 1=sagittal, 2=coronal
+    float slicePosition;      // 0.0 to 1.0
+    float windowCenter;
+    float windowWidth;
+    uint3 volumeDimensions;
+    float3 spacing;
+};
+
+// Hardware-accelerated MPR slice extraction
+kernel void mprSliceExtractionHardware(
+    texture3d<short, access::read> volumeTexture [[texture(0)]],
+    texture2d<float, access::write> outputTexture [[texture(1)]],
+    constant MPRParams& params [[buffer(0)]],
+    uint2 gid [[thread_position_in_grid]]
+) {
+    if (gid.x >= outputTexture.get_width() || gid.y >= outputTexture.get_height()) {
+        return;
+    }
+    
+    // Calculate normalized coordinates for volume sampling
+    float2 normalizedCoord = float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height());
+    
+    // Calculate 3D texture coordinate based on plane type
+    float3 volumeCoord;
+    
+    switch (params.planeType) {
+        case 0: // Axial (XY plane, varying Z)
+            volumeCoord = float3(normalizedCoord.x, normalizedCoord.y, params.slicePosition);
+            break;
+        case 1: // Sagittal (YZ plane, varying X)
+            volumeCoord = float3(params.slicePosition, normalizedCoord.x, normalizedCoord.y);
+            break;
+        case 2: // Coronal (XZ plane, varying Y)
+            volumeCoord = float3(normalizedCoord.x, params.slicePosition, normalizedCoord.y);
+            break;
+        default:
+            volumeCoord = float3(normalizedCoord.x, normalizedCoord.y, params.slicePosition);
+            break;
+    }
+    
+    // Sample the volume texture
+    short rawValue = volumeTexture.read(uint3(volumeCoord * float3(params.volumeDimensions))).r;
+    
+    // Convert to Hounsfield Units and apply windowing
+    float hounsfield = float(rawValue);
+    
+    // Apply CT windowing
+    float windowMin = params.windowCenter - params.windowWidth / 2.0;
+    float windowMax = params.windowCenter + params.windowWidth / 2.0;
+    
+    float windowedValue = clamp((hounsfield - windowMin) / (windowMax - windowMin), 0.0, 1.0);
+    
+    // Output grayscale value
+    outputTexture.write(float4(windowedValue, windowedValue, windowedValue, 1.0), gid);
+}

@@ -295,7 +295,7 @@ public class MetalVolumeRenderer {
             return
         }
         
-        var params = MPRShaderParams(
+        var params = MPRParams(
             planeType: UInt32(config.plane.rawValue.hash % 3),  // Simple hash to ID
             slicePosition: config.sliceIndex,
             windowCenter: config.windowCenter,
@@ -308,7 +308,7 @@ public class MetalVolumeRenderer {
             spacing: volumeData.spacing
         )
         
-        encoder.setBytes(&params, length: MemoryLayout<MPRShaderParams>.size, index: 0)
+        encoder.setBytes(&params, length: MemoryLayout<MPRParams>.size, index: 0)
         
         // Calculate thread groups
         let threadgroupSize = MTLSizeMake(16, 16, 1)
@@ -401,7 +401,7 @@ public class MetalVolumeRenderer {
 
 // MARK: - Shader Parameters Structure (Updated for r16Sint)
 
-private struct MPRShaderParams {
+private struct MPRParams {
     let planeType: UInt32           // 0=axial, 1=sagittal, 2=coronal
     let slicePosition: Float        // 0.0 to 1.0 normalized position
     let windowCenter: Float

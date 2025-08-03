@@ -607,27 +607,50 @@ class XAnatomyDataManager: ObservableObject {
             return []
         }
         
-        let testDataPath = (bundlePath as NSString).appendingPathComponent("TestData/XAPMD^COUSINALPHA")
+        // Try multiple possible paths for DICOM files
+        let possiblePaths = [
+            "TestData/XAPMD^COUSINALPHA",
+            "TestData",
+            "Resources/TestData/XAPMD^COUSINALPHA",
+            "Resources/TestData"
+        ]
         
-        do {
-            let fileURLs = try FileManager.default.contentsOfDirectory(
-                at: URL(fileURLWithPath: testDataPath),
-                includingPropertiesForKeys: nil,
-                options: .skipsHiddenFiles
-            )
+        for relativePath in possiblePaths {
+            let testDataPath = (bundlePath as NSString).appendingPathComponent(relativePath)
             
-            let dicomFiles = fileURLs.filter { url in
-                url.pathExtension.lowercased() == "dcm" ||
-                url.lastPathComponent.contains("2.16.840.1.114362")
-            }.sorted { $0.lastPathComponent < $1.lastPathComponent }
-            
-            print("📂 Found \(dicomFiles.count) DICOM files in: \(testDataPath)")
-            return dicomFiles
-            
-        } catch {
-            print("❌ Error reading DICOM files from \(testDataPath): \(error)")
-            return []
+            if FileManager.default.fileExists(atPath: testDataPath) {
+                do {
+                    let fileURLs = try FileManager.default.contentsOfDirectory(
+                        at: URL(fileURLWithPath: testDataPath),
+                        includingPropertiesForKeys: nil,
+                        options: .skipsHiddenFiles
+                    )
+                    
+                    let dicomFiles = fileURLs.filter { url in
+                        url.pathExtension.lowercased() == "dcm" ||
+                        url.lastPathComponent.contains("2.16.840.1.114362")
+                    }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+                    
+                    if !dicomFiles.isEmpty {
+                        print("📂 Found \(dicomFiles.count) DICOM files in: \(testDataPath)")
+                        return dicomFiles
+                    }
+                    
+                } catch {
+                    print("❌ Error reading from \(testDataPath): \(error)")
+                }
+            }
         }
+        
+        // If no DICOM files found, list bundle contents for debugging
+        print("🔍 Bundle contents:")
+        if let contents = try? FileManager.default.contentsOfDirectory(atPath: bundlePath) {
+            for item in contents.prefix(10) {
+                print("  - \(item)")
+            }
+        }
+        
+        return []
     }
     
     private func getRTStructFile() -> URL? {
