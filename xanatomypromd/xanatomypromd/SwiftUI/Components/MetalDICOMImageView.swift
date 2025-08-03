@@ -2,7 +2,7 @@ import SwiftUI
 import MetalKit
 import Metal
 
-// MARK: - Working Metal DICOM Image View (Fixed to use correct MetalVolumeRenderer API)
+// MARK: - Simplified Working Metal DICOM Image View
 struct MetalDICOMImageView: UIViewRepresentable {
     let viewModel: DICOMViewerViewModel
     let currentSlice: Int
@@ -35,14 +35,13 @@ struct MetalDICOMImageView: UIViewRepresentable {
     
     class Coordinator: NSObject, MTKViewDelegate {
         private var volumeRenderer: MetalVolumeRenderer?
+        private var crosshairManager: CrosshairManager?
         
         // Current parameters
         private var currentViewModel: DICOMViewerViewModel?
         private var currentSlice: Int = 0
         private var currentPlane: MPRPlane = .axial
         private var currentWindowingPreset: CTWindowLevel = CTWindowLevel.softTissue
-        private var cachedTexture: MTLTexture?
-        private var cacheKey: String = ""
         
         override init() {
             super.init()
@@ -52,6 +51,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
         private func setupRenderer() {
             do {
                 volumeRenderer = try MetalVolumeRenderer()
+                crosshairManager = CrosshairManager()
             } catch {
                 // Initialization failed - renderer will be nil
             }
@@ -68,7 +68,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
             self.currentPlane = currentPlane
             self.currentWindowingPreset = windowingPreset
             
-            // Load volume data if available (async call to main actor)
+            // Load volume data if available
             Task { @MainActor in
                 if let volumeData = viewModel.getVolumeData(), let volumeRenderer = volumeRenderer {
                     do {
@@ -87,46 +87,64 @@ struct MetalDICOMImageView: UIViewRepresentable {
         func draw(in view: MTKView) {
             guard let device = view.device,
                   let commandQueue = device.makeCommandQueue(),
-                  let drawable = view.currentDrawable,
-                  let volumeRenderer = volumeRenderer else {
+                  let drawable = view.currentDrawable else {
                 return
             }
             
-            // Create cache key for texture caching
-            let newCacheKey = "\(currentPlane.rawValue)-\(currentSlice)-\(currentWindowingPreset.name)"
+            // Generate MPR slice
+            guard let volumeRenderer = volumeRenderer else {
+                // Clear to black if no renderer
+                clearView(drawable: drawable, commandQueue: commandQueue)
+                return
+            }
             
-            // Generate new MPR slice if cache key changed
-            if cacheKey != newCacheKey {
-                cacheKey = newCacheKey
-                
-                let normalizedSliceIndex = Float(currentSlice) / Float(getMaxSlicesForPlane())
-                
-                let config = MetalVolumeRenderer.MPRConfig(
-                    plane: currentPlane,
-                    sliceIndex: normalizedSliceIndex,
-                    windowCenter: currentWindowingPreset.center,
-                    windowWidth: currentWindowingPreset.width
-                )
-                
-                // Generate MPR slice using the correct API
-                volumeRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
-                    guard let self = self else { return }
-                    self.cachedTexture = mprTexture
-                    
-                    // Trigger redraw on main thread
-                    DispatchQueue.main.async {
-                        view.setNeedsDisplay()
-                    }
+            let normalizedSliceIndex = Float(currentSlice) / Float(getMaxSlicesForPlane())
+            
+            let config = MetalVolumeRenderer.MPRConfig(
+                plane: currentPlane,
+                sliceIndex: normalizedSliceIndex,
+                windowCenter: currentWindowingPreset.center,
+                windowWidth: currentWindowingPreset.width
+            )
+            
+            // Generate MPR slice and display it
+            volumeRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
+                guard let self = self, let mprTexture = mprTexture else {
+                    self?.clearView(drawable: drawable, commandQueue: commandQueue)
+                    return
                 }
-                return
+                
+                // Display the MPR texture with crosshairs
+                self.displayMPRWithCrosshairs(
+                    mprTexture: mprTexture,
+                    drawable: drawable,
+                    commandQueue: commandQueue,
+                    device: device
+                )
             }
+        }
+        
+        private func clearView(drawable: MTLDrawable, commandQueue: MTLCommandQueue) {
+            let commandBuffer = commandQueue.makeCommandBuffer()
+            let renderPassDescriptor = MTLRenderPassDescriptor()
+            renderPassDescriptor.colorAttachments[0].texture = drawable.texture
+            renderPassDescriptor.colorAttachments[0].loadAction = .clear
+            renderPassDescriptor.colorAttachments[0].storeAction = .store
+            renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1.0)
             
-            // Display cached texture if available
-            guard let mprTexture = cachedTexture else { 
-                // Show black screen while loading
-                return 
+            if let renderEncoder = commandBuffer?.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
+                renderEncoder.endEncoding()
             }
-            
+            commandBuffer?.present(drawable)
+            commandBuffer?.commit()
+        }
+        
+        private func displayMPRWithCrosshairs(
+            mprTexture: MTLTexture,
+            drawable: MTLDrawable,
+            commandQueue: MTLCommandQueue,
+            device: MTLDevice
+        ) {
             let commandBuffer = commandQueue.makeCommandBuffer()
             
             let renderPassDescriptor = MTLRenderPassDescriptor()
@@ -135,10 +153,17 @@ struct MetalDICOMImageView: UIViewRepresentable {
             renderPassDescriptor.colorAttachments[0].storeAction = .store
             renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1.0)
             
-            guard let renderEncoder = commandBuffer?.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else { return }
+            guard let renderEncoder = commandBuffer?.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else { 
+                commandBuffer?.present(drawable)
+                commandBuffer?.commit()
+                return 
+            }
             
-            // Simple texture display (already processed by MetalVolumeRenderer)
+            // Display the MPR texture
             displayTexture(mprTexture, renderEncoder: renderEncoder, device: device)
+            
+            // Draw crosshairs on top
+            drawCrosshairs(renderEncoder: renderEncoder, device: device, viewSize: drawable.texture.size)
             
             renderEncoder.endEncoding()
             commandBuffer?.present(drawable)
@@ -148,8 +173,8 @@ struct MetalDICOMImageView: UIViewRepresentable {
         private func displayTexture(_ texture: MTLTexture, renderEncoder: MTLRenderCommandEncoder, device: MTLDevice) {
             // Create simple display pipeline
             guard let library = device.makeDefaultLibrary(),
-                  let vertexFunction = library.makeFunction(name: "vertex_main"),
-                  let fragmentFunction = library.makeFunction(name: "fragment_display_texture") else {
+                  let vertexFunction = library.makeFunction(name: "vertex_simple"),
+                  let fragmentFunction = library.makeFunction(name: "fragment_simple") else {
                 return
             }
             
@@ -162,13 +187,13 @@ struct MetalDICOMImageView: UIViewRepresentable {
                 return
             }
             
-            // Create full-screen quad vertices
+            // Create full-screen quad vertices (simple format)
             let quadVertices: [Float] = [
-                // Positions (NDC)    // Texture coordinates
-                -1.0, -1.0, 0.0, 1.0,  // Bottom left
-                 1.0, -1.0, 1.0, 1.0,  // Bottom right
-                -1.0,  1.0, 0.0, 0.0,  // Top left
-                 1.0,  1.0, 1.0, 0.0   // Top right
+                // Positions        // Texture coordinates
+                -1.0, -1.0,        0.0, 1.0,  // Bottom left
+                 1.0, -1.0,        1.0, 1.0,  // Bottom right
+                -1.0,  1.0,        0.0, 0.0,  // Top left
+                 1.0,  1.0,        1.0, 0.0   // Top right
             ]
             
             guard let vertexBuffer = device.makeBuffer(bytes: quadVertices, 
@@ -184,8 +209,22 @@ struct MetalDICOMImageView: UIViewRepresentable {
             renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         }
         
+        private func drawCrosshairs(renderEncoder: MTLRenderCommandEncoder, device: MTLDevice, viewSize: MTLSize) {
+            guard let crosshairManager = crosshairManager else { return }
+            
+            // Calculate crosshair position based on current slice and plane
+            let normalizedPosition = SIMD2<Float>(0.5, 0.5) // Center for now
+            
+            // Draw the crosshairs
+            crosshairManager.drawCrosshairs(
+                renderEncoder: renderEncoder,
+                device: device,
+                position: normalizedPosition,
+                viewSize: viewSize
+            )
+        }
+        
         private func getMaxSlicesForPlane() -> Int {
-            // Use cached volume data from renderer instead of calling main actor
             guard let volumeData = volumeRenderer?.volumeData else {
                 return 53 // Fallback
             }
@@ -199,5 +238,12 @@ struct MetalDICOMImageView: UIViewRepresentable {
                 return volumeData.dimensions.y
             }
         }
+    }
+}
+
+// MARK: - Size extension for MTLSize
+extension MTLSize {
+    var size: CGSize {
+        return CGSize(width: width, height: height)
     }
 }

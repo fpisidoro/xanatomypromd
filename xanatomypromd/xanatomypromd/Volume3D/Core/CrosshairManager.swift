@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import simd
+import Metal
 
 // MARK: - 3D Crosshair Coordinate Manager
 // Manages synchronized crosshair position across all MPR views
@@ -183,6 +184,87 @@ class CrosshairManager: ObservableObject {
             CGPoint(x: center.x, y: 0),
             CGPoint(x: center.x, y: viewSize.height)
         )
+    }
+    
+    // MARK: - Metal Crosshair Rendering
+    
+    /// Draw crosshairs using Metal rendering
+    func drawCrosshairs(
+        renderEncoder: MTLRenderCommandEncoder,
+        device: MTLDevice,
+        position: SIMD2<Float>,
+        viewSize: MTLSize
+    ) {
+        guard isVisible else { return }
+        
+        // Create crosshair pipeline
+        guard let library = device.makeDefaultLibrary(),
+              let vertexFunction = library.makeFunction(name: "vertex_crosshair"),
+              let fragmentFunction = library.makeFunction(name: "fragment_crosshair") else {
+            return
+        }
+        
+        let pipelineDescriptor = MTLRenderPipelineDescriptor()
+        pipelineDescriptor.vertexFunction = vertexFunction
+        pipelineDescriptor.fragmentFunction = fragmentFunction
+        pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        pipelineDescriptor.colorAttachments[0].isBlendingEnabled = true
+        pipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        pipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        
+        guard let renderPipelineState = try? device.makeRenderPipelineState(descriptor: pipelineDescriptor) else {
+            return
+        }
+        
+        // Convert view size to normalized coordinates
+        let width = Float(viewSize.width)
+        let height = Float(viewSize.height)
+        
+        // Calculate crosshair lines in normalized device coordinates (-1 to 1)
+        let centerX = (position.x * 2.0) - 1.0
+        let centerY = 1.0 - (position.y * 2.0) // Flip Y coordinate
+        
+        // Create horizontal line vertices
+        let horizontalVertices: [SIMD4<Float>] = [
+            SIMD4<Float>(-1.0, centerY, 0.0, 1.0), // Left
+            SIMD4<Float>( 1.0, centerY, 0.0, 1.0)  // Right
+        ]
+        
+        // Create vertical line vertices
+        let verticalVertices: [SIMD4<Float>] = [
+            SIMD4<Float>(centerX, -1.0, 0.0, 1.0), // Bottom
+            SIMD4<Float>(centerX,  1.0, 0.0, 1.0)  // Top
+        ]
+        
+        // Create colors (green with opacity)
+        let color = SIMD4<Float>(0.0, 1.0, 0.0, opacity)
+        let colors: [SIMD4<Float>] = [color, color]
+        
+        // Create buffers
+        guard let horizontalBuffer = device.makeBuffer(bytes: horizontalVertices, 
+                                                      length: horizontalVertices.count * MemoryLayout<SIMD4<Float>>.size,
+                                                      options: []),
+              let verticalBuffer = device.makeBuffer(bytes: verticalVertices, 
+                                                    length: verticalVertices.count * MemoryLayout<SIMD4<Float>>.size,
+                                                    options: []),
+              let colorBuffer = device.makeBuffer(bytes: colors, 
+                                                 length: colors.count * MemoryLayout<SIMD4<Float>>.size,
+                                                 options: []) else {
+            return
+        }
+        
+        // Set up render state
+        renderEncoder.setRenderPipelineState(renderPipelineState)
+        
+        // Draw horizontal line
+        renderEncoder.setVertexBuffer(horizontalBuffer, offset: 0, index: 0)
+        renderEncoder.setVertexBuffer(colorBuffer, offset: 0, index: 1)
+        renderEncoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: 2)
+        
+        // Draw vertical line
+        renderEncoder.setVertexBuffer(verticalBuffer, offset: 0, index: 0)
+        renderEncoder.setVertexBuffer(colorBuffer, offset: 0, index: 1)
+        renderEncoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: 2)
     }
     
     // MARK: - Debug Information

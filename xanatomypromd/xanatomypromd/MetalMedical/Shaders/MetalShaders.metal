@@ -1,6 +1,59 @@
 #include <metal_stdlib>
 using namespace metal;
 
+// MARK: - Simple Vertex and Fragment Shaders for Basic Display
+
+struct SimpleVertexIn {
+    float2 position;
+    float2 texCoord;
+};
+
+struct SimpleVertexOut {
+    float4 position [[position]];
+    float2 texCoord;
+};
+
+// Simple vertex shader without aspect ratio complications
+vertex SimpleVertexOut vertex_simple(const device float4* vertices [[buffer(0)]],
+                                     uint vid [[vertex_id]]) {
+    SimpleVertexOut out;
+    out.position = float4(vertices[vid].xy, 0.0, 1.0);
+    out.texCoord = vertices[vid].zw;
+    return out;
+}
+
+// Simple fragment shader for texture display
+fragment float4 fragment_simple(SimpleVertexOut in [[stage_in]],
+                               texture2d<float> inputTexture [[texture(0)]]) {
+    constexpr sampler textureSampler(coord::normalized,
+                                     filter::linear,
+                                     address::clamp_to_edge);
+    
+    return inputTexture.sample(textureSampler, in.texCoord);
+}
+
+// MARK: - Crosshair Vertex and Fragment Shaders
+
+struct CrosshairVertexOut {
+    float4 position [[position]];
+    float4 color;
+};
+
+// Vertex shader for crosshairs
+vertex CrosshairVertexOut vertex_crosshair(const device float4* vertices [[buffer(0)]],
+                                           const device float4* colors [[buffer(1)]],
+                                           uint vid [[vertex_id]]) {
+    CrosshairVertexOut out;
+    out.position = vertices[vid];
+    out.color = colors[vid];
+    return out;
+}
+
+// Fragment shader for crosshairs
+fragment float4 fragment_crosshair(CrosshairVertexOut in [[stage_in]]) {
+    return in.color;
+}
+
 // MARK: - Vertex and Fragment Structures
 
 struct VertexIn {
