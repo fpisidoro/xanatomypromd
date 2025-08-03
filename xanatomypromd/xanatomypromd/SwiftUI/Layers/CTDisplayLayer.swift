@@ -164,17 +164,8 @@ struct CTDisplayLayer: UIViewRepresentable {
         // MARK: - MTKViewDelegate
         
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-            // CRITICAL FOR MEDICAL IMAGING:
-            // Do NOT use frame size - use actual image dimensions to maintain pixel accuracy
-            guard let volumeData = currentVolumeData else { return }
-            
-            let imageDimensions = getImageDimensions(for: currentPlane, volumeData: volumeData)
-            let imageSize = CGSize(width: imageDimensions.width, height: imageDimensions.height)
-            
-            // Set drawable to match actual image pixels, not frame
-            view.drawableSize = imageSize
-            
-            print("📏 Medical Imaging: Drawable size set to actual image dimensions: \(imageSize)")
+            // Let SwiftUI handle view sizing - focus on accurate rendering
+            // The key is maintaining pixel accuracy in the rendering, not forcing drawable size
         }
         
         private func getImageDimensions(for plane: MPRPlane, volumeData: VolumeData) -> (width: Int, height: Int) {
