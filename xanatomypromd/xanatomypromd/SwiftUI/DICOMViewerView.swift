@@ -267,7 +267,7 @@ struct DICOMViewerView: View {
             
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(CTWindowPresets.all, id: \.name) { preset in
+                    ForEach(CTWindowPresets.all, id: \CTWindowPresets.WindowLevel.name) { preset in
                         windowingPresetButton(preset)
                     }
                 }
