@@ -30,7 +30,7 @@ struct AspectRatioUniforms {
     }
 }
 
-// MARK: - Main DICOM Viewer Interface with MPR
+// MARK: - Main DICOM Viewer Interface with MPR and WORKING CROSSHAIRS
 
 struct DICOMViewerView: View {
     @StateObject private var viewModel = DICOMViewerViewModel()
@@ -50,7 +50,7 @@ struct DICOMViewerView: View {
                     // MARK: - Header with Series Info + Plane Info
                     headerView
                     
-                    // MARK: - Main Image Display
+                    // MARK: - Main Image Display with WORKING CROSSHAIRS
                     imageDisplayView(geometry: geometry)
                         .frame(height: geometry.size.height * 0.7)
                     
@@ -103,7 +103,7 @@ struct DICOMViewerView: View {
                     .font(.headline)
                     .foregroundColor(.blue)
                 
-                Text("Slice \\(currentSlice + 1)/\\(getMaxSlicesForPlane())")
+                Text("Slice \(currentSlice + 1)/\(getMaxSlicesForPlane())")
                     .font(.caption)
                     .foregroundColor(.white)
                 
@@ -117,7 +117,7 @@ struct DICOMViewerView: View {
         .background(Color.black.opacity(0.8))
     }
     
-    // MARK: - Image Display View (RESTORED TO WORKING VERSION)
+    // MARK: - RESTORED Image Display View with WORKING CROSSHAIRS
     private func imageDisplayView(geometry: GeometryProxy) -> some View {
         ZStack {
             if isLoading {
@@ -135,7 +135,7 @@ struct DICOMViewerView: View {
             } else {
                 GeometryReader { imageGeometry in
                     ZStack {
-                        // DICOM image
+                        // DICOM image with proper aspect ratio and coordinates
                         MetalDICOMImageView(
                             viewModel: viewModel,
                             currentSlice: currentSlice,
@@ -168,7 +168,7 @@ struct DICOMViewerView: View {
                             }
                         )
                         
-                        // Crosshair overlay
+                        // RESTORED: Working crosshair overlay - SYNCHRONIZED
                         CrosshairOverlayView(
                             crosshairManager: crosshairManager,
                             plane: currentPlane,
@@ -343,6 +343,7 @@ struct DICOMViewerView: View {
                         set: { newValue in
                             let newSlice = Int(newValue)
                             currentSlice = newSlice
+                            // CRITICAL: Update crosshair when slice changes
                             crosshairManager.updateFromSliceScroll(plane: currentPlane, sliceIndex: newSlice)
                         }
                     ),
@@ -394,7 +395,8 @@ struct DICOMViewerView: View {
     
     private func switchToPlane(_ plane: MPRPlane) {
         currentPlane = plane
-        currentSlice = 0 // Reset to first slice when switching planes
+        // Get current crosshair slice for new plane
+        currentSlice = crosshairManager.getSliceIndex(for: plane)
         
         // Update crosshair position when switching planes
         crosshairManager.updateFromSliceScroll(plane: plane, sliceIndex: currentSlice)
@@ -403,6 +405,7 @@ struct DICOMViewerView: View {
     private func previousSlice() {
         if currentSlice > 0 {
             currentSlice -= 1
+            // CRITICAL: Update crosshair synchronization
             crosshairManager.updateFromSliceScroll(plane: currentPlane, sliceIndex: currentSlice)
         }
     }
@@ -410,6 +413,7 @@ struct DICOMViewerView: View {
     private func nextSlice() {
         if currentSlice < getMaxSlicesForPlane() - 1 {
             currentSlice += 1
+            // CRITICAL: Update crosshair synchronization
             crosshairManager.updateFromSliceScroll(plane: currentPlane, sliceIndex: currentSlice)
         }
     }

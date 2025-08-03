@@ -2,7 +2,7 @@ import SwiftUI
 import MetalKit
 import Metal
 
-// MARK: - Simple Working Metal DICOM Image View (No Crosshairs)
+// MARK: - Restored Working Metal DICOM Image View with Crosshairs
 struct MetalDICOMImageView: UIViewRepresentable {
     let viewModel: DICOMViewerViewModel
     let currentSlice: Int
@@ -44,9 +44,15 @@ struct MetalDICOMImageView: UIViewRepresentable {
         private var cachedTexture: MTLTexture?
         private var cacheKey: String = ""
         
+        // Metal pipeline for display
+        private var displayPipelineState: MTLRenderPipelineState?
+        private var vertexBuffer: MTLBuffer?
+        private var aspectRatioBuffer: MTLBuffer?
+        
         override init() {
             super.init()
             setupRenderer()
+            setupDisplayPipeline()
         }
         
         private func setupRenderer() {
@@ -55,6 +61,37 @@ struct MetalDICOMImageView: UIViewRepresentable {
             } catch {
                 // Initialization failed - renderer will be nil
             }
+        }
+        
+        private func setupDisplayPipeline() {
+            guard let device = MTLCreateSystemDefaultDevice(),
+                  let library = device.makeDefaultLibrary() else {
+                return
+            }
+            
+            let pipelineDescriptor = MTLRenderPipelineDescriptor()
+            pipelineDescriptor.vertexFunction = library.makeFunction(name: "vertex_simple")
+            pipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragment_simple")
+            pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+            
+            do {
+                displayPipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+            } catch {
+                // Pipeline creation failed
+            }
+            
+            // Create full-screen quad vertices
+            let quadVertices: [Float] = [
+                // Positions        // Texture coordinates
+                -1.0, -1.0,        0.0, 1.0,  // Bottom left
+                 1.0, -1.0,        1.0, 1.0,  // Bottom right
+                -1.0,  1.0,        0.0, 0.0,  // Top left
+                 1.0,  1.0,        1.0, 0.0   // Top right
+            ]
+            
+            vertexBuffer = device.makeBuffer(bytes: quadVertices, 
+                                           length: quadVertices.count * MemoryLayout<Float>.size,
+                                           options: [])
         }
         
         func updateParameters(
@@ -69,15 +106,60 @@ struct MetalDICOMImageView: UIViewRepresentable {
             self.currentWindowingPreset = windowingPreset
             
             // Load volume data if available
-            Task { @MainActor in
-                if let volumeData = viewModel.getVolumeData(), let volumeRenderer = volumeRenderer {
-                    do {
-                        try volumeRenderer.loadVolume(volumeData)
-                    } catch {
-                        // Volume loading failed
-                    }
+            if let volumeData = viewModel.getVolumeData(), let volumeRenderer = volumeRenderer {
+                do {
+                    try volumeRenderer.loadVolume(volumeData)
+                } catch {
+                    // Volume loading failed
                 }
             }
+            
+            // Update aspect ratio for current plane
+            updateAspectRatio()
+        }
+        
+        private func updateAspectRatio() {
+            guard let volumeData = volumeRenderer?.volumeData,
+                  let device = MTLCreateSystemDefaultDevice() else {
+                return
+            }
+            
+            // Calculate correct aspect ratio using physical spacing
+            let dimensions = volumeData.dimensions
+            let spacing = volumeData.spacing
+            
+            let aspectRatio: Float
+            switch currentPlane {
+            case .axial:
+                // XY plane: width vs height in mm
+                let widthMM = Float(dimensions.x) * spacing.x
+                let heightMM = Float(dimensions.y) * spacing.y
+                aspectRatio = widthMM / heightMM
+                
+            case .sagittal:
+                // YZ plane: anterior-posterior vs superior-inferior in mm
+                let widthMM = Float(dimensions.y) * spacing.y
+                let heightMM = Float(dimensions.z) * spacing.z
+                aspectRatio = widthMM / heightMM
+                
+            case .coronal:
+                // XZ plane: left-right vs superior-inferior in mm
+                let widthMM = Float(dimensions.x) * spacing.x
+                let heightMM = Float(dimensions.z) * spacing.z
+                aspectRatio = widthMM / heightMM
+            }
+            
+            // Apply aspect ratio correction to maintain proper proportions
+            let aspectUniforms = AspectRatioUniforms(
+                scaleX: aspectRatio > 1.0 ? 1.0 : aspectRatio,
+                scaleY: aspectRatio > 1.0 ? 1.0 / aspectRatio : 1.0
+            )
+            
+            aspectRatioBuffer = device.makeBuffer(
+                bytes: [aspectUniforms],
+                length: MemoryLayout<AspectRatioUniforms>.size,
+                options: []
+            )
         }
         
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
@@ -92,7 +174,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
             }
             
             // Create cache key for texture caching
-            let newCacheKey = "\\(currentPlane.rawValue)-\\(currentSlice)-\\(currentWindowingPreset.name)"
+            let newCacheKey = "\(currentPlane.rawValue)-\(currentSlice)-\(currentWindowingPreset.name)"
             
             // Generate new MPR slice if cache key changed
             if cacheKey != newCacheKey {
@@ -112,7 +194,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
                     windowWidth: currentWindowingPreset.width
                 )
                 
-                // Generate MPR slice
+                // Generate MPR slice without excessive logging
                 volumeRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
                     guard let self = self else { return }
                     self.cachedTexture = mprTexture
@@ -158,55 +240,22 @@ struct MetalDICOMImageView: UIViewRepresentable {
             renderPassDescriptor.colorAttachments[0].storeAction = .store
             renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1.0)
             
-            guard let renderEncoder = commandBuffer?.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else { 
+            guard let renderEncoder = commandBuffer?.makeRenderCommandEncoder(descriptor: renderPassDescriptor),
+                  let pipelineState = displayPipelineState,
+                  let vertexBuffer = vertexBuffer else { 
                 commandBuffer?.present(drawable)
                 commandBuffer?.commit()
                 return 
             }
             
-            // Use simple vertex/fragment shaders
-            guard let library = device.makeDefaultLibrary(),
-                  let vertexFunction = library.makeFunction(name: "vertex_simple"),
-                  let fragmentFunction = library.makeFunction(name: "fragment_simple") else {
-                renderEncoder.endEncoding()
-                commandBuffer?.present(drawable)
-                commandBuffer?.commit()
-                return
-            }
-            
-            let pipelineDescriptor = MTLRenderPipelineDescriptor()
-            pipelineDescriptor.vertexFunction = vertexFunction
-            pipelineDescriptor.fragmentFunction = fragmentFunction
-            pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-            
-            guard let renderPipelineState = try? device.makeRenderPipelineState(descriptor: pipelineDescriptor) else {
-                renderEncoder.endEncoding()
-                commandBuffer?.present(drawable)
-                commandBuffer?.commit()
-                return
-            }
-            
-            // Create full-screen quad vertices
-            let quadVertices: [Float] = [
-                // Positions        // Texture coordinates
-                -1.0, -1.0,        0.0, 1.0,  // Bottom left
-                 1.0, -1.0,        1.0, 1.0,  // Bottom right
-                -1.0,  1.0,        0.0, 0.0,  // Top left
-                 1.0,  1.0,        1.0, 0.0   // Top right
-            ]
-            
-            guard let vertexBuffer = device.makeBuffer(bytes: quadVertices, 
-                                                      length: quadVertices.count * MemoryLayout<Float>.size,
-                                                      options: []) else {
-                renderEncoder.endEncoding()
-                commandBuffer?.present(drawable)
-                commandBuffer?.commit()
-                return
-            }
-            
-            // Render the texture
-            renderEncoder.setRenderPipelineState(renderPipelineState)
+            renderEncoder.setRenderPipelineState(pipelineState)
             renderEncoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+            
+            // Apply aspect ratio correction if available
+            if let aspectBuffer = aspectRatioBuffer {
+                renderEncoder.setVertexBuffer(aspectBuffer, offset: 0, index: 1)
+            }
+            
             renderEncoder.setFragmentTexture(texture, index: 0)
             renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
             
