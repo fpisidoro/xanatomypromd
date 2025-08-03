@@ -16,6 +16,11 @@ class DICOMViewerViewModel: ObservableObject {
     @Published var seriesInfo: DICOMSeriesInfo?
     @Published var volumeData: VolumeData? // NEW: Volume data for CT rendering
     
+    // Computed property for volume loading status
+    var isVolumeLoaded: Bool {
+        return volumeData != nil
+    }
+    
     // MARK: - Data Properties
     
     private var dicomFiles: [URL] = []
