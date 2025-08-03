@@ -29,9 +29,11 @@ struct CTDisplayLayer: UIViewRepresentable {
         mtkView.device = MTLCreateSystemDefaultDevice()
         mtkView.delegate = context.coordinator
         mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
-        mtkView.drawableSize = CGSize(width: 512, height: 512)
+        // Don't hardcode drawable size - let SwiftUI handle sizing
         mtkView.framebufferOnly = false
         mtkView.backgroundColor = UIColor.black
+        // Enable proper scaling for medical imaging
+        mtkView.contentScaleFactor = UIScreen.main.scale
         return mtkView
     }
     

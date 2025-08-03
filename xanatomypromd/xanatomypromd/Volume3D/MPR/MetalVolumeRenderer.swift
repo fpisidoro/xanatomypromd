@@ -240,34 +240,21 @@ public class MetalVolumeRenderer {
         }
         
         let dims = volumeData.dimensions
-        let spacing = volumeData.spacing
         
         switch plane {
         case .axial:
-            // XY plane - use actual pixel dimensions (square pixels)
+            // XY plane - maintain original matrix size
             return (dims.x, dims.y)
             
         case .sagittal:
-            // YZ plane - fix aspect ratio using physical spacing
-            // Width is Y direction, Height is Z direction
-            let physicalWidth = Float(dims.y) * spacing.y   // mm
-            let physicalHeight = Float(dims.z) * spacing.z  // mm
-            
-            // Use Y dimension as base and scale Z appropriately
-            let baseWidth = dims.y
-            let correctedHeight = Int(Float(baseWidth) * (physicalHeight / physicalWidth))
-            return (baseWidth, correctedHeight)
+            // YZ plane - Y (anterior-posterior) x Z (superior-inferior)
+            // Keep voxel grid dimensions, let display handle aspect ratio
+            return (dims.y, dims.z)
             
         case .coronal:
-            // XZ plane - fix aspect ratio using physical spacing  
-            // Width is X direction, Height is Z direction
-            let physicalWidth = Float(dims.x) * spacing.x   // mm
-            let physicalHeight = Float(dims.z) * spacing.z  // mm
-            
-            // Use X dimension as base and scale Z appropriately
-            let baseWidth = dims.x
-            let correctedHeight = Int(Float(baseWidth) * (physicalHeight / physicalWidth))
-            return (baseWidth, correctedHeight)
+            // XZ plane - X (left-right) x Z (superior-inferior)
+            // Keep voxel grid dimensions, let display handle aspect ratio
+            return (dims.x, dims.z)
         }
     }
     
