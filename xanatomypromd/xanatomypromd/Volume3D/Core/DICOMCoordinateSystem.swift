@@ -373,34 +373,4 @@ class DICOMCoordinateSystem: ObservableObject {
     }
 }
 
-// MARK: - MPRPlane Extensions for Coordinate System
-
-extension MPRPlane {
-    
-    /// Get the slice axis index for this plane (0=X, 1=Y, 2=Z)
-    var sliceAxis: Int {
-        switch self {
-        case .axial:    return 2  // Z-axis (varies with axial slices)
-        case .sagittal: return 0  // X-axis (varies with sagittal slices)
-        case .coronal:  return 1  // Y-axis (varies with coronal slices)
-        }
-    }
-    
-    /// Get the in-plane axes for this plane
-    var planeAxes: (Int, Int) {
-        switch self {
-        case .axial:    return (0, 1)  // X,Y plane
-        case .sagittal: return (1, 2)  // Y,Z plane
-        case .coronal:  return (0, 2)  // X,Z plane
-        }
-    }
-    
-    /// Get display name for this plane
-    var displayName: String {
-        switch self {
-        case .axial:    return "Axial"
-        case .sagittal: return "Sagittal"
-        case .coronal:  return "Coronal"
-        }
-    }
-}
+// MPRPlane extensions already exist in the project
