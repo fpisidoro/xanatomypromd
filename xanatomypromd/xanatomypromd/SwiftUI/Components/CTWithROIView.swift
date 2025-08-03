@@ -3,6 +3,18 @@ import MetalKit
 import Metal
 import simd
 
+// MARK: - Metal Rendering Structures
+struct WindowingData {
+    let windowCenter: Float
+    let windowWidth: Float
+}
+
+struct AspectRatioUniforms {
+    let scaleX: Float
+    let scaleY: Float
+    let offset: SIMD2<Float>
+}
+
 // MARK: - Combined CT + ROI Display View
 // SwiftUI wrapper that combines CT rendering with ROI overlays
 // FIXED: Now actually renders CT images instead of solid colors
@@ -280,19 +292,106 @@ struct CTWithROIView: UIViewRepresentable {
         }
         
         private func renderCTTexture(_ ctTexture: MTLTexture, renderEncoder: MTLRenderCommandEncoder, viewSize: CGSize) {
-            // TODO: Implement full quad rendering with vertex/fragment shaders
-            // For now, the CT texture is generated but needs proper rendering pipeline
+            guard let device = MTLCreateSystemDefaultDevice() else {
+                print("❌ No Metal device available")
+                return
+            }
             
-            // In a complete implementation:
-            // 1. Create vertex buffer for full-screen quad
-            // 2. Use fragment shader to sample CT texture
-            // 3. Apply final color mapping and display
+            // 1. Create render pipeline state for CT windowing
+            guard let renderPipelineState = createCTRenderPipelineState(device: device) else {
+                print("❌ Failed to create CT render pipeline state")
+                return
+            }
             
-            print("   🎨 CT texture ready for display: \(ctTexture.width)x\(ctTexture.height)")
+            // 2. Create full-screen quad vertices
+            let quadVertices: [Float] = [
+                // Positions (NDC)    // Texture coordinates
+                -1.0, -1.0, 0.0, 1.0,  // Bottom left
+                 1.0, -1.0, 1.0, 1.0,  // Bottom right
+                -1.0,  1.0, 0.0, 0.0,  // Top left
+                 1.0,  1.0, 1.0, 0.0   // Top right
+            ]
             
-            // TEMPORARY: Log texture info to verify CT rendering pipeline
-            let pixelFormat = ctTexture.pixelFormat
-            print("   📊 CT texture format: \(pixelFormat)")
+            guard let vertexBuffer = device.makeBuffer(bytes: quadVertices, 
+                                                      length: quadVertices.count * MemoryLayout<Float>.size,
+                                                      options: []) else {
+                print("❌ Failed to create vertex buffer")
+                return
+            }
+            
+            // 3. Create aspect ratio uniforms for proper display
+            var aspectRatio = AspectRatioUniforms(
+                scaleX: 1.0,
+                scaleY: 1.0, 
+                offset: SIMD2<Float>(0.0, 0.0)
+            )
+            
+            guard let aspectBuffer = device.makeBuffer(bytes: &aspectRatio,
+                                                      length: MemoryLayout<AspectRatioUniforms>.size,
+                                                      options: []) else {
+                print("❌ Failed to create aspect ratio buffer")
+                return
+            }
+            
+            // 4. Create windowing parameters buffer
+            var windowingData = WindowingData(
+                windowCenter: currentWindowLevel.center,
+                windowWidth: currentWindowLevel.width
+            )
+            
+            guard let windowingBuffer = device.makeBuffer(bytes: &windowingData,
+                                                         length: MemoryLayout<WindowingData>.size,
+                                                         options: []) else {
+                print("❌ Failed to create windowing buffer")
+                return
+            }
+            
+            // 5. Set up render state
+            renderEncoder.setRenderPipelineState(renderPipelineState)
+            renderEncoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+            renderEncoder.setVertexBuffer(aspectBuffer, offset: 0, index: 1)
+            renderEncoder.setFragmentTexture(ctTexture, index: 0)
+            renderEncoder.setFragmentBuffer(windowingBuffer, offset: 0, index: 0)
+            
+            // 6. Draw the quad
+            renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+            
+            print("✅ CT texture rendered to screen: \(ctTexture.width)x\(ctTexture.height)")
+        }
+        
+        // MARK: - Create render pipeline state for CT windowing
+        private func createCTRenderPipelineState(device: MTLDevice) -> MTLRenderPipelineState? {
+            guard let library = device.makeDefaultLibrary() else {
+                print("❌ Failed to create Metal library")
+                return nil
+            }
+            
+            guard let vertexFunction = library.makeFunction(name: "vertex_main"),
+                  let fragmentFunction = library.makeFunction(name: "fragment_windowing") else {
+                print("❌ Failed to find CT rendering shaders")
+                return nil
+            }
+            
+            let pipelineDescriptor = MTLRenderPipelineDescriptor()
+            pipelineDescriptor.vertexFunction = vertexFunction
+            pipelineDescriptor.fragmentFunction = fragmentFunction
+            pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+            
+            // Enable blending for ROI overlay later
+            pipelineDescriptor.colorAttachments[0].isBlendingEnabled = true
+            pipelineDescriptor.colorAttachments[0].rgbBlendOperation = .add
+            pipelineDescriptor.colorAttachments[0].alphaBlendOperation = .add
+            pipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+            pipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
+            pipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+            pipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            
+            do {
+                return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+            } catch {
+                print("❌ Failed to create render pipeline state: \(error)")
+                return nil
+            }
         }
         
         private func renderPlaceholder(renderEncoder: MTLRenderCommandEncoder, viewSize: CGSize) {
