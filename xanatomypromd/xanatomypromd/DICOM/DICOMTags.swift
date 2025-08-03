@@ -116,6 +116,27 @@ extension DICOMTag {
     ]
 }
 
+// MARK: - CT Window Presets
+
+public struct CTWindowLevel {
+    public let name: String
+    public let center: Float
+    public let width: Float
+    
+    public init(name: String, center: Float, width: Float) {
+        self.name = name
+        self.center = center
+        self.width = width
+    }
+    
+    // Standard CT presets
+    public static let bone = CTWindowLevel(name: "Bone", center: 500, width: 2000)
+    public static let lung = CTWindowLevel(name: "Lung", center: -600, width: 1600)
+    public static let softTissue = CTWindowLevel(name: "Soft Tissue", center: 50, width: 350)
+    
+    public static let allPresets = [softTissue, bone, lung]
+}
+
 // MARK: - Common Transfer Syntax UIDs
 
 public struct TransferSyntax {

@@ -59,9 +59,7 @@ public class MetalVolumeRenderer {
         // Setup MPR pipeline
         try setupMPRPipeline()
         
-        print("✅ MetalVolumeRenderer initialized with FIXED HARDWARE ACCELERATION")
-        print("   🖥️  Device: \(device.name)")
-        print("   🧠 3D texture support: \(device.supportsFamily(.apple5) ? "Full" : "Limited")")
+        // Renderer initialized
     }
     
     // MARK: - Volume Loading (FIXED - No Float16 Conversion)
@@ -84,8 +82,7 @@ public class MetalVolumeRenderer {
             throw MetalVolumeError.textureCreationFailed
         }
         
-        // FIXED: Upload Int16 data directly (no conversion)
-        print("✅ Uploading volume data as Int16 directly...")
+        // Upload Int16 data directly
         
         // Upload volume data to 3D texture directly as Int16
         let bytesPerRow = volumeData.dimensions.x * MemoryLayout<Int16>.size  // 2 bytes per Int16
@@ -114,11 +111,7 @@ public class MetalVolumeRenderer {
         
         self.volumeTexture = texture
         
-        let stats = volumeData.getStatistics()
-        print("✅ 3D r16Sint texture created with HARDWARE SAMPLING: \(stats.dimensions.x)×\(stats.dimensions.y)×\(stats.dimensions.z)")
-        print("   🚀 Hardware acceleration: ACTIVE (no Float16 conversion)")
-        print("   💾 GPU memory: \(String(format: "%.1f", Double(stats.memoryUsage) / 1024.0 / 1024.0)) MB")
-        print("   📊 Value range: \(stats.minValue) to \(stats.maxValue)")
+        // Volume texture created successfully
     }
     
     // MARK: - MPR Slice Generation (Hardware Accelerated - Fixed)
@@ -162,9 +155,7 @@ public class MetalVolumeRenderer {
         ) { success in
             let renderTime = CFAbsoluteTimeGetCurrent() - startTime
             
-            if success {
-                print("🚀 FIXED HARDWARE MPR \(config.plane.rawValue): \(String(format: "%.2f", renderTime * 1000))ms")
-            }
+            // MPR generation completed
             
             completion(success ? outputTexture : nil)
         }
@@ -236,9 +227,9 @@ public class MetalVolumeRenderer {
         
         do {
             mprPipelineState = try device.makeComputePipelineState(function: function)
-            print("✅ FIXED HARDWARE ACCELERATED MPR compute pipeline created")
+            // MPR compute pipeline created
         } catch {
-            print("❌ Hardware MPR pipeline creation failed: \(error)")
+            // Pipeline creation failed
             throw MetalVolumeError.pipelineCreationFailed
         }
     }
@@ -249,14 +240,33 @@ public class MetalVolumeRenderer {
         }
         
         let dims = volumeData.dimensions
+        let spacing = volumeData.spacing
         
         switch plane {
         case .axial:
-            return (dims.x, dims.y)  // XY plane (512 × 512)
+            return (dims.x, dims.y)  // XY plane - maintains 1:1 pixel ratio
+            
         case .sagittal:
-            return (dims.y, dims.z)  // YZ plane (512 × 53)
+            // YZ plane - correct aspect ratio using physical spacing
+            let physicalWidth = Float(dims.y) * spacing.y
+            let physicalHeight = Float(dims.z) * spacing.z
+            let aspectRatio = physicalWidth / physicalHeight
+            
+            // Use fixed height and scale width by aspect ratio
+            let fixedHeight = 512
+            let correctedWidth = Int(Float(fixedHeight) * aspectRatio)
+            return (correctedWidth, fixedHeight)
+            
         case .coronal:
-            return (dims.x, dims.z)  // XZ plane (512 × 53)
+            // XZ plane - correct aspect ratio using physical spacing
+            let physicalWidth = Float(dims.x) * spacing.x
+            let physicalHeight = Float(dims.z) * spacing.z
+            let aspectRatio = physicalWidth / physicalHeight
+            
+            // Use fixed height and scale width by aspect ratio
+            let fixedHeight = 512
+            let correctedWidth = Int(Float(fixedHeight) * aspectRatio)
+            return (correctedWidth, fixedHeight)
         }
     }
     

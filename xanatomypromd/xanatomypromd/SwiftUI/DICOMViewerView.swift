@@ -34,7 +34,7 @@ struct AspectRatioUniforms {
 
 struct DICOMViewerView: View {
     @StateObject private var viewModel = DICOMViewerViewModel()
-    @State private var selectedWindowingPreset: CTWindowPresets.WindowLevel = CTWindowPresets.softTissue
+    @State private var selectedWindowingPreset: CTWindowLevel = CTWindowLevel.softTissue
     @State private var currentPlane: MPRPlane = .axial
     @State private var currentSlice = 0
     @State private var isLoading = true
@@ -267,7 +267,7 @@ struct DICOMViewerView: View {
             
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(CTWindowPresets.all, id: \CTWindowPresets.WindowLevel.name) { preset in
+                    ForEach(CTWindowLevel.allPresets, id: \.name) { preset in
                         windowingPresetButton(preset)
                     }
                 }
@@ -277,7 +277,7 @@ struct DICOMViewerView: View {
     }
     
     // MARK: - Individual Windowing Preset Button
-    private func windowingPresetButton(_ preset: CTWindowPresets.WindowLevel) -> some View {
+    private func windowingPresetButton(_ preset: CTWindowLevel) -> some View {
         Button(action: {
             selectedWindowingPreset = preset
         }) {

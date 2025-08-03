@@ -47,7 +47,7 @@ public class VolumeData {
             return pos1.z > pos2.z  // Higher Z = superior (top of head)
         }
         
-        print("📊 Building volume from \(sortedDatasets.count) slices")
+        // Building volume from datasets
         
         // Extract slice information
         var sliceInfos: [SliceInfo] = []
@@ -85,9 +85,7 @@ public class VolumeData {
             
             allVoxelData.append(contentsOf: rescaledPixels)
             
-            if index < 3 {
-                print("   Slice \(index): pos=\(sliceInfo.position), spacing=\(sliceInfo.pixelSpacing)")
-            }
+            // Slice processed
         }
         
         self.sliceInfos = sliceInfos

@@ -7,7 +7,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
     let viewModel: DICOMViewerViewModel
     let currentSlice: Int
     let currentPlane: MPRPlane
-    let windowingPreset: CTWindowPresets.WindowLevel
+    let windowingPreset: CTWindowLevel
     
     func makeUIView(context: Context) -> MTKView {
         let mtkView = MTKView()
@@ -40,7 +40,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
         private var currentViewModel: DICOMViewerViewModel?
         private var currentSlice: Int = 0
         private var currentPlane: MPRPlane = .axial
-        private var currentWindowingPreset: CTWindowPresets.WindowLevel = CTWindowPresets.softTissue
+        private var currentWindowingPreset: CTWindowLevel = CTWindowLevel.softTissue
         private var cachedTexture: MTLTexture?
         private var cacheKey: String = ""
         
@@ -52,9 +52,8 @@ struct MetalDICOMImageView: UIViewRepresentable {
         private func setupRenderer() {
             do {
                 volumeRenderer = try MetalVolumeRenderer()
-                print("✅ MetalDICOMImageView renderer initialized")
             } catch {
-                print("❌ Failed to initialize MetalDICOMImageView renderer: \(error)")
+                // Initialization failed - renderer will be nil
             }
         }
         
@@ -62,7 +61,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
             viewModel: DICOMViewerViewModel,
             currentSlice: Int,
             currentPlane: MPRPlane,
-            windowingPreset: CTWindowPresets.WindowLevel
+            windowingPreset: CTWindowLevel
         ) {
             self.currentViewModel = viewModel
             self.currentSlice = currentSlice
@@ -75,7 +74,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
                     do {
                         try volumeRenderer.loadVolume(volumeData)
                     } catch {
-                        print("❌ Failed to load volume: \(error)")
+                        // Volume loading failed
                     }
                 }
             }
@@ -151,7 +150,6 @@ struct MetalDICOMImageView: UIViewRepresentable {
             guard let library = device.makeDefaultLibrary(),
                   let vertexFunction = library.makeFunction(name: "vertex_main"),
                   let fragmentFunction = library.makeFunction(name: "fragment_display_texture") else {
-                print("❌ Failed to find display shaders")
                 return
             }
             
@@ -161,7 +159,6 @@ struct MetalDICOMImageView: UIViewRepresentable {
             pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
             
             guard let renderPipelineState = try? device.makeRenderPipelineState(descriptor: pipelineDescriptor) else {
-                print("❌ Failed to create display pipeline state")
                 return
             }
             
@@ -177,7 +174,6 @@ struct MetalDICOMImageView: UIViewRepresentable {
             guard let vertexBuffer = device.makeBuffer(bytes: quadVertices, 
                                                       length: quadVertices.count * MemoryLayout<Float>.size,
                                                       options: []) else {
-                print("❌ Failed to create vertex buffer")
                 return
             }
             

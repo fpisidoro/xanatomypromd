@@ -36,25 +36,25 @@ class DICOMViewerViewModel: ObservableObject {
     
     func setRTStructData(_ data: RTStructData) {
         rtStructData = data
-        print("✅ RTStruct data loaded: \(data.roiStructures.count) ROI structures")
+        // RTStruct data loaded
     }
     
     // MARK: - Initialization
     
     init() {
-        print("📊 DICOMViewerViewModel initialized")
+        // ViewModel initialized
     }
     
     // MARK: - DICOM Loading with Volume Data
     
     func loadDICOMSeries() async {
-        print("📂 Loading DICOM series with volume data...")
+        // Loading DICOM series
         isLoading = true
         
         do {
             // STEP 1: Load DICOM files
             let dicomFileURLs = try loadDICOMFiles()
-            print("   📁 Found \(dicomFileURLs.count) DICOM files")
+            // Found DICOM files
             
             // STEP 2: Parse DICOM datasets
             var datasets: [(DICOMDataset, Int)] = []
@@ -64,20 +64,20 @@ class DICOMViewerViewModel: ObservableObject {
                     let data = try Data(contentsOf: fileURL)
                     let dataset = try DICOMParser.parse(data)
                     datasets.append((dataset, index))
-                    print("   ✅ Parsed DICOM file \(index + 1)/\(dicomFileURLs.count)")
+                    // Parsed DICOM file
                 } catch {
-                    print("   ❌ Failed to parse \(fileURL.lastPathComponent): \(error)")
+                    // Failed to parse file
                 }
             }
             
             // STEP 3: Build 3D volume from datasets
             if !datasets.isEmpty {
-                print("   🔄 Building 3D volume from \(datasets.count) slices...")
+                // Building 3D volume
                 volumeData = try VolumeData(from: datasets)
                 totalSlices = volumeData?.dimensions.z ?? 53
-                print("   ✅ Volume built: \(volumeData?.dimensions ?? SIMD3<Int>(0,0,0))")
+                // Volume built successfully
             } else {
-                print("   ⚠️ No valid DICOM datasets - using fallback")
+                // Using fallback data
                 volumeData = nil
                 totalSlices = 53
             }
@@ -95,10 +95,10 @@ class DICOMViewerViewModel: ObservableObject {
             }
             
             isLoading = false
-            print("✅ DICOM series with volume data loaded successfully")
+            // DICOM series loaded
             
         } catch {
-            print("❌ Error loading DICOM series: \(error)")
+            // Error loading DICOM series
             // Fallback to test data
             volumeData = nil
             seriesInfo = createFallbackSeriesInfo()
@@ -289,13 +289,13 @@ class DICOMViewerViewModel: ObservableObject {
     // MARK: - Helper Functions
     
     private func loadRealRTStructData() -> RTStructData? {
-        print("📊 Loading real RTStruct data from files...")
+        // Loading RTStruct data
         
         // First try to load from actual RTStruct files
         let rtStructFiles = DICOMFileManager.getRTStructFiles()
         
         if let rtStructFile = rtStructFiles.first {
-            print("   📄 Found RTStruct file: \(rtStructFile.lastPathComponent)")
+            // Found RTStruct file
             
             do {
                 let data = try Data(contentsOf: rtStructFile)
@@ -304,17 +304,17 @@ class DICOMViewerViewModel: ObservableObject {
                 // Try parsing with minimal parser first
                 if let simpleData = MinimalRTStructParser.parseSimpleRTStruct(from: dataset) {
                     let fullData = MinimalRTStructParser.convertToFullROI(simpleData)
-                    print("   ✅ Successfully parsed RTStruct with \(fullData.roiStructures.count) ROI structures")
+                    // Successfully parsed RTStruct
                     return fullData
                 }
                 
             } catch {
-                print("   ❌ Error parsing RTStruct file: \(error)")
+                // Error parsing RTStruct file
             }
         }
         
         // Fallback to test data if no real RTStruct files available
-        print("   🧪 No RTStruct files found, using test data generator")
+        // Using test ROI data
         
         // Create test RTStruct data using our MinimalRTStructParser
         let testROIStructures = [
