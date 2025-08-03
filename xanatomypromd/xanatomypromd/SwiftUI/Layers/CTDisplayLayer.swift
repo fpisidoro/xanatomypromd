@@ -129,12 +129,13 @@ struct CTDisplayLayer: UIViewRepresentable {
             self.currentVolumeData = volumeData
             
             // Load volume data into renderer if available
-            if let volumeData = volumeData, let volumeRenderer = volumeRenderer {
+            if let volumeData = volumeData, volumeRenderer == nil {
                 do {
-                    try volumeRenderer.loadVolume(volumeData)
-                    print("✅ CT Display Layer: Volume data loaded")
+                    volumeRenderer = try MetalVolumeRenderer()
+                    try volumeRenderer?.loadVolume(volumeData)
+                    print("✅ CT Display Layer: Volume renderer created and loaded")
                 } catch {
-                    print("❌ CT Display Layer: Failed to load volume data: \(error)")
+                    print("❌ CT Display Layer: Failed to create/load volume renderer: \(error)")
                 }
             }
         }

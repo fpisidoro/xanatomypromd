@@ -122,6 +122,20 @@ struct XAnatomyProMainView: View {
                 .gesture(panGesture)
                 .gesture(zoomGesture)
                 .overlay(sliceNavigationOverlay(geometry: geometry))
+                .onAppear {
+                    // Initialize coordinate system when volume data is loaded
+                    if let volumeData = dataManager.volumeData {
+                        coordinateSystem.initializeFromVolumeData(volumeData)
+                        print("✅ Coordinate system initialized with volume dimensions: \(volumeData.dimensions)")
+                    }
+                }
+                .onChange(of: dataManager.volumeData) { volumeData in
+                    // Update coordinate system when volume data changes
+                    if let volumeData = volumeData {
+                        coordinateSystem.initializeFromVolumeData(volumeData)
+                        print("✅ Coordinate system updated with new volume data")
+                    }
+                }
             }
         }
         .frame(height: geometry.size.height * 0.7)
@@ -308,20 +322,36 @@ struct XAnatomyProMainView: View {
     
     private var loadingView: some View {
         VStack(spacing: 16) {
-            ProgressView("Loading...")
+            ProgressView("Loading DICOM Data...")
                 .progressViewStyle(CircularProgressViewStyle(tint: .white))
                 .foregroundColor(.white)
             
+            Text(dataManager.loadingProgress)
+                .font(.caption)
+                .foregroundColor(.gray)
+                .multilineTextAlignment(.center)
+            
             if dataManager.isVolumeLoaded {
-                Text("✅ Volume Ready")
-                    .foregroundColor(.green)
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("CT Volume Ready")
+                        .foregroundColor(.green)
+                }
             }
             
             if dataManager.isROILoaded {
-                Text("✅ ROI Ready")
-                    .foregroundColor(.green)
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("ROI Structures Ready")
+                        .foregroundColor(.green)
+                }
             }
         }
+        .padding()
+        .background(Color.black.opacity(0.8))
+        .cornerRadius(12)
     }
     
     private var statusIndicator: some View {
@@ -449,35 +479,170 @@ class XAnatomyDataManager: ObservableObject {
     @Published var roiData: RTStructData?
     @Published var patientInfo: PatientInfo?
     @Published var isLoading = false
+    @Published var loadingProgress: String = ""
+    
+    private var volumeRenderer: MetalVolumeRenderer?
     
     var isVolumeLoaded: Bool { volumeData != nil }
     var isROILoaded: Bool { roiData != nil }
     
+    init() {
+        // Initialize volume renderer
+        do {
+            volumeRenderer = try MetalVolumeRenderer()
+            print("✅ MetalVolumeRenderer initialized")
+        } catch {
+            print("❌ Failed to initialize MetalVolumeRenderer: \(error)")
+        }
+    }
+    
     func loadAllData() async {
         isLoading = true
+        loadingProgress = "Initializing..."
+        
         await loadVolumeData()
         await loadROIData()
         await loadPatientInfo()
+        
         isLoading = false
+        loadingProgress = "Complete"
     }
     
     private func loadVolumeData() async {
-        try? await Task.sleep(nanoseconds: 1_000_000_000)
-        print("📊 Volume data loaded (simulated)")
+        loadingProgress = "Loading DICOM files..."
+        
+        do {
+            // Get DICOM files from bundle
+            let dicomFiles = getDICOMFiles()
+            print("📂 Found \(dicomFiles.count) DICOM files")
+            
+            guard !dicomFiles.isEmpty else {
+                print("❌ No DICOM files found in bundle")
+                return
+            }
+            
+            loadingProgress = "Processing \(dicomFiles.count) DICOM files..."
+            
+            // Load volume using MetalVolumeRenderer
+            if let renderer = volumeRenderer {
+                let loadedVolumeData = try await renderer.loadVolumeFromDICOMFiles(dicomFiles)
+                
+                // Update published property on main actor
+                volumeData = loadedVolumeData
+                
+                loadingProgress = "Volume loaded successfully"
+                print("✅ Volume data loaded: \(loadedVolumeData.dimensions)")
+                
+                // Log volume info
+                if let info = renderer.getVolumeInfo() {
+                    print(info)
+                }
+            }
+            
+        } catch {
+            print("❌ Failed to load volume data: \(error)")
+            loadingProgress = "Failed to load volume: \(error.localizedDescription)"
+        }
     }
     
     private func loadROIData() async {
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        print("🎨 ROI data loaded (simulated)")
+        loadingProgress = "Loading ROI structures..."
+        
+        // Try to load RTStruct file
+        if let rtStructURL = getRTStructFile() {
+            do {
+                // This would use RTStruct parser when ready
+                // For now, just simulate
+                try await Task.sleep(nanoseconds: 500_000_000)
+                print("🎨 ROI data loaded (RTStruct parsing coming soon)")
+                loadingProgress = "ROI structures loaded"
+            } catch {
+                print("❌ Failed to load ROI data: \(error)")
+            }
+        } else {
+            print("📝 No RTStruct file found - continuing without ROI")
+        }
     }
     
     private func loadPatientInfo() async {
-        patientInfo = PatientInfo(
-            name: "Test Patient XAPV2",
-            studyDate: "2025-01-28",
-            modality: "CT"
-        )
-        print("👤 Patient info loaded")
+        loadingProgress = "Loading patient information..."
+        
+        // Extract patient info from first DICOM file
+        let dicomFiles = getDICOMFiles()
+        if let firstFile = dicomFiles.first {
+            do {
+                let data = try Data(contentsOf: firstFile)
+                let dataset = try DICOMParser.parse(data)
+                
+                let patientName = dataset.string(for: DICOMTag.patientName) ?? "Unknown Patient"
+                let studyDate = dataset.string(for: DICOMTag.studyDate) ?? "Unknown Date"
+                let modality = dataset.string(for: DICOMTag.modality) ?? "CT"
+                
+                patientInfo = PatientInfo(
+                    name: patientName,
+                    studyDate: studyDate,
+                    modality: modality
+                )
+                
+                print("👤 Patient info loaded: \(patientName)")
+                loadingProgress = "Patient information loaded"
+                
+            } catch {
+                print("❌ Failed to extract patient info: \(error)")
+                // Use fallback
+                patientInfo = PatientInfo(
+                    name: "Test Patient XAPV2",
+                    studyDate: "2025-01-28",
+                    modality: "CT"
+                )
+            }
+        }
+    }
+    
+    // MARK: - File Discovery
+    
+    private func getDICOMFiles() -> [URL] {
+        guard let bundlePath = Bundle.main.resourcePath else {
+            print("❌ Could not find bundle resource path")
+            return []
+        }
+        
+        let testDataPath = (bundlePath as NSString).appendingPathComponent("TestData/XAPMD^COUSINALPHA")
+        
+        do {
+            let fileURLs = try FileManager.default.contentsOfDirectory(
+                at: URL(fileURLWithPath: testDataPath),
+                includingPropertiesForKeys: nil,
+                options: .skipsHiddenFiles
+            )
+            
+            let dicomFiles = fileURLs.filter { url in
+                url.pathExtension.lowercased() == "dcm" ||
+                url.lastPathComponent.contains("2.16.840.1.114362")
+            }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+            
+            print("📂 Found \(dicomFiles.count) DICOM files in: \(testDataPath)")
+            return dicomFiles
+            
+        } catch {
+            print("❌ Error reading DICOM files from \(testDataPath): \(error)")
+            return []
+        }
+    }
+    
+    private func getRTStructFile() -> URL? {
+        guard let bundlePath = Bundle.main.resourcePath else { return nil }
+        
+        let rtStructPath = (bundlePath as NSString).appendingPathComponent("TestData/test_rtstruct.dcm")
+        let rtStructURL = URL(fileURLWithPath: rtStructPath)
+        
+        return FileManager.default.fileExists(atPath: rtStructPath) ? rtStructURL : nil
+    }
+    
+    // MARK: - Volume Renderer Access
+    
+    func getVolumeRenderer() -> MetalVolumeRenderer? {
+        return volumeRenderer
     }
 }
 
