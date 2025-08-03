@@ -267,33 +267,38 @@ struct DICOMViewerView: View {
             
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(CTWindowPresets.all, id: \\.name) { preset in
-                        Button(action: {
-                            selectedWindowingPreset = preset
-                        }) {
-                            VStack(spacing: 4) {
-                                Text(preset.name)
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.white)
-                                
-                                Text("C:\\(Int(preset.center)) W:\\(Int(preset.width))")
-                                    .font(.caption2)
-                                    .foregroundColor(.gray)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(
-                                selectedWindowingPreset.name == preset.name
-                                    ? Color.blue
-                                    : Color.gray.opacity(0.3)
-                            )
-                            .cornerRadius(8)
-                        }
+                    ForEach(CTWindowPresets.all, id: \.name) { preset in
+                        windowingPresetButton(preset)
                     }
                 }
                 .padding(.horizontal)
             }
+        }
+    }
+    
+    // MARK: - Individual Windowing Preset Button
+    private func windowingPresetButton(_ preset: CTWindowPresets.WindowLevel) -> some View {
+        Button(action: {
+            selectedWindowingPreset = preset
+        }) {
+            VStack(spacing: 4) {
+                Text(preset.name)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.white)
+                
+                Text("C:\(Int(preset.center)) W:\(Int(preset.width))")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                selectedWindowingPreset.name == preset.name
+                    ? Color.blue
+                    : Color.gray.opacity(0.3)
+            )
+            .cornerRadius(8)
         }
     }
     
