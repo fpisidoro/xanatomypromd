@@ -214,8 +214,14 @@ struct CrosshairOverlayView: View {
                 CrosshairLine(
                     startPoint: crosshairManager.getHorizontalCrosshairLine(for: plane, viewSize: viewSize).0,
                     endPoint: crosshairManager.getHorizontalCrosshairLine(for: plane, viewSize: viewSize).1,
-                    centerPoint: crosshairManager.getCrosshairScreenPosition(for: plane, viewSize: viewSize),
-                    opacity: Double(crosshairManager.opacity),
+                    intersectionPoint: crosshairManager.getCrosshairScreenPosition(for: plane, viewSize: viewSize),
+                    appearance: CrosshairAppearance(
+                        isVisible: true,
+                        color: .green,
+                        opacity: Double(crosshairManager.opacity),
+                        lineWidth: 1.0,
+                        fadeDistance: 0.4
+                    ),
                     isHorizontal: true
                 )
                 
@@ -223,8 +229,14 @@ struct CrosshairOverlayView: View {
                 CrosshairLine(
                     startPoint: crosshairManager.getVerticalCrosshairLine(for: plane, viewSize: viewSize).0,
                     endPoint: crosshairManager.getVerticalCrosshairLine(for: plane, viewSize: viewSize).1,
-                    centerPoint: crosshairManager.getCrosshairScreenPosition(for: plane, viewSize: viewSize),
-                    opacity: Double(crosshairManager.opacity),
+                    intersectionPoint: crosshairManager.getCrosshairScreenPosition(for: plane, viewSize: viewSize),
+                    appearance: CrosshairAppearance(
+                        isVisible: true,
+                        color: .green,
+                        opacity: Double(crosshairManager.opacity),
+                        lineWidth: 1.0,
+                        fadeDistance: 0.4
+                    ),
                     isHorizontal: false
                 )
             }
