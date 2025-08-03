@@ -34,6 +34,7 @@ struct AspectRatioUniforms {
 
 struct DICOMViewerView: View {
     @StateObject private var viewModel = DICOMViewerViewModel()
+    @StateObject private var crosshairManager = CrosshairManager()
     @State private var selectedWindowingPreset: CTWindowLevel = CTWindowLevel.softTissue
     @State private var currentPlane: MPRPlane = .axial
     @State private var currentSlice = 0
@@ -123,38 +124,49 @@ struct DICOMViewerView: View {
                     }
                 }
             } else {
-                // RESTORED: Metal-rendered DICOM image with proper MPR support
-                MetalDICOMImageView(
-                    viewModel: viewModel,
-                    currentSlice: currentSlice,
-                    currentPlane: currentPlane,
-                    windowingPreset: selectedWindowingPreset
-                )
-                .scaleEffect(scale)
-                .offset(dragOffset)
-                .clipped()
-                .gesture(DragGesture()
-                    .onChanged { value in
-                        dragOffset = value.translation
+                GeometryReader { imageGeometry in
+                    ZStack {
+                        // DICOM image
+                        MetalDICOMImageView(
+                            viewModel: viewModel,
+                            currentSlice: currentSlice,
+                            currentPlane: currentPlane,
+                            windowingPreset: selectedWindowingPreset
+                        )
+                        .scaleEffect(scale)
+                        .offset(dragOffset)
+                        .clipped()
+                        .gesture(DragGesture()
+                            .onChanged { value in
+                                dragOffset = value.translation
+                            }
+                            .onEnded { _ in
+                                withAnimation(.spring()) {
+                                    dragOffset = .zero
+                                }
+                            }
+                        )
+                        .gesture(MagnificationGesture()
+                            .onChanged { value in
+                                scale = lastScale * value
+                            }
+                            .onEnded { value in
+                                lastScale = scale
+                                withAnimation(.spring()) {
+                                    scale = max(0.5, min(scale, 3.0))
+                                    lastScale = scale
+                                }
+                            }
+                        )
+                        
+                        // Crosshair overlay
+                        CrosshairOverlayView(
+                            crosshairManager: crosshairManager,
+                            plane: currentPlane,
+                            viewSize: imageGeometry.size
+                        )
                     }
-                    .onEnded { _ in
-                        withAnimation(.spring()) {
-                            dragOffset = .zero
-                        }
-                    }
-                )
-                .gesture(MagnificationGesture()
-                    .onChanged { value in
-                        scale = lastScale * value
-                    }
-                    .onEnded { value in
-                        lastScale = scale
-                        withAnimation(.spring()) {
-                            scale = max(0.5, min(scale, 3.0))
-                            lastScale = scale
-                        }
-                    }
-                )
+                }
                 
                 // Slice navigation overlay
                 sliceNavigationOverlay(geometry: geometry)
@@ -319,7 +331,11 @@ struct DICOMViewerView: View {
                 Slider(
                     value: Binding(
                         get: { Double(currentSlice) },
-                        set: { currentSlice = Int($0) }
+                        set: { newValue in
+                            let newSlice = Int(newValue)
+                            currentSlice = newSlice
+                            crosshairManager.updateFromSliceScroll(plane: currentPlane, sliceIndex: newSlice)
+                        }
                     ),
                     in: 0...Double(getMaxSlicesForPlane() - 1),
                     step: 1
@@ -370,17 +386,22 @@ struct DICOMViewerView: View {
     private func switchToPlane(_ plane: MPRPlane) {
         currentPlane = plane
         currentSlice = 0 // Reset to first slice when switching planes
+        
+        // Update crosshair position when switching planes
+        crosshairManager.updateFromSliceScroll(plane: plane, sliceIndex: currentSlice)
     }
     
     private func previousSlice() {
         if currentSlice > 0 {
             currentSlice -= 1
+            crosshairManager.updateFromSliceScroll(plane: currentPlane, sliceIndex: currentSlice)
         }
     }
     
     private func nextSlice() {
         if currentSlice < getMaxSlicesForPlane() - 1 {
             currentSlice += 1
+            crosshairManager.updateFromSliceScroll(plane: currentPlane, sliceIndex: currentSlice)
         }
     }
     

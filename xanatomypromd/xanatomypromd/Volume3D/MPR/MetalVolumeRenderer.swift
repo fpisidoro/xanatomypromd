@@ -244,29 +244,30 @@ public class MetalVolumeRenderer {
         
         switch plane {
         case .axial:
-            return (dims.x, dims.y)  // XY plane - maintains 1:1 pixel ratio
+            // XY plane - use actual pixel dimensions (square pixels)
+            return (dims.x, dims.y)
             
         case .sagittal:
-            // YZ plane - correct aspect ratio using physical spacing
-            let physicalWidth = Float(dims.y) * spacing.y
-            let physicalHeight = Float(dims.z) * spacing.z
-            let aspectRatio = physicalWidth / physicalHeight
+            // YZ plane - fix aspect ratio using physical spacing
+            // Width is Y direction, Height is Z direction
+            let physicalWidth = Float(dims.y) * spacing.y   // mm
+            let physicalHeight = Float(dims.z) * spacing.z  // mm
             
-            // Use fixed height and scale width by aspect ratio
-            let fixedHeight = 512
-            let correctedWidth = Int(Float(fixedHeight) * aspectRatio)
-            return (correctedWidth, fixedHeight)
+            // Use Y dimension as base and scale Z appropriately
+            let baseWidth = dims.y
+            let correctedHeight = Int(Float(baseWidth) * (physicalHeight / physicalWidth))
+            return (baseWidth, correctedHeight)
             
         case .coronal:
-            // XZ plane - correct aspect ratio using physical spacing
-            let physicalWidth = Float(dims.x) * spacing.x
-            let physicalHeight = Float(dims.z) * spacing.z
-            let aspectRatio = physicalWidth / physicalHeight
+            // XZ plane - fix aspect ratio using physical spacing  
+            // Width is X direction, Height is Z direction
+            let physicalWidth = Float(dims.x) * spacing.x   // mm
+            let physicalHeight = Float(dims.z) * spacing.z  // mm
             
-            // Use fixed height and scale width by aspect ratio
-            let fixedHeight = 512
-            let correctedWidth = Int(Float(fixedHeight) * aspectRatio)
-            return (correctedWidth, fixedHeight)
+            // Use X dimension as base and scale Z appropriately
+            let baseWidth = dims.x
+            let correctedHeight = Int(Float(baseWidth) * (physicalHeight / physicalWidth))
+            return (baseWidth, correctedHeight)
         }
     }
     
