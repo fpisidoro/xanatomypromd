@@ -123,21 +123,37 @@ struct CTDisplayLayer: UIViewRepresentable {
             windowLevel: CTWindowLevel,
             volumeData: VolumeData?
         ) {
+            print("🔍 CT Display: updateRenderingParameters called")
+            print("   Plane: \(plane), VolumeData: \(volumeData != nil ? "present" : "nil")")
+            
             self.currentCoordinateSystem = coordinateSystem
             self.currentPlane = plane
             self.currentWindowLevel = windowLevel
-            self.currentVolumeData = volumeData
             
-            // Load volume data into renderer if available
-            if let volumeData = volumeData, volumeRenderer == nil {
-                do {
-                    volumeRenderer = try MetalVolumeRenderer()
-                    try volumeRenderer?.loadVolume(volumeData)
-                    print("✅ CT Display Layer: Volume renderer created and loaded")
-                } catch {
-                    print("❌ CT Display Layer: Failed to create/load volume renderer: \(error)")
+            // Load volume data into renderer if provided
+            if let volumeData = volumeData {
+                if currentVolumeData == nil {
+                    print("🔍 CT Display: Loading volume data...")
+                    do {
+                        if volumeRenderer == nil {
+                            volumeRenderer = try MetalVolumeRenderer()
+                        }
+                        try volumeRenderer?.loadVolume(volumeData)
+                        self.currentVolumeData = volumeData
+                        print("✅ CT Display: Volume data loaded successfully")
+                    } catch {
+                        print("❌ CT Display: Failed to load volume data: \(error)")
+                    }
+                } else {
+                    self.currentVolumeData = volumeData
                 }
             }
+            
+            // Clear cache to force regeneration
+            cachedTexture = nil
+            cacheKey = ""
+            
+            print("🔍 CT Display: Parameters updated, cache cleared")
         }
         
         // MARK: - MTKViewDelegate
