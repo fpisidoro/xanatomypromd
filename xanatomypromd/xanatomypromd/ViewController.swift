@@ -10,7 +10,7 @@ import SwiftUI
 
 class ViewController: UIViewController {
     
-    private var hostingController: UIHostingController<DICOMViewerView>?
+    private var hostingController: UIHostingController<XAnatomyProMainView>?
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -39,8 +39,8 @@ class ViewController: UIViewController {
     }
     
     private func setupDICOMViewer() {
-        // Create SwiftUI DICOM Viewer
-        let dicomViewer = DICOMViewerView()
+        // Create SwiftUI DICOM Viewer with new layered architecture
+        let dicomViewer = XAnatomyProMainView()
         let hostingController = UIHostingController(rootView: dicomViewer)
         
         // Store reference
@@ -61,7 +61,7 @@ class ViewController: UIViewController {
         
         hostingController.didMove(toParent: self)
         
-        print("✅ SwiftUI DICOM Viewer initialized successfully")
+        print("✅ SwiftUI X-Anatomy Pro v2.0 with layered architecture initialized successfully")
     }
     
     override var prefersStatusBarHidden: Bool {
