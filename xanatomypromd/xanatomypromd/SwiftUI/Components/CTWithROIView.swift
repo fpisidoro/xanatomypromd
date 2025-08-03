@@ -9,12 +9,6 @@ struct WindowingData {
     let windowWidth: Float
 }
 
-struct AspectRatioUniforms {
-    let scaleX: Float
-    let scaleY: Float
-    let offset: SIMD2<Float>
-}
-
 // MARK: - Combined CT + ROI Display View
 // SwiftUI wrapper that combines CT rendering with ROI overlays
 struct CTWithROIView: UIViewRepresentable {
