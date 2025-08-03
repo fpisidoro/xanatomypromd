@@ -32,7 +32,62 @@ struct CTWithROIView: UIViewRepresentable {
     // MARK: - UIViewRepresentable Implementation
     
     func makeUIView(context: Context) -> MTKView {
-        let mtkView = MTKView()
+        }
+        
+        // Helper method to create PixelData from slice data
+        private func createPixelData(from sliceData: [Int16], width: Int, height: Int) -> PixelData? {
+            let data = sliceData.withUnsafeBytes { bytes in
+                Data(bytes: bytes.baseAddress!, count: bytes.count)
+            }
+            
+            return PixelData(
+                data: data,
+                rows: height,
+                columns: width,
+                bitsAllocated: 16,
+                bitsStored: 16,
+                highBit: 15,
+                pixelRepresentation: 1  // Signed
+            )
+        }
+        
+        // Simple method to display a pre-processed texture
+        private func displayTexture(_ texture: MTLTexture, renderEncoder: MTLRenderCommandEncoder, viewSize: CGSize) {
+            guard let device = MTLCreateSystemDefaultDevice() else {
+                print("❌ No Metal device available")
+                return
+            }
+            
+            // Create simple display pipeline
+            guard let renderPipelineState = createDisplayPipelineState(device: device) else {
+                print("❌ Failed to create display pipeline state")
+                return
+            }
+            
+            // Create full-screen quad vertices
+            let quadVertices: [Float] = [
+                // Positions (NDC)    // Texture coordinates
+                -1.0, -1.0, 0.0, 1.0,  // Bottom left
+                 1.0, -1.0, 1.0, 1.0,  // Bottom right
+                -1.0,  1.0, 0.0, 0.0,  // Top left
+                 1.0,  1.0, 1.0, 0.0   // Top right
+            ]
+            
+            guard let vertexBuffer = device.makeBuffer(bytes: quadVertices, 
+                                                      length: quadVertices.count * MemoryLayout<Float>.size,
+                                                      options: []) else {
+                print("❌ Failed to create vertex buffer")
+                return
+            }
+            
+            // Set up render state and display the texture
+            renderEncoder.setRenderPipelineState(renderPipelineState)
+            renderEncoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+            renderEncoder.setFragmentTexture(texture, index: 0)
+            renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+            
+            print("✅ CT texture displayed: \(texture.width)x\(texture.height)")
+        }let mtkView = MTKView()
         mtkView.device = MTLCreateSystemDefaultDevice()
         mtkView.delegate = context.coordinator
         mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
@@ -166,144 +221,71 @@ struct CTWithROIView: UIViewRepresentable {
             renderEncoder.endEncoding()
         }
         
-        // NEW: Render actual CT slice using Metal volume renderer
+        // Use existing MetalRenderer for simple slice display
         private func renderCTBackground(renderEncoder: MTLRenderCommandEncoder, viewSize: CGSize) {
-            guard let volumeRenderer = volumeRenderer,
+            guard let metalRenderer = metalRenderer,
                   let volumeData = currentVolumeData else {
-                print("⚠️ Volume renderer or data not available")
+                print("⚠️ Metal renderer or volume data not available")
                 return
             }
             
-            // For now, extract slice data directly from volume data
-            // TODO: Implement proper GPU MPR slice generation
-            let sliceData = extractSliceDataDirectly()
-            
-            if let (data, width, height) = sliceData {
-                // Convert slice data to Metal texture and render
-                if let ctTexture = createTextureFromSliceData(data, width: width, height: height) {
-                    renderCTTexture(ctTexture, renderEncoder: renderEncoder, viewSize: viewSize)
-                    print("✅ Rendered CT slice \(currentSliceIndex) for \(currentPlane.displayName)")
-                } else {
-                    print("❌ Failed to create texture from slice data")
-                    renderPlaceholder(renderEncoder: renderEncoder, viewSize: viewSize)
-                }
-            } else {
-                print("❌ Failed to extract slice data")
-                renderPlaceholder(renderEncoder: renderEncoder, viewSize: viewSize)
-            }
-        }
-        
-        private func extractSliceDataDirectly() -> (data: [Int16], width: Int, height: Int)? {
-            guard let volumeData = currentVolumeData else { return nil }
-            
+            // Extract slice data using the existing VolumeData methods
             let normalizedSliceIndex = Float(currentSliceIndex) / Float(getMaxSlicesForPlane())
+            
+            let pixelData: PixelData?
             
             switch currentPlane {
             case .axial:
-                let zIndex = Int(normalizedSliceIndex * Float(volumeData.dimensions.z - 1))
-                let sliceData = extractAxialSlice(volumeData: volumeData, zIndex: zIndex)
-                return (data: sliceData, width: volumeData.dimensions.x, height: volumeData.dimensions.y)
+                let z = normalizedSliceIndex * Float(volumeData.dimensions.z - 1)
+                let sliceData = volumeData.extractAxialSlice(atZ: z)
+                pixelData = createPixelData(from: sliceData, width: volumeData.dimensions.x, height: volumeData.dimensions.y)
                 
             case .sagittal:
-                let xIndex = Int(normalizedSliceIndex * Float(volumeData.dimensions.x - 1))
-                let sliceData = extractSagittalSlice(volumeData: volumeData, xIndex: xIndex)
-                return (data: sliceData, width: volumeData.dimensions.y, height: volumeData.dimensions.z)
+                let x = normalizedSliceIndex * Float(volumeData.dimensions.x - 1)
+                let sliceData = volumeData.extractSagittalSlice(atX: x)
+                pixelData = createPixelData(from: sliceData, width: volumeData.dimensions.y, height: volumeData.dimensions.z)
                 
             case .coronal:
-                let yIndex = Int(normalizedSliceIndex * Float(volumeData.dimensions.y - 1))
-                let sliceData = extractCoronalSlice(volumeData: volumeData, yIndex: yIndex)
-                return (data: sliceData, width: volumeData.dimensions.x, height: volumeData.dimensions.z)
-            }
-        }
-        
-        private func extractAxialSlice(volumeData: VolumeData, zIndex: Int) -> [Int16] {
-            let dims = volumeData.dimensions
-            let sliceSize = dims.x * dims.y
-            let startIndex = zIndex * sliceSize
-            let endIndex = startIndex + sliceSize
-            
-            guard endIndex <= volumeData.voxelData.count else {
-                return Array(repeating: 0, count: sliceSize)
+                let y = normalizedSliceIndex * Float(volumeData.dimensions.y - 1)
+                let sliceData = volumeData.extractCoronalSlice(atY: y)
+                pixelData = createPixelData(from: sliceData, width: volumeData.dimensions.x, height: volumeData.dimensions.z)
             }
             
-            return Array(volumeData.voxelData[startIndex..<endIndex])
-        }
-        
-        private func extractSagittalSlice(volumeData: VolumeData, xIndex: Int) -> [Int16] {
-            let dims = volumeData.dimensions
-            var sliceData: [Int16] = []
-            
-            for z in 0..<dims.z {
-                for y in 0..<dims.y {
-                    let volumeIndex = z * (dims.x * dims.y) + y * dims.x + xIndex
-                    if volumeIndex < volumeData.voxelData.count {
-                        sliceData.append(volumeData.voxelData[volumeIndex])
-                    } else {
-                        sliceData.append(0)
-                    }
-                }
+            guard let pixelData = pixelData else {
+                print("❌ Failed to extract slice data")
+                return
             }
             
-            return sliceData
-        }
-        
-        private func extractCoronalSlice(volumeData: VolumeData, yIndex: Int) -> [Int16] {
-            let dims = volumeData.dimensions
-            var sliceData: [Int16] = []
-            
-            for z in 0..<dims.z {
-                for x in 0..<dims.x {
-                    let volumeIndex = z * (dims.x * dims.y) + yIndex * dims.x + x
-                    if volumeIndex < volumeData.voxelData.count {
-                        sliceData.append(volumeData.voxelData[volumeIndex])
-                    } else {
-                        sliceData.append(0)
-                    }
-                }
-            }
-            
-            return sliceData
-        }
-        
-        private func createTextureFromSliceData(_ data: [Int16], width: Int, height: Int) -> MTLTexture? {
-            guard let device = MTLCreateSystemDefaultDevice() else { return nil }
-            
-            let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
-                pixelFormat: .r16Sint, // Match the Int16 slice data
-                width: width,
-                height: height,
-                mipmapped: false
-            )
-            textureDescriptor.usage = [.shaderRead]
-            
-            guard let texture = device.makeTexture(descriptor: textureDescriptor) else { return nil }
-            
-            let region = MTLRegionMake2D(0, 0, width, height)
-            data.withUnsafeBytes { bytes in
-                texture.replace(
-                    region: region,
-                    mipmapLevel: 0,
-                    withBytes: bytes.baseAddress!,
-                    bytesPerRow: width * 2 // 2 bytes per Int16
+            // Use MetalRenderer to display the slice with proper windowing
+            do {
+                let ctTexture = try metalRenderer.renderWithWindowing(
+                    pixelData: pixelData,
+                    windowLevel: currentWindowLevel
                 )
+                
+                // Display the windowed texture
+                displayTexture(ctTexture, renderEncoder: renderEncoder, viewSize: viewSize)
+                
+            } catch {
+                print("❌ Failed to render CT slice: \(error)")
             }
-            
-            return texture
         }
+
         
-        private func renderCTTexture(_ ctTexture: MTLTexture, renderEncoder: MTLRenderCommandEncoder, viewSize: CGSize) {
+        // Simple display method for already-processed MPR texture
+        private func displayMPRTexture(_ mprTexture: MTLTexture, renderEncoder: MTLRenderCommandEncoder, viewSize: CGSize) {
             guard let device = MTLCreateSystemDefaultDevice() else {
                 print("❌ No Metal device available")
                 return
             }
             
-            // 1. Create render pipeline state for CT windowing
-            guard let renderPipelineState = createCTRenderPipelineState(device: device) else {
-                print("❌ Failed to create CT render pipeline state")
+            // Create simple display pipeline for the already-windowed texture
+            guard let renderPipelineState = createDisplayPipelineState(device: device) else {
+                print("❌ Failed to create display pipeline state")
                 return
             }
             
-            // 2. Create full-screen quad vertices
+            // Create full-screen quad vertices
             let quadVertices: [Float] = [
                 // Positions (NDC)    // Texture coordinates
                 -1.0, -1.0, 0.0, 1.0,  // Bottom left
@@ -319,56 +301,25 @@ struct CTWithROIView: UIViewRepresentable {
                 return
             }
             
-            // 3. Create aspect ratio uniforms for proper display
-            var aspectRatio = AspectRatioUniforms(
-                scaleX: 1.0,
-                scaleY: 1.0, 
-                offset: SIMD2<Float>(0.0, 0.0)
-            )
-            
-            guard let aspectBuffer = device.makeBuffer(bytes: &aspectRatio,
-                                                      length: MemoryLayout<AspectRatioUniforms>.size,
-                                                      options: []) else {
-                print("❌ Failed to create aspect ratio buffer")
-                return
-            }
-            
-            // 4. Create windowing parameters buffer
-            var windowingData = WindowingData(
-                windowCenter: currentWindowLevel.center,
-                windowWidth: currentWindowLevel.width
-            )
-            
-            guard let windowingBuffer = device.makeBuffer(bytes: &windowingData,
-                                                         length: MemoryLayout<WindowingData>.size,
-                                                         options: []) else {
-                print("❌ Failed to create windowing buffer")
-                return
-            }
-            
-            // 5. Set up render state
+            // Set up render state and display the texture
             renderEncoder.setRenderPipelineState(renderPipelineState)
             renderEncoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-            renderEncoder.setVertexBuffer(aspectBuffer, offset: 0, index: 1)
-            renderEncoder.setFragmentTexture(ctTexture, index: 0)
-            renderEncoder.setFragmentBuffer(windowingBuffer, offset: 0, index: 0)
-            
-            // 6. Draw the quad
+            renderEncoder.setFragmentTexture(mprTexture, index: 0)
             renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
             
-            print("✅ CT texture rendered to screen: \(ctTexture.width)x\(ctTexture.height)")
+            print("✅ MPR texture displayed: \(mprTexture.width)x\(mprTexture.height)")
         }
         
-        // MARK: - Create render pipeline state for CT windowing
-        private func createCTRenderPipelineState(device: MTLDevice) -> MTLRenderPipelineState? {
+        // MARK: - Create simple display pipeline state for already-processed textures
+        private func createDisplayPipelineState(device: MTLDevice) -> MTLRenderPipelineState? {
             guard let library = device.makeDefaultLibrary() else {
                 print("❌ Failed to create Metal library")
                 return nil
             }
             
             guard let vertexFunction = library.makeFunction(name: "vertex_main"),
-                  let fragmentFunction = library.makeFunction(name: "fragment_windowing") else {
-                print("❌ Failed to find CT rendering shaders")
+                  let fragmentFunction = library.makeFunction(name: "fragment_display_texture") else {
+                print("❌ Failed to find display shaders")
                 return nil
             }
             
@@ -377,19 +328,10 @@ struct CTWithROIView: UIViewRepresentable {
             pipelineDescriptor.fragmentFunction = fragmentFunction
             pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
             
-            // Enable blending for ROI overlay later
-            pipelineDescriptor.colorAttachments[0].isBlendingEnabled = true
-            pipelineDescriptor.colorAttachments[0].rgbBlendOperation = .add
-            pipelineDescriptor.colorAttachments[0].alphaBlendOperation = .add
-            pipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-            pipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
-            pipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
-            pipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
-            
             do {
                 return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
             } catch {
-                print("❌ Failed to create render pipeline state: \(error)")
+                print("❌ Failed to create display pipeline state: \(error)")
                 return nil
             }
         }
