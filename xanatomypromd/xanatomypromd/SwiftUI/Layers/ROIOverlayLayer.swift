@@ -31,7 +31,7 @@ struct ROIOverlayLayer: View {
             guard let roiData = roiData, roiSettings.isVisible else { return }
             
             // Get current slice position from coordinate system
-            let currentSlicePosition = coordinateSystem.getCurrentSlicePosition(for: plane)
+            let currentSlicePosition = coordinateSystem.getCurrentSliceIndex(for: plane)
             
             // Render each ROI structure
             for roiStructure in roiData.roiStructures {
