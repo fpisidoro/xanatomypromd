@@ -189,7 +189,8 @@ struct MetalDICOMImageView: UIViewRepresentable {
                 cacheKey = newCacheKey
                 
                 guard let volumeRenderer = volumeRenderer else {
-                    clearView(drawable: drawable, commandQueue: commandQueue)
+                    // Show test pattern if no volume renderer
+                    displayTestPattern(drawable: drawable, commandQueue: commandQueue, device: device)
                     return
                 }
                 
@@ -202,7 +203,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
                     windowWidth: currentWindowingPreset.width
                 )
                 
-                // Generate MPR slice without excessive logging
+                // Generate MPR slice
                 volumeRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
                     guard let self = self else { return }
                     self.cachedTexture = mprTexture
@@ -217,11 +218,27 @@ struct MetalDICOMImageView: UIViewRepresentable {
             
             // Display cached texture if available
             guard let mprTexture = cachedTexture else { 
-                clearView(drawable: drawable, commandQueue: commandQueue)
+                displayTestPattern(drawable: drawable, commandQueue: commandQueue, device: device)
                 return 
             }
             
             displayTexture(mprTexture, drawable: drawable, commandQueue: commandQueue, device: device)
+        }
+        
+        private func displayTestPattern(drawable: CAMetalDrawable, commandQueue: MTLCommandQueue, device: MTLDevice) {
+            let commandBuffer = commandQueue.makeCommandBuffer()
+            
+            let renderPassDescriptor = MTLRenderPassDescriptor()
+            renderPassDescriptor.colorAttachments[0].texture = drawable.texture
+            renderPassDescriptor.colorAttachments[0].loadAction = .clear
+            renderPassDescriptor.colorAttachments[0].storeAction = .store
+            renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
+            
+            if let renderEncoder = commandBuffer?.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
+                renderEncoder.endEncoding()
+            }
+            commandBuffer?.present(drawable)
+            commandBuffer?.commit()
         }
         
         private func clearView(drawable: CAMetalDrawable, commandQueue: MTLCommandQueue) {
