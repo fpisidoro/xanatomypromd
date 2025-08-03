@@ -1,9 +1,9 @@
 import SwiftUI
 import MetalKit
 
-// MARK: - Layer 3: Crosshair Overlay Layer (MEDICAL-ACCURATE 3D COORDINATES)
-// MEDICAL PRINCIPLE: Crosshairs MUST align with CT image bounds, NOT screen bounds
-// Transforms 3D medical coordinates to image-aligned screen coordinates
+// MARK: - Layer 3: Crosshair Overlay Layer (FIXED COORDINATE SYSTEM)
+// MEDICAL PRINCIPLE: Crosshairs MUST align with CT image bounds with CORRECT coordinate mapping
+// FIXED: Proper coordinate normalization, centering, and full range movement
 
 struct CrosshairOverlayLayer: View {
     
@@ -66,11 +66,11 @@ struct CrosshairOverlayLayer: View {
         }
         .allowsHitTesting(false) // Crosshairs are visual only
         .onAppear {
-            print("🎯 Medical Crosshairs: Initialized for \(plane) plane")
+            print("🎯 FIXED Crosshairs: Initialized for \(plane) plane")
             logMedicalCoordinateMapping()
         }
         .onChange(of: plane) { newPlane in
-            print("🎯 Medical Crosshairs: Plane changed to \(newPlane)")
+            print("🎯 FIXED Crosshairs: Plane changed to \(newPlane)")
             logMedicalCoordinateMapping()
         }
         .onChange(of: coordinateSystem.currentWorldPosition) { _ in
@@ -78,26 +78,26 @@ struct CrosshairOverlayLayer: View {
         }
     }
     
-    // MARK: - Medical 3D Coordinate Transformation
+    // MARK: - FIXED Medical 3D Coordinate Transformation
     
-    /// Calculate crosshair position using medical-accurate 3D coordinate transformation
+    /// Calculate crosshair position using FIXED medical-accurate 3D coordinate transformation
     private func calculateMedicalCrosshairPosition(viewSize: CGSize) -> CGPoint? {
         guard let volumeData = volumeData else {
-            print("❌ Medical Crosshairs: No volume data available")
+            print("❌ FIXED Crosshairs: No volume data available")
             return nil
         }
         
         // Get current 3D medical position from coordinate system
         let currentPosition = coordinateSystem.currentWorldPosition
         
-        // Transform 3D medical position to 2D image coordinates for current plane
-        let imageCoordinates = transform3DToImageCoordinates(
+        // FIXED: Transform 3D medical position to 2D image coordinates for current plane
+        let imageCoordinates = transformMedicalToImageCoordinates(
             medicalPosition: currentPosition,
             plane: plane,
             volumeData: volumeData
         )
         
-        // Transform image coordinates to screen coordinates within letterbox bounds
+        // FIXED: Transform image coordinates to screen coordinates within letterbox bounds
         let screenCoordinates = transformImageToScreenCoordinates(
             imageCoordinates: imageCoordinates,
             plane: plane,
@@ -105,23 +105,30 @@ struct CrosshairOverlayLayer: View {
             viewSize: viewSize
         )
         
-        print("🎯 Medical Transform: \(currentPosition) → \(imageCoordinates) → \(screenCoordinates)")
+        print("🎯 FIXED Transform: \(currentPosition) → \(imageCoordinates) → \(screenCoordinates)")
         
         return screenCoordinates
     }
     
-    /// Transform 3D medical position to 2D image texture coordinates
-    private func transform3DToImageCoordinates(
+    /// FIXED: Transform 3D medical position to 2D image texture coordinates
+    private func transformMedicalToImageCoordinates(
         medicalPosition: SIMD3<Float>,
         plane: MPRPlane,
         volumeData: VolumeData
     ) -> SIMD2<Float> {
         
-        // Convert physical position (mm) to normalized texture coordinates [0,1]
+        // FIXED: Convert physical position (mm) to PIXEL coordinates first
+        let pixelPosition = SIMD3<Float>(
+            medicalPosition.x / volumeData.spacing.x,  // mm ÷ (mm/pixel) = pixel
+            medicalPosition.y / volumeData.spacing.y,
+            medicalPosition.z / volumeData.spacing.z
+        )
+        
+        // FIXED: Then normalize to [0,1] using actual volume dimensions
         let normalizedPosition = SIMD3<Float>(
-            medicalPosition.x / (Float(volumeData.dimensions.x) * volumeData.spacing.x),
-            medicalPosition.y / (Float(volumeData.dimensions.y) * volumeData.spacing.y),
-            medicalPosition.z / (Float(volumeData.dimensions.z) * volumeData.spacing.z)
+            pixelPosition.x / Float(volumeData.dimensions.x - 1),  // Use (N-1) for proper [0,1] range
+            pixelPosition.y / Float(volumeData.dimensions.y - 1),
+            pixelPosition.z / Float(volumeData.dimensions.z - 1)
         )
         
         // Project 3D position to 2D image coordinates based on plane
@@ -141,12 +148,12 @@ struct CrosshairOverlayLayer: View {
             imageCoordinates = SIMD2<Float>(normalizedPosition.x, normalizedPosition.z)
         }
         
-        print("🎯 3D→2D Transform (\(plane)): \(medicalPosition) → \(imageCoordinates)")
+        print("🎯 FIXED 3D→2D (\(plane)): pixel=\(pixelPosition) norm=\(normalizedPosition) → \(imageCoordinates)")
         
         return imageCoordinates
     }
     
-    /// Transform 2D image coordinates to screen coordinates within medical image bounds
+    /// FIXED: Transform 2D image coordinates to screen coordinates within medical image bounds
     private func transformImageToScreenCoordinates(
         imageCoordinates: SIMD2<Float>,
         plane: MPRPlane,
@@ -161,14 +168,15 @@ struct CrosshairOverlayLayer: View {
             viewSize: viewSize
         )
         
-        // Transform normalized image coordinates [0,1] to screen pixel coordinates
+        // FIXED: Transform normalized image coordinates [0,1] to screen pixel coordinates
+        // NO Y-FLIP HERE - handle coordinate system correctly
         let screenX = medicalImageBounds.minX + (CGFloat(imageCoordinates.x) * medicalImageBounds.width)
-        let screenY = medicalImageBounds.minY + (CGFloat(1.0 - imageCoordinates.y) * medicalImageBounds.height) // Flip Y
+        let screenY = medicalImageBounds.minY + (CGFloat(imageCoordinates.y) * medicalImageBounds.height)
         
         let screenCoordinates = CGPoint(x: screenX, y: screenY)
         
-        print("🎯 2D→Screen Transform: \(imageCoordinates) → \(screenCoordinates)")
-        print("🎯 Medical Image Bounds: \(medicalImageBounds)")
+        print("🎯 FIXED 2D→Screen: \(imageCoordinates) → \(screenCoordinates)")
+        print("🎯 FIXED Bounds: \(medicalImageBounds)")
         
         return screenCoordinates
     }
@@ -225,7 +233,7 @@ struct CrosshairOverlayLayer: View {
             height: quadHeightPixels
         )
         
-        print("🎯 Medical Image Bounds Calc:")
+        print("🎯 FIXED Image Bounds:")
         print("   📐 Texture: \(textureDimensions.width)×\(textureDimensions.height)")
         print("   📏 Physical: \(String(format: "%.1f", physicalDimensions.width))×\(String(format: "%.1f", physicalDimensions.height))mm")
         print("   📊 Aspect: \(String(format: "%.3f", physicalAspect)) vs \(String(format: "%.3f", viewAspect))")
@@ -289,18 +297,18 @@ struct CrosshairOverlayLayer: View {
         let currentPosition = coordinateSystem.currentWorldPosition
         let currentSlice = coordinateSystem.getCurrentSliceIndex(for: plane)
         
-        print("🎯 Medical Coordinate Mapping (\(plane)):")
+        print("🎯 FIXED Coordinate Mapping (\(plane)):")
         print("   🏥 Medical Position: \(currentPosition)mm")
         print("   📐 Current Slice: \(currentSlice)")
         print("   📏 Volume Dimensions: \(volumeData.dimensions)")
         print("   🎯 DICOM Spacing: \(volumeData.spacing)")
         
-        let imageCoords = transform3DToImageCoordinates(
+        let imageCoords = transformMedicalToImageCoordinates(
             medicalPosition: currentPosition,
             plane: plane,
             volumeData: volumeData
         )
-        print("   📊 Image Coordinates: \(imageCoords)")
+        print("   📊 FIXED Image Coordinates: \(imageCoords)")
     }
 }
 
@@ -405,7 +413,7 @@ struct CrosshairLine: View {
     }
 }
 
-// MARK: - Medical Crosshair Interaction Handler
+// MARK: - FIXED Medical Crosshair Interaction Handler
 
 struct CrosshairInteractionLayer: View {
     @ObservedObject var coordinateSystem: DICOMCoordinateSystem
@@ -419,7 +427,7 @@ struct CrosshairInteractionLayer: View {
             .gesture(
                 DragGesture(coordinateSpace: .local)
                     .onChanged { value in
-                        // Transform screen touch to medical coordinates
+                        // FIXED: Transform screen touch to medical coordinates
                         if let medicalPosition = transformScreenToMedicalCoordinates(
                             screenLocation: value.location,
                             plane: plane,
@@ -429,13 +437,13 @@ struct CrosshairInteractionLayer: View {
                             // Update coordinate system with new medical position
                             coordinateSystem.updateWorldPosition(medicalPosition)
                             
-                            print("🎯 Touch → Medical: \(value.location) → \(medicalPosition)mm")
+                            print("🎯 FIXED Touch: \(value.location) → \(medicalPosition)mm")
                         }
                     }
             )
     }
     
-    /// Transform screen coordinates back to 3D medical coordinates
+    /// FIXED: Transform screen coordinates back to 3D medical coordinates
     private func transformScreenToMedicalCoordinates(
         screenLocation: CGPoint,
         plane: MPRPlane,
@@ -454,46 +462,54 @@ struct CrosshairInteractionLayer: View {
         
         // Check if touch is within image bounds
         guard medicalImageBounds.contains(screenLocation) else {
-            print("🎯 Touch outside image bounds: \(screenLocation)")
+            print("🎯 FIXED Touch outside bounds: \(screenLocation)")
             return nil
         }
         
-        // Convert screen location to normalized image coordinates [0,1]
+        // FIXED: Convert screen location to normalized image coordinates [0,1]
         let normalizedX = Float((screenLocation.x - medicalImageBounds.minX) / medicalImageBounds.width)
-        let normalizedY = Float(1.0 - (screenLocation.y - medicalImageBounds.minY) / medicalImageBounds.height) // Flip Y
+        let normalizedY = Float((screenLocation.y - medicalImageBounds.minY) / medicalImageBounds.height)
         
-        let imageCoordinates = SIMD2<Float>(
-            max(0.0, min(1.0, normalizedX)),
-            max(0.0, min(1.0, normalizedY))
-        )
+        // FIXED: No premature clamping - let coordinates be used as-is
+        let imageCoordinates = SIMD2<Float>(normalizedX, normalizedY)
         
-        // Convert 2D image coordinates to 3D medical position based on plane
+        // FIXED: Convert 2D image coordinates to 3D medical position based on plane
         let currentPosition = coordinateSystem.currentWorldPosition
         var newMedicalPosition = currentPosition
         
-        // Calculate physical position from normalized coordinates
-        let physicalDimensions = SIMD3<Float>(
-            Float(volumeData.dimensions.x) * volumeData.spacing.x,
-            Float(volumeData.dimensions.y) * volumeData.spacing.y,
-            Float(volumeData.dimensions.z) * volumeData.spacing.z
-        )
+        // FIXED: Calculate pixel position first, then convert to medical coordinates
+        let pixelPosition: SIMD2<Float>
         
         switch plane {
         case .axial:
             // XY plane - update X and Y, keep Z
-            newMedicalPosition.x = imageCoordinates.x * physicalDimensions.x
-            newMedicalPosition.y = imageCoordinates.y * physicalDimensions.y
+            pixelPosition = SIMD2<Float>(
+                imageCoordinates.x * Float(volumeData.dimensions.x - 1),
+                imageCoordinates.y * Float(volumeData.dimensions.y - 1)
+            )
+            newMedicalPosition.x = pixelPosition.x * volumeData.spacing.x
+            newMedicalPosition.y = pixelPosition.y * volumeData.spacing.y
             
         case .sagittal:
             // YZ plane - update Y and Z, keep X
-            newMedicalPosition.y = imageCoordinates.x * physicalDimensions.y
-            newMedicalPosition.z = imageCoordinates.y * physicalDimensions.z
+            pixelPosition = SIMD2<Float>(
+                imageCoordinates.x * Float(volumeData.dimensions.y - 1),
+                imageCoordinates.y * Float(volumeData.dimensions.z - 1)
+            )
+            newMedicalPosition.y = pixelPosition.x * volumeData.spacing.y
+            newMedicalPosition.z = pixelPosition.y * volumeData.spacing.z
             
         case .coronal:
             // XZ plane - update X and Z, keep Y
-            newMedicalPosition.x = imageCoordinates.x * physicalDimensions.x
-            newMedicalPosition.z = imageCoordinates.y * physicalDimensions.z
+            pixelPosition = SIMD2<Float>(
+                imageCoordinates.x * Float(volumeData.dimensions.x - 1),
+                imageCoordinates.y * Float(volumeData.dimensions.z - 1)
+            )
+            newMedicalPosition.x = pixelPosition.x * volumeData.spacing.x
+            newMedicalPosition.z = pixelPosition.y * volumeData.spacing.z
         }
+        
+        print("🎯 FIXED Reverse: \(screenLocation) → \(imageCoordinates) → \(pixelPosition) → \(newMedicalPosition)")
         
         return newMedicalPosition
     }
@@ -593,7 +609,7 @@ struct CrosshairInteractionLayer: View {
     }
 }
 
-// MARK: - Combined Medical-Accurate Crosshair Layer
+// MARK: - Combined FIXED Medical-Accurate Crosshair Layer
 
 struct InteractiveCrosshairLayer: View {
     @ObservedObject var coordinateSystem: DICOMCoordinateSystem
@@ -605,7 +621,7 @@ struct InteractiveCrosshairLayer: View {
     
     var body: some View {
         ZStack {
-            // Display layer (always present) - Medical-accurate
+            // Display layer (always present) - FIXED Medical-accurate
             CrosshairOverlayLayer(
                 coordinateSystem: coordinateSystem,
                 plane: plane,
@@ -614,7 +630,7 @@ struct InteractiveCrosshairLayer: View {
                 appearance: appearance
             )
             
-            // Interaction layer (optional) - Medical-accurate
+            // Interaction layer (optional) - FIXED Medical-accurate
             if allowInteraction {
                 CrosshairInteractionLayer(
                     coordinateSystem: coordinateSystem,
