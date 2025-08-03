@@ -2,9 +2,9 @@ import SwiftUI
 import MetalKit
 import Metal
 
-// MARK: - Layer 1: CT Display Layer
+// MARK: - Layer 1: CT Display Layer (FIXED - Aspect Ratio Preserving)
 // AUTHORITATIVE layer that renders DICOM slices in true patient coordinates
-// All other layers align to THIS coordinate system
+// FIXED: Now maintains correct aspect ratio in ALL orientations and screen sizes
 
 struct CTDisplayLayer: UIViewRepresentable {
     
@@ -32,10 +32,9 @@ struct CTDisplayLayer: UIViewRepresentable {
         mtkView.framebufferOnly = false
         mtkView.backgroundColor = UIColor.black
         
-        // CRITICAL: Maintain medical imaging accuracy
-        // Never stretch or distort - preserve true pixel aspect ratio
-        mtkView.contentMode = .scaleAspectFit  // Maintain aspect ratio, add letterboxing if needed
-        mtkView.contentScaleFactor = 1.0  // 1:1 pixel mapping
+        // FIXED: Remove contentMode - we handle aspect ratio in Metal rendering
+        // This allows the MTKView to fill the SwiftUI frame while we control
+        // the actual image aspect ratio in the shaders
         
         return mtkView
     }
@@ -54,13 +53,17 @@ struct CTDisplayLayer: UIViewRepresentable {
         Coordinator()
     }
     
-    // MARK: - CT Rendering Coordinator
+    // MARK: - CT Rendering Coordinator (FIXED - Aspect Ratio Preserving)
     
     class Coordinator: NSObject, MTKViewDelegate {
         
         private var volumeRenderer: MetalVolumeRenderer?
         private var displayPipelineState: MTLRenderPipelineState?
+        
+        // FIXED: Dynamic vertex buffer for aspect-ratio preserving quads
         private var vertexBuffer: MTLBuffer?
+        private var currentViewSize: CGSize = .zero
+        private var currentTextureSize: CGSize = .zero
         
         // Current rendering state
         private var currentCoordinateSystem: DICOMCoordinateSystem?
@@ -105,15 +108,42 @@ struct CTDisplayLayer: UIViewRepresentable {
             } catch {
                 print("❌ CT Display Layer: Failed to create display pipeline: \(error)")
             }
+        }
+        
+        // FIXED: Create aspect-ratio preserving quad vertices
+        private func createAspectRatioPreservingQuad(
+            textureSize: CGSize,
+            viewSize: CGSize,
+            device: MTLDevice
+        ) {
+            // Calculate aspect ratios
+            let textureAspect = Float(textureSize.width / textureSize.height)
+            let viewAspect = Float(viewSize.width / viewSize.height)
             
-            // Create full-screen quad vertices
+            // Calculate proper quad size to maintain aspect ratio
+            let quadSize: (width: Float, height: Float)
+            
+            if textureAspect > viewAspect {
+                // Texture is wider than view - letterbox top/bottom
+                quadSize = (1.0, viewAspect / textureAspect)
+                print("🔍 CT Aspect: Letterboxing top/bottom - textureAspect=\(String(format: "%.2f", textureAspect)), viewAspect=\(String(format: "%.2f", viewAspect))")
+            } else {
+                // Texture is taller than view - letterbox left/right
+                quadSize = (textureAspect / viewAspect, 1.0)
+                print("🔍 CT Aspect: Letterboxing left/right - textureAspect=\(String(format: "%.2f", textureAspect)), viewAspect=\(String(format: "%.2f", viewAspect))")
+            }
+            
+            // Create vertices for properly sized quad (not full-screen)
             let quadVertices: [Float] = [
-                // Positions        // Texture coordinates
-                -1.0, -1.0,        0.0, 1.0,  // Bottom left
-                 1.0, -1.0,        1.0, 1.0,  // Bottom right
-                -1.0,  1.0,        0.0, 0.0,  // Top left
-                 1.0,  1.0,        1.0, 0.0   // Top right
+                // Positions                                    // Texture coordinates
+                -quadSize.width, -quadSize.height,             0.0, 1.0,  // Bottom left
+                 quadSize.width, -quadSize.height,             1.0, 1.0,  // Bottom right
+                -quadSize.width,  quadSize.height,             0.0, 0.0,  // Top left
+                 quadSize.width,  quadSize.height,             1.0, 0.0   // Top right
             ]
+            
+            print("🔍 CT Aspect: Quad size = \(String(format: "%.3f", quadSize.width))×\(String(format: "%.3f", quadSize.height))")
+            print("🔍 CT Aspect: Texture = \(Int(textureSize.width))×\(Int(textureSize.height)), View = \(Int(viewSize.width))×\(Int(viewSize.height))")
             
             vertexBuffer = device.makeBuffer(
                 bytes: quadVertices,
@@ -164,8 +194,11 @@ struct CTDisplayLayer: UIViewRepresentable {
         // MARK: - MTKViewDelegate
         
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-            // Let SwiftUI handle view sizing - focus on accurate rendering
-            // The key is maintaining pixel accuracy in the rendering, not forcing drawable size
+            print("🔍 CT Aspect: Drawable size changed to \(Int(size.width))×\(Int(size.height))")
+            currentViewSize = size
+            
+            // Force vertex buffer regeneration on next draw
+            vertexBuffer = nil
         }
         
         private func getImageDimensions(for plane: MPRPlane, volumeData: VolumeData) -> (width: Int, height: Int) {
@@ -187,6 +220,9 @@ struct CTDisplayLayer: UIViewRepresentable {
                   let drawable = view.currentDrawable else {
                 return
             }
+            
+            // Update current view size
+            currentViewSize = view.drawableSize
             
             // Get current slice from coordinate system
             guard let coordinateSystem = currentCoordinateSystem else {
@@ -225,6 +261,12 @@ struct CTDisplayLayer: UIViewRepresentable {
                     guard let self = self else { return }
                     self.cachedTexture = mprTexture
                     
+                    // FIXED: Update current texture size for aspect ratio calculation
+                    if let texture = mprTexture {
+                        self.currentTextureSize = CGSize(width: texture.width, height: texture.height)
+                        print("🔍 CT Aspect: New texture size = \(texture.width)×\(texture.height)")
+                    }
+                    
                     // Trigger redraw on main thread
                     DispatchQueue.main.async {
                         view.setNeedsDisplay()
@@ -239,10 +281,21 @@ struct CTDisplayLayer: UIViewRepresentable {
                 return
             }
             
+            // FIXED: Update texture size and regenerate vertex buffer if needed
+            let textureSize = CGSize(width: mprTexture.width, height: mprTexture.height)
+            if currentTextureSize != textureSize || vertexBuffer == nil {
+                currentTextureSize = textureSize
+                createAspectRatioPreservingQuad(
+                    textureSize: textureSize,
+                    viewSize: currentViewSize,
+                    device: device
+                )
+            }
+            
             displayTexture(mprTexture, drawable: drawable, commandQueue: commandQueue)
         }
         
-        // MARK: - Rendering Methods
+        // MARK: - Rendering Methods (FIXED - Using Dynamic Vertex Buffer)
         
         private func displayTexture(_ texture: MTLTexture, drawable: CAMetalDrawable, commandQueue: MTLCommandQueue) {
             let commandBuffer = commandQueue.makeCommandBuffer()
@@ -255,7 +308,7 @@ struct CTDisplayLayer: UIViewRepresentable {
             
             guard let renderEncoder = commandBuffer?.makeRenderCommandEncoder(descriptor: renderPassDescriptor),
                   let pipelineState = displayPipelineState,
-                  let vertexBuffer = vertexBuffer else {
+                  let vertexBuffer = vertexBuffer else {  // FIXED: Use dynamic vertex buffer
                 commandBuffer?.present(drawable)
                 commandBuffer?.commit()
                 return
