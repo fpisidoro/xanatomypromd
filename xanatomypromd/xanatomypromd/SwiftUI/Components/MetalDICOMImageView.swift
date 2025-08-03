@@ -116,8 +116,8 @@ struct MetalDICOMImageView: UIViewRepresentable {
                 }
             }
             
-            // Update aspect ratio for current plane
-            updateAspectRatio()
+            // Update aspect ratio for current plane (simplified - using basic shader)
+            // updateAspectRatio()
         }
         
         private func updateAspectRatio() {
@@ -258,11 +258,6 @@ struct MetalDICOMImageView: UIViewRepresentable {
             
             renderEncoder.setRenderPipelineState(pipelineState)
             renderEncoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-            
-            // Apply aspect ratio correction if available
-            if let aspectBuffer = aspectRatioBuffer {
-                renderEncoder.setVertexBuffer(aspectBuffer, offset: 0, index: 1)
-            }
             
             renderEncoder.setFragmentTexture(texture, index: 0)
             renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
