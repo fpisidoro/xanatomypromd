@@ -51,7 +51,10 @@ struct MetalDICOMImageView: UIViewRepresentable {
         private func setupRenderer() {
             do {
                 volumeRenderer = try MetalVolumeRenderer()
-                crosshairManager = CrosshairManager()
+                // Initialize crosshair manager without main actor requirement
+                Task { @MainActor in
+                    crosshairManager = CrosshairManager()
+                }
             } catch {
                 // Initialization failed - renderer will be nil
             }
@@ -87,7 +90,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
         func draw(in view: MTKView) {
             guard let device = view.device,
                   let commandQueue = device.makeCommandQueue(),
-                  let drawable = view.currentDrawable else {
+                  let drawable = view.currentDrawable as? CAMetalDrawable else {
                 return
             }
             
@@ -124,7 +127,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
             }
         }
         
-        private func clearView(drawable: MTLDrawable, commandQueue: MTLCommandQueue) {
+        private func clearView(drawable: CAMetalDrawable, commandQueue: MTLCommandQueue) {
             let commandBuffer = commandQueue.makeCommandBuffer()
             let renderPassDescriptor = MTLRenderPassDescriptor()
             renderPassDescriptor.colorAttachments[0].texture = drawable.texture
@@ -141,7 +144,7 @@ struct MetalDICOMImageView: UIViewRepresentable {
         
         private func displayMPRWithCrosshairs(
             mprTexture: MTLTexture,
-            drawable: MTLDrawable,
+            drawable: CAMetalDrawable,
             commandQueue: MTLCommandQueue,
             device: MTLDevice
         ) {
@@ -163,7 +166,14 @@ struct MetalDICOMImageView: UIViewRepresentable {
             displayTexture(mprTexture, renderEncoder: renderEncoder, device: device)
             
             // Draw crosshairs on top
-            drawCrosshairs(renderEncoder: renderEncoder, device: device, viewSize: drawable.texture.size)
+            if let crosshairManager = self.crosshairManager {
+                crosshairManager.drawCrosshairs(
+                    renderEncoder: renderEncoder, 
+                    device: device, 
+                    position: SIMD2<Float>(0.5, 0.5), 
+                    viewSize: MTLSize(width: drawable.texture.width, height: drawable.texture.height, depth: 1)
+                )
+            }
             
             renderEncoder.endEncoding()
             commandBuffer?.present(drawable)
@@ -241,9 +251,3 @@ struct MetalDICOMImageView: UIViewRepresentable {
     }
 }
 
-// MARK: - Size extension for MTLSize
-extension MTLSize {
-    var size: CGSize {
-        return CGSize(width: width, height: height)
-    }
-}
