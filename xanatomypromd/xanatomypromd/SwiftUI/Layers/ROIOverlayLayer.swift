@@ -40,7 +40,7 @@ struct ROIOverlayLayer: View {
                 // Get contours for current slice
                 let contours = getContoursForCurrentSlice(
                     roiStructure: roiStructure,
-                    slicePosition: currentSlicePosition,
+                    slicePosition: Float(currentSlicePosition),
                     plane: plane
                 )
                 
