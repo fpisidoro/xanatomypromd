@@ -6,18 +6,14 @@ struct VertexOut {
     float2 texCoord;
 };
 
-vertex VertexOut vertex_simple(const device float4* vertices [[buffer(0)]],
-                              uint vid [[vertex_id]]) {
+vertex VertexOut vertex_simple(const device float4* vertices [[buffer(0)]], uint vid [[vertex_id]]) {
     VertexOut out;
-    float4 vertex = vertices[vid];
-    out.position = float4(vertex.xy, 0.0, 1.0);
-    out.texCoord = vertex.zw;
+    out.position = float4(vertices[vid].xy, 0.0, 1.0);
+    out.texCoord = vertices[vid].zw;
     return out;
 }
 
-fragment float4 fragment_simple(VertexOut in [[stage_in]],
-                               texture2d<float> inputTexture [[texture(0)]]) {
+fragment float4 fragment_simple(VertexOut in [[stage_in]], texture2d<float> inputTexture [[texture(0)]]) {
     constexpr sampler textureSampler(mag_filter::linear, min_filter::linear);
-    float4 color = inputTexture.sample(textureSampler, in.texCoord);
-    return color;
+    return inputTexture.sample(textureSampler, in.texCoord);
 }
