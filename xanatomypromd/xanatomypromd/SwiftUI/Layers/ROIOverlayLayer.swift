@@ -122,25 +122,23 @@ struct ROIOverlayLayer: View {
                 }
             }
             
-            // For now, show contours only if reasonably close (within ~150mm)
-            // TEMP FIX: Since ROI maps to slice -27, transform the ROI Z to our coordinate system
-            let debugContours = roiStructure.contours.filter { contour in
-                // Calculate what slice this contour should map to in our volume
-                let roiVoxelZ = (contour.slicePosition - coordinateSystem.volumeOrigin.z) / coordinateSystem.volumeSpacing.z
-                let roiSliceIndex = Int(round(roiVoxelZ))
+            // PROPER FIX: Use ROI coordinates as-is and fix slice matching
+            // Both ROI and volume should use same DICOM coordinate system
+            let properContours = roiStructure.contours.filter { contour in
+                // Convert current world position to same coordinate space as ROI
+                let currentZ = coordinateSystem.currentWorldPosition.z
+                let zDifference = abs(contour.slicePosition - currentZ)
                 
-                // Get current slice index
-                let currentSliceIndex = coordinateSystem.getCurrentSliceIndex(for: plane)
+                // Use larger tolerance until coordinate systems are properly aligned
+                let tolerance: Float = 5.0
+                let isNearCurrentSlice = zDifference < tolerance
                 
-                // Show ROI only on the slice it should appear on (accounting for coordinate offset)
-                let sliceDifference = abs(roiSliceIndex - currentSliceIndex)
-                print("      🎯 ROI slice \(roiSliceIndex) vs current \(currentSliceIndex), diff=\(sliceDifference)")
+                print("      🎯 ROI Z=\(contour.slicePosition) vs Current Z=\(currentZ), diff=\(zDifference), show=\(isNearCurrentSlice)")
                 
-                // For now, show on slice 0 since ROI maps to slice -27 (outside volume)
-                return currentSliceIndex == 0
+                return isNearCurrentSlice
             }
-            print("   📊 Showing \(debugContours.count) contours within 150mm of current slice")
-            return debugContours
+            print("   📊 Showing \(properContours.count) contours with proper coordinate matching")
+            return properContours
             
         case .sagittal:
             // Sagittal: create cross-section at current X position
