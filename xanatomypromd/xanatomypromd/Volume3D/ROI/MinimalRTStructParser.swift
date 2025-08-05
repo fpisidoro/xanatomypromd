@@ -107,27 +107,34 @@ public class MinimalRTStructParser {
     private static func parseROIStructuresFromSequences(dataset: DICOMDataset) -> [SimpleROIStructure] {
         print("   🔍 Parsing RTStruct sequences for complete 3D structure...")
         
-        // For this RTStruct file, try direct contour data extraction
-        // The sequence parsing isn't working due to format issues
-        
+        // Use the PROVEN working method that found coordinates before
         var allContourData: [SimpleContour] = []
         
-        // Method 1: Direct scan of ROI Contour Sequence for contour data
+        // Method 1: Scan all elements for Contour Data tags (ORIGINAL WORKING METHOD)
+        for (tag, element) in dataset.elements {
+            if tag.group == 0x3006 && tag.element == 0x0050 {
+                print("   ✅ FOUND Contour Data tag directly in elements!")
+                if let contour = parseContourDataDirectly(element.data) {
+                    allContourData.append(contour)
+                }
+            }
+        }
+        
+        // Method 2: Scan ROI Contour Sequence (ENHANCED)
         if let roiContourElement = dataset.elements[.roiContourSequence] {
-            print("   🔍 Scanning ROI Contour Sequence raw data for contour coordinates...")
+            print("   🔍 Scanning ROI Contour Sequence raw data...")
             let foundContours = scanForContourDataInBytes(roiContourElement.data)
             allContourData.append(contentsOf: foundContours)
         }
         
         if allContourData.isEmpty {
-            print("   ❌ No contour data found via direct scanning")
+            print("   ❌ No contour data found")
             return []
         }
         
-        print("   ✅ Found \(allContourData.count) contours via direct scanning")
+        print("   ✅ Found \(allContourData.count) contours total")
         
-        // Create a single ROI structure with all found contours
-        // Use reasonable defaults since sequence parsing failed
+        // Create ROI structure
         let roi = SimpleROIStructure(
             roiNumber: 8241,
             roiName: "ROI-1",
@@ -135,7 +142,7 @@ public class MinimalRTStructParser {
             contours: allContourData
         )
         
-        // Calculate Z range for this ROI
+        // Calculate Z range
         let zPositions = allContourData.map { $0.slicePosition }
         let minZ = zPositions.min() ?? 0
         let maxZ = zPositions.max() ?? 0
@@ -147,68 +154,80 @@ public class MinimalRTStructParser {
     
     // MARK: - Direct Byte Scanning for Contour Data
     private static func scanForContourDataInBytes(_ data: Data) -> [SimpleContour] {
-        print("     🔍 Byte-level scan for (3006,0050) in \(data.count) bytes...")
+        print("     🔍 Enhanced byte-level scan in \(data.count) bytes...")
         
         var contours: [SimpleContour] = []
         
-        // First, look for Contour Sequence tag (3006,0040) which contains the contour data
-        let contourSeqBytes: [UInt8] = [0x06, 0x30, 0x40, 0x00] // (3006,0040)
-        
-        print("       🔍 Looking for Contour Sequence (3006,0040)...")
-        
+        // Method 1: Look for exact (3006,0050) tags
+        let contourDataBytes: [UInt8] = [0x06, 0x30, 0x50, 0x00]
         for i in 0..<(data.count - 8) {
             let slice = data.subdata(in: i..<i+4)
-            if Array(slice) == contourSeqBytes {
-                print("       ✅ FOUND Contour Sequence at byte \(i)!")
+            if Array(slice) == contourDataBytes {
+                print("     ✅ FOUND (3006,0050) at byte \(i)!")
                 
-                // Read length of contour sequence with alignment check
-                let seqLength: UInt32
-                if (i + 4) % 4 == 0 {
-                    // Aligned read
-                    seqLength = data.withUnsafeBytes { bytes in
-                        bytes.load(fromByteOffset: i + 4, as: UInt32.self)
-                    }
-                } else {
-                    // Unaligned read - copy bytes manually
-                    let lengthBytes = data.subdata(in: (i + 4)..<(i + 8))
-                    seqLength = lengthBytes.withUnsafeBytes { bytes in
-                        bytes.load(as: UInt32.self)
-                    }
+                let length = data.withUnsafeBytes { bytes in
+                    bytes.load(fromByteOffset: i + 4, as: UInt32.self)
                 }
                 
-                print("         Contour Sequence length: \(seqLength) bytes")
-                
-                if seqLength == 0xFFFFFFFF {
-                    // Undefined length - scan to end of available data
-                    let seqStart = i + 8
-                    let seqEnd = min(seqStart + 1000, data.count) // Reasonable limit
-                    let sequenceData = data.subdata(in: seqStart..<seqEnd)
-                    
-                    print("         Scanning undefined length sequence (\(sequenceData.count) bytes)...")
-                    let foundInSequence = scanForContourDataInSequence(sequenceData)
-                    contours.append(contentsOf: foundInSequence)
-                    
-                } else if seqLength > 0 && seqLength < 10000 && i + 8 + Int(seqLength) <= data.count {
-                    // Defined length
-                    let sequenceData = data.subdata(in: (i + 8)..<(i + 8 + Int(seqLength)))
-                    
-                    print("         Scanning defined length sequence (\(sequenceData.count) bytes)...")
-                    let foundInSequence = scanForContourDataInSequence(sequenceData)
-                    contours.append(contentsOf: foundInSequence)
+                if length > 0 && length < 100000 && i + 8 + Int(length) <= data.count {
+                    let contourDataRaw = data.subdata(in: (i + 8)..<(i + 8 + Int(length)))
+                    if let contour = parseContourDataDirectly(contourDataRaw) {
+                        contours.append(contour)
+                        print("     ✅ Parsed contour: \(contour.points.count) points at Z=\(contour.slicePosition)")
+                    }
                 }
             }
         }
         
-        // If no contour sequence found, show hex dump
+        // Method 2: Scan for ASCII coordinate patterns (as seen in hex dump)
         if contours.isEmpty {
-            print("       📝 No Contour Sequence found. Hex dump of first 64 bytes:")
-            let dumpSize = min(64, data.count)
-            for i in stride(from: 0, to: dumpSize, by: 16) {
-                let lineEnd = min(i + 16, dumpSize)
-                let lineData = data.subdata(in: i..<lineEnd)
-                let hexString = lineData.map { String(format: "%02X", $0) }.joined(separator: " ")
-                let offsetString = String(format: "%04X", i)
-                print("         \(offsetString): \(hexString)")
+            print("     🔍 Scanning for ASCII coordinate patterns...")
+            
+            // Convert data to string, handling embedded nulls
+            var coordinateString = ""
+            for i in 0..<data.count {
+                let byte = data[i]
+                if byte >= 32 && byte <= 126 { // Printable ASCII
+                    coordinateString += String(Character(UnicodeScalar(byte)!))
+                } else if byte == 0 {
+                    coordinateString += " " // Replace null with space
+                }
+            }
+            
+            print("       Coordinate string: \"\(coordinateString.prefix(100))...\"")
+            
+            // Look for coordinate patterns (numbers with decimal points and backslashes)
+            if coordinateString.contains(".") && coordinateString.contains("\\") {
+                print("       ✅ Found coordinate pattern!")
+                
+                // Extract all decimal numbers
+                let pattern = "-?\\d+\\.\\d+"
+                let regex = try? NSRegularExpression(pattern: pattern)
+                let matches = regex?.matches(in: coordinateString, range: NSRange(coordinateString.startIndex..., in: coordinateString)) ?? []
+                
+                let numbers = matches.compactMap { match -> Float? in
+                    let range = Range(match.range, in: coordinateString)
+                    return range.flatMap { Float(String(coordinateString[$0])) }
+                }
+                
+                print("       Found \(numbers.count) coordinate values")
+                
+                if numbers.count >= 6 && numbers.count % 3 == 0 {
+                    var points: [SIMD3<Float>] = []
+                    for i in stride(from: 0, to: numbers.count - 2, by: 3) {
+                        let x = numbers[i]
+                        let y = numbers[i + 1]
+                        let z = numbers[i + 2]
+                        points.append(SIMD3<Float>(x, y, z))
+                    }
+                    
+                    if !points.isEmpty {
+                        let zPosition = points.first?.z ?? 0
+                        let contour = SimpleContour(points: points, slicePosition: zPosition)
+                        contours.append(contour)
+                        print("       ✅ Parsed ASCII coordinates: \(points.count) points at Z=\(zPosition)")
+                    }
+                }
             }
         }
         
