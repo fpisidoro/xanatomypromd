@@ -81,24 +81,42 @@ public class MinimalRTStructParser {
             print("      Z=\(z)mm: \(contoursAtZ.count) contours, \(totalPoints) points")
         }
         
-        // Create single ROI structure with all contours
-        let roi = SimpleROIStructure(
-            roiNumber: 8241,
-            roiName: "ROI-1",
-            displayColor: SIMD3<Float>(1.0, 0.0, 1.0), // Magenta
-            contours: allContours
-        )
+        // Create SEPARATE ROI structures for each unique contour (instead of combining)
+        var roiStructures: [SimpleROIStructure] = []
+        var roiCounter = 8241
         
-        let totalContours = allContours.count
-        let totalPoints = allContours.reduce(0) { $0 + $1.points.count }
-        let zRange = sortedZPositions.isEmpty ? "N/A" : "\(sortedZPositions.first!) to \(sortedZPositions.last!)mm"
+        // Group contours that should belong to the same ROI (same Z-position and similar point count)
+        let groupedByROI = Dictionary(grouping: allContours) { contour in
+            // Use Z-position and point count as grouping key
+            return "\(Int(contour.slicePosition * 100))_\(contour.points.count)"
+        }
         
-        print("   ✅ SUCCESS: ROI \(roi.roiNumber) '\(roi.roiName)' - \(totalContours) contours, \(totalPoints) points, Z: \(zRange)")
+        for (groupKey, contours) in groupedByROI {
+            let roi = SimpleROIStructure(
+                roiNumber: roiCounter,
+                roiName: "ROI-\(roiCounter - 8240)",
+                displayColor: generateROIColor(for: roiCounter - 8241),
+                contours: contours
+            )
+            
+            roiStructures.append(roi)
+            
+            let totalContours = contours.count
+            let totalPoints = contours.reduce(0) { $0 + $1.points.count }
+            let zPositions = contours.map { $0.slicePosition }
+            let minZ = zPositions.min() ?? 0
+            let maxZ = zPositions.max() ?? 0
+            let zRange = minZ == maxZ ? "\(minZ)mm" : "\(minZ) to \(maxZ)mm"
+            
+            print("   ✅ Created ROI \(roi.roiNumber) '\(roi.roiName)' - \(totalContours) contours, \(totalPoints) points, Z: \(zRange)")
+            
+            roiCounter += 1
+        }
         
         return SimpleRTStructData(
             structureSetName: structureSetName,
             patientName: patientName,
-            roiStructures: [roi]
+            roiStructures: roiStructures
         )
     }
     
@@ -431,7 +449,22 @@ public class MinimalRTStructParser {
         return nil
     }
     
-    // MARK: - Coordinate Number Extraction (PROVEN METHOD)
+    // MARK: - Utility Functions
+    private static func generateROIColor(for index: Int) -> SIMD3<Float> {
+        let colors: [SIMD3<Float>] = [
+            SIMD3<Float>(1.0, 0.0, 1.0), // Magenta
+            SIMD3<Float>(0.0, 1.0, 0.0), // Green
+            SIMD3<Float>(0.0, 0.0, 1.0), // Blue
+            SIMD3<Float>(1.0, 1.0, 0.0), // Yellow
+            SIMD3<Float>(1.0, 0.0, 0.0), // Red
+            SIMD3<Float>(0.0, 1.0, 1.0), // Cyan
+            SIMD3<Float>(1.0, 0.5, 0.0), // Orange
+            SIMD3<Float>(0.5, 0.0, 1.0), // Purple
+            SIMD3<Float>(0.0, 1.0, 0.5), // Spring Green
+            SIMD3<Float>(1.0, 1.0, 0.5), // Light Yellow
+        ]
+        return colors[index % colors.count]
+    }
     private static func extractCoordinateNumbers(from string: String) -> [Float] {
         // Method 1: Backslash-separated (PROVEN format from working parser)
         let backslashComponents = string.components(separatedBy: "\\")
