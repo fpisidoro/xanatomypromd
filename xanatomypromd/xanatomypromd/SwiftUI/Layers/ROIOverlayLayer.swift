@@ -40,26 +40,23 @@ struct ROIOverlayLayer: View {
             for roiStructure in roiData.roiStructures {
                 // SimpleROIStructure doesn't have isVisible, assume all are visible
                 
-                // Get contours for current slice - no longer need slice position parameter
+                // Get contours for current slice
                 let contours = getContoursForCurrentSlice(
                     roiStructure: roiStructure,
-                    slicePosition: 0, // Not used anymore
+                    slicePosition: 0,
                     plane: plane
                 )
                 
-                // FALLBACK TEST: If no contours found, try showing the first contour regardless of position
-                let finalContours: [MinimalRTStructParser.SimpleContour]
-                if contours.isEmpty && plane == .axial {
-                    print("   ⚠️ No contours at current position, showing first contour for testing")
-                    finalContours = Array(roiStructure.contours.prefix(1))
-                } else {
-                    finalContours = contours
+                print("   📊 ROI \(roiStructure.roiNumber): '\(roiStructure.roiName)' - \(contours.count) contours")
+                
+                // Only draw if we have actual contours at this position
+                guard !contours.isEmpty else {
+                    print("      ⚠️ No contours at current position - skipping")
+                    continue
                 }
                 
-                print("   📊 ROI \(roiStructure.roiNumber): '\(roiStructure.roiName)' - \(finalContours.count) contours")
-                
                 // Draw each contour
-                for (index, contour) in finalContours.enumerated() {
+                for (index, contour) in contours.enumerated() {
                     print("      📐 Drawing contour \(index): \(contour.points.count) points")
                     drawContour(
                         contour: contour,
