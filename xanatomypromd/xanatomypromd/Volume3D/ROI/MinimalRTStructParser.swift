@@ -488,27 +488,110 @@ public class MinimalRTStructParser {
     private static func extractROIMetadata(from dataset: DICOMDataset) -> [(name: String, color: SIMD3<Float>, zMin: Float, zMax: Float)] {
         var metadata: [(name: String, color: SIMD3<Float>, zMin: Float, zMax: Float)] = []
         
-        // Try to parse Structure Set ROI Sequence (3006,0020)
-        if let structureSetROISeq = dataset.elements[.structureSetROISequence] {
-            print("   📚 Parsing Structure Set ROI Sequence for metadata...")
+        print("   📚 Extracting ROI metadata from RTStruct...")
+        
+        // Parse ROI Contour Sequence (3006,0039) for colors
+        if let roiContourSeq = dataset.elements[.roiContourSequence] {
+            print("      🎨 Parsing ROI Contour Sequence for colors...")
             
-            // Parse sequence items to extract ROI names
-            // This is simplified - full implementation would parse the sequence properly
-            let items = parseSequenceItems(structureSetROISeq.data)
-            for (index, _) in items.enumerated() {
-                // Default names if we can't parse them
-                let name = "Structure \(index + 1)"
-                let color = generateROIColor(for: index)
-                metadata.append((name: name, color: color, zMin: -200, zMax: 200))
+            let items = parseSequenceItems(roiContourSeq.data)
+            print("      Found \(items.count) ROI contour items")
+            
+            for (index, itemData) in items.enumerated() {
+                // Extract ROI Display Color (3006,002A) from each item
+                let colorTag: [UInt8] = [0x06, 0x30, 0x2A, 0x00] // ROI Display Color
+                
+                if let colorOffset = scanForTag(in: itemData, tag: colorTag, startingAt: 0) {
+                    // Read length
+                    if colorOffset + 8 <= itemData.count {
+                        let lengthData = itemData.subdata(in: (colorOffset + 4)..<(colorOffset + 8))
+                        let length = lengthData.withUnsafeBytes { bytes in
+                            var value: UInt32 = 0
+                            withUnsafeMutableBytes(of: &value) { dest in
+                                dest.copyMemory(from: bytes)
+                            }
+                            return value
+                        }
+                        
+                        if length > 0 && colorOffset + 8 + Int(length) <= itemData.count {
+                            let colorData = itemData.subdata(in: (colorOffset + 8)..<(colorOffset + 8 + Int(length)))
+                            
+                            // Parse RGB values (format: "R\\G\\B" where values are 0-255)
+                            if let colorString = String(data: colorData, encoding: .ascii) {
+                                let components = colorString.components(separatedBy: "\\")
+                                if components.count >= 3 {
+                                    if let r = Int(components[0].trimmingCharacters(in: .whitespacesAndNewlines)),
+                                       let g = Int(components[1].trimmingCharacters(in: .whitespacesAndNewlines)),
+                                       let b = Int(components[2].trimmingCharacters(in: .whitespacesAndNewlines)) {
+                                        
+                                        // Convert from 0-255 to 0-1 range
+                                        let color = SIMD3<Float>(
+                                            Float(r) / 255.0,
+                                            Float(g) / 255.0,
+                                            Float(b) / 255.0
+                                        )
+                                        
+                                        print("         🌈 ROI \(index + 1) color: RGB(\(r), \(g), \(b))")
+                                        
+                                        let name = "Structure \(index + 1)"
+                                        metadata.append((name: name, color: color, zMin: -200, zMax: 200))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // If no color found, use generated color
+                if metadata.count <= index {
+                    let color = generateROIColor(for: index)
+                    let name = "Structure \(index + 1)"
+                    metadata.append((name: name, color: color, zMin: -200, zMax: 200))
+                    print("         ⚠️ No color found for ROI \(index + 1), using generated color")
+                }
             }
         }
         
-        // Try to parse ROI Contour Sequence (3006,0039) for colors
-        if let roiContourSeq = dataset.elements[.roiContourSequence] {
-            // Parse for display colors
-            // Simplified - would need proper sequence parsing
+        // Parse Structure Set ROI Sequence (3006,0020) for names
+        if let structureSetROISeq = dataset.elements[.structureSetROISequence] {
+            print("      🏷️ Parsing Structure Set ROI Sequence for names...")
+            
+            let items = parseSequenceItems(structureSetROISeq.data)
+            print("      Found \(items.count) structure set items")
+            
+            for (index, itemData) in items.enumerated() {
+                // Extract ROI Name (3006,0026)
+                let nameTag: [UInt8] = [0x06, 0x30, 0x26, 0x00] // ROI Name
+                
+                if let nameOffset = scanForTag(in: itemData, tag: nameTag, startingAt: 0) {
+                    if nameOffset + 8 <= itemData.count {
+                        let lengthData = itemData.subdata(in: (nameOffset + 4)..<(nameOffset + 8))
+                        let length = lengthData.withUnsafeBytes { bytes in
+                            var value: UInt32 = 0
+                            withUnsafeMutableBytes(of: &value) { dest in
+                                dest.copyMemory(from: bytes)
+                            }
+                            return value
+                        }
+                        
+                        if length > 0 && nameOffset + 8 + Int(length) <= itemData.count {
+                            let nameData = itemData.subdata(in: (nameOffset + 8)..<(nameOffset + 8 + Int(length)))
+                            
+                            if let roiName = String(data: nameData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                                if index < metadata.count {
+                                    // Update the name while keeping the color
+                                    let oldMetadata = metadata[index]
+                                    metadata[index] = (name: roiName, color: oldMetadata.color, zMin: oldMetadata.zMin, zMax: oldMetadata.zMax)
+                                    print("         🆔 ROI \(index + 1) name: '\(roiName)'")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         
+        print("      ✅ Extracted metadata for \(metadata.count) ROIs")
         return metadata
     }
     
