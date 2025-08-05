@@ -300,7 +300,7 @@ public class MinimalRTStructParser {
             
             print("           🏷️ Found tag: \(String(format: "%08X", tag)), length: \(length)")
             
-            if tag == 0x30060022 { // ROI Number
+            if tag == 0x22063006 { // ROI Number (3006,0022) in little endian
                 if length > 0 && length < 100 && offset + 8 + Int(length) <= data.count {
                     let valueData = data.subdata(in: (offset + 8)..<(offset + 8 + Int(length)))
                     if let numberString = String(data: valueData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines) {
@@ -308,7 +308,7 @@ public class MinimalRTStructParser {
                         print("           📊 ROI Number: \(roiNumber!)")
                     }
                 }
-            } else if tag == 0x30060026 { // ROI Name
+            } else if tag == 0x26063006 { // ROI Name (3006,0026) in little endian
                 if length > 0 && length < 1000 && offset + 8 + Int(length) <= data.count {
                     let valueData = data.subdata(in: (offset + 8)..<(offset + 8 + Int(length)))
                     roiName = String(data: valueData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -365,7 +365,7 @@ public class MinimalRTStructParser {
             
             print("           🏷️ Found tag: \(String(format: "%08X", tag)), length: \(length)")
             
-            if tag == 0x30060084 { // Referenced ROI Number
+            if tag == 0x84063006 { // Referenced ROI Number (3006,0084) in little endian
                 if length > 0 && length < 100 && offset + 8 + Int(length) <= data.count {
                     let valueData = data.subdata(in: (offset + 8)..<(offset + 8 + Int(length)))
                     if let numberString = String(data: valueData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines) {
@@ -373,7 +373,7 @@ public class MinimalRTStructParser {
                         print("           📊 Referenced ROI Number: \(roiNumber!)")
                     }
                 }
-            } else if tag == 0x3006002A { // ROI Display Color
+            } else if tag == 0x2A063006 { // ROI Display Color (3006,002A) in little endian
                 if length >= 12 && length < 100 && offset + 8 + Int(length) <= data.count {
                     let colorData = data.subdata(in: (offset + 8)..<(offset + 8 + Int(length)))
                     if let colorString = String(data: colorData, encoding: .ascii) {
@@ -387,7 +387,7 @@ public class MinimalRTStructParser {
                         }
                     }
                 }
-            } else if tag == 0x30060040 { // Contour Sequence
+            } else if tag == 0x40063006 { // Contour Sequence (3006,0040) in little endian
                 print("           📦 Found Contour Sequence, length: \(length)")
                 // Parse all contours within this sequence
                 if length > 0 && length < data.count && offset + 8 + Int(length) <= data.count {
@@ -447,7 +447,7 @@ public class MinimalRTStructParser {
                 bytes.load(fromByteOffset: offset + 4, as: UInt32.self)
             }
             
-            if tag == 0x30060050 { // Contour Data
+            if tag == 0x50063006 { // Contour Data (3006,0050) in little endian
                 if length > 0 && offset + 8 + Int(length) <= data.count {
                     let contourData = data.subdata(in: (offset + 8)..<(offset + 8 + Int(length)))
                     
