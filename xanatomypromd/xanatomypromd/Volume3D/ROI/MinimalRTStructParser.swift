@@ -136,7 +136,7 @@ public class MinimalRTStructParser {
         var contours: [SimpleContour] = []
         let targetBytes: [UInt8] = [0x06, 0x30, 0x50, 0x00] // (3006,0050) in little endian
         
-        for i in 0...<(data.count - 8) {
+        for i in 0..<(data.count - 8) {
             // Check for Contour Data tag
             let slice = data.subdata(in: i..<i+4)
             if Array(slice) == targetBytes {
