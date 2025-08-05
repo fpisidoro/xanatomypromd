@@ -102,12 +102,12 @@ public class MinimalRTStructParser {
         )
     }
     
-    // MARK: - ORIGINAL WORKING METHOD: Scan Entire Dataset
+    // MARK: - ENHANCED SCANNING: Find ALL Contours Across Dataset
     private static func scanEntireDatasetForContours(dataset: DICOMDataset) -> [SimpleContour] {
         var allContours: [SimpleContour] = []
         
-        // Method 1: Scan all dataset elements for (3006,0050) tags
-        print("   🔍 Method 1: Scanning all dataset elements...")
+        // Method 1: Scan all dataset elements for (3006,0050) tags - Enhanced for multiple contours
+        print("   🔍 Method 1: Enhanced scanning of all dataset elements...")
         for (tag, element) in dataset.elements {
             if tag.group == 0x3006 && tag.element == 0x0050 {
                 print("     ✅ FOUND Contour Data tag \(tag) in dataset elements!")
@@ -118,33 +118,58 @@ public class MinimalRTStructParser {
             }
         }
         
-        // Method 2: Direct byte scanning in specific sequence elements
-        print("   🔍 Method 2: Direct byte scanning in sequences...")
+        // Method 2: AGGRESSIVE byte scanning in ALL elements that might contain embedded contours
+        print("   🔍 Method 2: AGGRESSIVE scanning for embedded contours...")
         
         // Scan ROI Contour Sequence if it exists
         if let roiContourElement = dataset.elements[.roiContourSequence] {
-            print("     📦 Scanning ROI Contour Sequence (\(roiContourElement.data.count) bytes)...")
+            print("     📦 Deep scanning ROI Contour Sequence (\(roiContourElement.data.count) bytes)...")
             let foundContours = scanForContourDataInBytes(roiContourElement.data)
             allContours.append(contentsOf: foundContours)
         }
         
-        // Scan Structure Set ROI Sequence if it exists (sometimes coordinate data is here)
+        // Scan Structure Set ROI Sequence if it exists
         if let structureSetElement = dataset.elements[.structureSetROISequence] {
-            print("     📦 Scanning Structure Set ROI Sequence (\(structureSetElement.data.count) bytes)...")
+            print("     📦 Deep scanning Structure Set ROI Sequence (\(structureSetElement.data.count) bytes)...")
             let foundContours = scanForContourDataInBytes(structureSetElement.data)
             allContours.append(contentsOf: foundContours)
         }
         
-        // Method 3: Scan ALL elements for any embedded coordinate patterns
-        if allContours.isEmpty {
-            print("   🔍 Method 3: Scanning ALL elements for coordinate patterns...")
-            for (tag, element) in dataset.elements {
-                if element.data.count > 20 { // Only scan elements with substantial data
-                    let foundContours = scanForCoordinatePatterns(element.data)
-                    if !foundContours.isEmpty {
-                        print("     ✅ Found coordinates in tag \(tag)!")
-                        allContours.append(contentsOf: foundContours)
-                    }
+        // Method 3: Scan ALL large elements for any embedded coordinate patterns
+        print("   🔍 Method 3: Scanning ALL large elements for coordinate patterns...")
+        for (tag, element) in dataset.elements {
+            if element.data.count > 100 { // Only scan elements with substantial data
+                let foundContours = scanForCoordinatePatterns(element.data)
+                if !foundContours.isEmpty {
+                    print("     ✅ Found \(foundContours.count) coordinate patterns in tag \(tag)!")
+                    allContours.append(contentsOf: foundContours)
+                }
+            }
+        }
+        
+        // Method 4: DEEP DIVE - Raw byte scanning of entire dataset for any missed contours
+        if allContours.count < 3 { // If we haven't found enough contours, go deeper
+            print("   🔍 Method 4: DEEP DIVE - Raw scanning entire dataset...")
+            
+            // Create one large data block from all elements
+            var combinedData = Data()
+            for (_, element) in dataset.elements {
+                combinedData.append(element.data)
+            }
+            
+            print("     🌊 Deep scanning \(combinedData.count) total bytes...")
+            let deepContours = scanForContourDataInBytes(combinedData)
+            
+            // Only add unique contours (avoid duplicates)
+            for contour in deepContours {
+                let isDuplicate = allContours.contains { existingContour in
+                    abs(existingContour.slicePosition - contour.slicePosition) < 0.01 &&
+                    existingContour.points.count == contour.points.count
+                }
+                
+                if !isDuplicate {
+                    allContours.append(contour)
+                    print("       🆕 New contour: \(contour.points.count) points at Z=\(contour.slicePosition)")
                 }
             }
         }
@@ -152,43 +177,62 @@ public class MinimalRTStructParser {
         return allContours
     }
     
-    // MARK: - Direct Byte Scanning (PROVEN METHOD)
+    // MARK: - Direct Byte Scanning (ENHANCED FOR MULTIPLE CONTOURS)
     private static func scanForContourDataInBytes(_ data: Data) -> [SimpleContour] {
         var contours: [SimpleContour] = []
         
-        // Scan for (3006,0050) tags - the PROVEN method
+        print("       🔍 Enhanced scanning for ALL (3006,0050) tags in \(data.count) bytes...")
+        
+        // Scan for ALL (3006,0050) tags - enhanced for multiple contours
         let contourDataBytes: [UInt8] = [0x06, 0x30, 0x50, 0x00] // Little endian
         
-        for i in 0..<(data.count - 8) {
-            let slice = data.subdata(in: i..<i+4)
-            if Array(slice) == contourDataBytes {
-                print("       ✅ FOUND (3006,0050) at byte \(i)!")
-                
-                // Read length (handle both aligned and unaligned)
-                let length: UInt32
-                if i + 8 <= data.count {
-                    length = data.withUnsafeBytes { bytes in
-                        bytes.load(fromByteOffset: i + 4, as: UInt32.self)
-                    }
+        var searchOffset = 0
+        while searchOffset < data.count - 8 {
+            // Find next (3006,0050) tag
+            var found = false
+            for i in searchOffset..<(data.count - 8) {
+                let slice = data.subdata(in: i..<i+4)
+                if Array(slice) == contourDataBytes {
+                    print("         ✅ FOUND (3006,0050) at byte \(i)!")
                     
-                    print("         📏 Length: \(length) bytes")
-                    
-                    if length > 0 && length < 100000 && i + 8 + Int(length) <= data.count {
-                        let contourDataRaw = data.subdata(in: (i + 8)..<(i + 8 + Int(length)))
-                        
-                        if let contour = parseContourDataDirectly(contourDataRaw) {
-                            contours.append(contour)
-                            print("         ✅ SUCCESS: \(contour.points.count) points at Z=\(contour.slicePosition)")
+                    // Read length (handle both aligned and unaligned)
+                    if i + 8 <= data.count {
+                        let length = data.withUnsafeBytes { bytes in
+                            bytes.load(fromByteOffset: i + 4, as: UInt32.self)
                         }
+                        
+                        print("           📏 Length: \(length) bytes")
+                        
+                        if length > 0 && length < 100000 && i + 8 + Int(length) <= data.count {
+                            let contourDataRaw = data.subdata(in: (i + 8)..<(i + 8 + Int(length)))
+                            
+                            if let contour = parseContourDataDirectly(contourDataRaw) {
+                                contours.append(contour)
+                                print("           ✅ SUCCESS: \(contour.points.count) points at Z=\(contour.slicePosition)")
+                            }
+                            
+                            // Continue searching after this contour data
+                            searchOffset = i + 8 + Int(length)
+                        } else {
+                            searchOffset = i + 8
+                        }
+                        
+                        found = true
+                        break
                     }
                 }
             }
+            
+            if !found {
+                break // No more contour data tags found
+            }
         }
         
+        print("       📊 Found \(contours.count) contours total in this data block")
         return contours
     }
     
-    // MARK: - Coordinate Pattern Scanning (Fallback)
+    // MARK: - Enhanced Coordinate Pattern Scanning (Multiple Contours)
     private static func scanForCoordinatePatterns(_ data: Data) -> [SimpleContour] {
         var contours: [SimpleContour] = []
         
@@ -196,23 +240,59 @@ public class MinimalRTStructParser {
         if let asciiString = String(data: data, encoding: .ascii) {
             // Look for decimal numbers with backslashes (the PROVEN format)
             if asciiString.contains("\\") && asciiString.contains(".") {
-                let numbers = extractCoordinateNumbers(from: asciiString)
                 
-                if numbers.count >= 6 && numbers.count % 3 == 0 {
-                    var points: [SIMD3<Float>] = []
-                    var zPosition: Float = 0.0
-                    
-                    for i in stride(from: 0, to: numbers.count - 2, by: 3) {
-                        let x = numbers[i]
-                        let y = numbers[i + 1]
-                        let z = numbers[i + 2]
-                        points.append(SIMD3<Float>(x, y, z))
-                        zPosition = z // Use last Z as representative
+                // Try to split into multiple coordinate blocks
+                // Coordinates are often separated by null bytes or other delimiters
+                let coordinateBlocks = asciiString.components(separatedBy: CharacterSet.controlCharacters)
+                    .filter { block in
+                        block.contains("\\") && block.contains(".") && block.count > 10
                     }
+                
+                print("         🔍 Found \(coordinateBlocks.count) potential coordinate blocks")
+                
+                for (index, block) in coordinateBlocks.enumerated() {
+                    let numbers = extractCoordinateNumbers(from: block)
                     
-                    if !points.isEmpty {
-                        let contour = SimpleContour(points: points, slicePosition: zPosition)
-                        contours.append(contour)
+                    if numbers.count >= 6 && numbers.count % 3 == 0 {
+                        var points: [SIMD3<Float>] = []
+                        var zPosition: Float = 0.0
+                        
+                        for i in stride(from: 0, to: numbers.count - 2, by: 3) {
+                            let x = numbers[i]
+                            let y = numbers[i + 1]
+                            let z = numbers[i + 2]
+                            points.append(SIMD3<Float>(x, y, z))
+                            zPosition = z // All points in a contour should have same Z
+                        }
+                        
+                        if !points.isEmpty {
+                            let contour = SimpleContour(points: points, slicePosition: zPosition)
+                            contours.append(contour)
+                            print("         ✅ Block \(index + 1): \(points.count) points at Z=\(zPosition)")
+                        }
+                    }
+                }
+                
+                // Fallback: try parsing as single block if no separate blocks found
+                if contours.isEmpty {
+                    let numbers = extractCoordinateNumbers(from: asciiString)
+                    
+                    if numbers.count >= 6 && numbers.count % 3 == 0 {
+                        var points: [SIMD3<Float>] = []
+                        var zPosition: Float = 0.0
+                        
+                        for i in stride(from: 0, to: numbers.count - 2, by: 3) {
+                            let x = numbers[i]
+                            let y = numbers[i + 1]
+                            let z = numbers[i + 2]
+                            points.append(SIMD3<Float>(x, y, z))
+                            zPosition = z
+                        }
+                        
+                        if !points.isEmpty {
+                            let contour = SimpleContour(points: points, slicePosition: zPosition)
+                            contours.append(contour)
+                        }
                     }
                 }
             }
