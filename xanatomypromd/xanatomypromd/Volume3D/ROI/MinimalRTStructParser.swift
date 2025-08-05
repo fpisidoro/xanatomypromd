@@ -150,27 +150,52 @@ public class MinimalRTStructParser {
         print("     🔍 Byte-level scan for (3006,0050) in \(data.count) bytes...")
         
         var contours: [SimpleContour] = []
-        let targetBytes: [UInt8] = [0x06, 0x30, 0x50, 0x00] // (3006,0050) in little endian
         
-        for i in 0..<(data.count - 8) {
-            // Check for Contour Data tag
-            let slice = data.subdata(in: i..<i+4)
-            if Array(slice) == targetBytes {
-                print("     ✅ FOUND (3006,0050) at byte \(i)!")
-                
-                // Read length (next 4 bytes)
-                let length = data.withUnsafeBytes { bytes in
-                    bytes.load(fromByteOffset: i + 4, as: UInt32.self)
-                }
-                
-                if length > 0 && length < 100000 && i + 8 + Int(length) <= data.count {
-                    let contourDataRaw = data.subdata(in: (i + 8)..<(i + 8 + Int(length)))
+        // Try multiple possible byte patterns for (3006,0050)
+        let patterns: [(String, [UInt8])] = [
+            ("Little Endian", [0x06, 0x30, 0x50, 0x00]),  // (3006,0050)
+            ("Big Endian", [0x30, 0x06, 0x00, 0x50]),     // (3006,0050)
+            ("Alt Pattern 1", [0x50, 0x00, 0x06, 0x30]),  // Reversed
+            ("Alt Pattern 2", [0x00, 0x50, 0x30, 0x06])   // Different order
+        ]
+        
+        for (patternName, targetBytes) in patterns {
+            print("       🔍 Trying \(patternName) pattern: [\(targetBytes.map { String(format: "%02X", $0) }.joined(separator: ", "))]")
+            
+            for i in 0..<(data.count - 8) {
+                let slice = data.subdata(in: i..<i+4)
+                if Array(slice) == targetBytes {
+                    print("       ✅ FOUND \(patternName) (3006,0050) at byte \(i)!")
                     
-                    if let contour = parseContourDataDirectly(contourDataRaw) {
-                        contours.append(contour)
-                        print("     ✅ Parsed contour with \(contour.points.count) points at Z=\(contour.slicePosition)")
+                    // Read length (next 4 bytes)
+                    let length = data.withUnsafeBytes { bytes in
+                        bytes.load(fromByteOffset: i + 4, as: UInt32.self)
+                    }
+                    
+                    print("         Length: \(length) bytes")
+                    
+                    if length > 0 && length < 100000 && i + 8 + Int(length) <= data.count {
+                        let contourDataRaw = data.subdata(in: (i + 8)..<(i + 8 + Int(length)))
+                        
+                        if let contour = parseContourDataDirectly(contourDataRaw) {
+                            contours.append(contour)
+                            print("         ✅ Parsed contour with \(contour.points.count) points at Z=\(contour.slicePosition)")
+                        }
                     }
                 }
+            }
+        }
+        
+        // If no contour data tags found, show a hex dump of the data
+        if contours.isEmpty {
+            print("       📝 Hex dump of first 64 bytes:")
+            let dumpSize = min(64, data.count)
+            for i in stride(from: 0, to: dumpSize, by: 16) {
+                let lineEnd = min(i + 16, dumpSize)
+                let lineData = data.subdata(in: i..<lineEnd)
+                let hexString = lineData.map { String(format: "%02X", $0) }.joined(separator: " ")
+                let offsetString = String(format: "%04X", i)
+                print("         \(offsetString): \(hexString)")
             }
         }
         
