@@ -19,7 +19,7 @@ struct ROIOverlayLayer: View {
     let viewSize: CGSize
     
     /// ROI data source
-    let roiData: SimpleRTStructData?
+    let roiData: MinimalRTStructParser.SimpleRTStructData?
     
     /// ROI display settings
     let roiSettings: ROIDisplaySettings
@@ -48,7 +48,7 @@ struct ROIOverlayLayer: View {
                 )
                 
                 // FALLBACK TEST: If no contours found, try showing the first contour regardless of position
-                let finalContours: [SimpleContour]
+                let finalContours: [MinimalRTStructParser.SimpleContour]
                 if contours.isEmpty && plane == .axial {
                     print("   ⚠️ No contours at current position, showing first contour for testing")
                     finalContours = Array(roiStructure.contours.prefix(1))
@@ -84,10 +84,10 @@ struct ROIOverlayLayer: View {
     
     /// Get contours that should be visible on the current slice
     private func getContoursForCurrentSlice(
-        roiStructure: SimpleROIStructure,
+        roiStructure: MinimalRTStructParser.SimpleROIStructure,
         slicePosition: Float,
         plane: MPRPlane
-    ) -> [SimpleContour] {
+    ) -> [MinimalRTStructParser.SimpleContour] {
         // Get current world position from coordinate system
         let currentWorldPos = coordinateSystem.currentWorldPosition
         
@@ -121,9 +121,9 @@ struct ROIOverlayLayer: View {
     
     /// Create sagittal cross-section (YZ plane) at specific X position
     private func createSagittalCrossSection(
-        roiStructure: SimpleROIStructure,
+        roiStructure: MinimalRTStructParser.SimpleROIStructure,
         xPosition: Float
-    ) -> [SimpleContour] {
+    ) -> [MinimalRTStructParser.SimpleContour] {
         var crossSectionPoints: [SIMD3<Float>] = []
         
         // Find intersections with all contours
@@ -139,7 +139,7 @@ struct ROIOverlayLayer: View {
         // Create contour from intersection points if enough points found
         if crossSectionPoints.count >= 3 {
             let sortedPoints = sortPointsInPlane(crossSectionPoints, plane: .sagittal)
-            return [SimpleContour(
+            return [MinimalRTStructParser.SimpleContour(
                 points: sortedPoints,
                 slicePosition: xPosition
             )]
@@ -150,9 +150,9 @@ struct ROIOverlayLayer: View {
     
     /// Create coronal cross-section (XZ plane) at specific Y position
     private func createCoronalCrossSection(
-        roiStructure: SimpleROIStructure,
+        roiStructure: MinimalRTStructParser.SimpleROIStructure,
         yPosition: Float
-    ) -> [SimpleContour] {
+    ) -> [MinimalRTStructParser.SimpleContour] {
         var crossSectionPoints: [SIMD3<Float>] = []
         
         // Find intersections with all contours
@@ -168,7 +168,7 @@ struct ROIOverlayLayer: View {
         // Create contour from intersection points if enough points found
         if crossSectionPoints.count >= 3 {
             let sortedPoints = sortPointsInPlane(crossSectionPoints, plane: .coronal)
-            return [SimpleContour(
+            return [MinimalRTStructParser.SimpleContour(
                 points: sortedPoints,
                 slicePosition: yPosition
             )]
@@ -179,7 +179,7 @@ struct ROIOverlayLayer: View {
     
     /// Find intersections between contour edges and a plane
     private func findPlaneIntersections(
-        contour: SimpleContour,
+        contour: MinimalRTStructParser.SimpleContour,
         planeAxis: Int,
         planePosition: Float
     ) -> [SIMD3<Float>] {
@@ -267,8 +267,8 @@ struct ROIOverlayLayer: View {
     
     /// Draw a single contour on the canvas
     private func drawContour(
-        contour: SimpleContour,
-        roiStructure: SimpleROIStructure,
+        contour: MinimalRTStructParser.SimpleContour,
+        roiStructure: MinimalRTStructParser.SimpleROIStructure,
         context: GraphicsContext,
         size: CGSize
     ) {

@@ -25,7 +25,7 @@ struct LayeredMPRView: View {
     
     /// Data sources
     let volumeData: VolumeData?
-    let roiData: SimpleRTStructData?
+    let roiData: MinimalRTStructParser.SimpleRTStructData?
     
     /// View configuration
     let viewSize: CGSize
@@ -40,7 +40,7 @@ struct LayeredMPRView: View {
         crosshairAppearance: CrosshairAppearance = .default,
         roiSettings: ROIDisplaySettings = .default,
         volumeData: VolumeData? = nil,
-        roiData: SimpleRTStructData? = nil,
+        roiData: MinimalRTStructParser.SimpleRTStructData? = nil,
         viewSize: CGSize = CGSize(width: 512, height: 512),
         allowInteraction: Bool = true
     ) {

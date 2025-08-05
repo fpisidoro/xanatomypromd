@@ -476,7 +476,7 @@ struct XAnatomyProMainView: View {
 @MainActor
 class XAnatomyDataManager: ObservableObject {
     @Published var volumeData: VolumeData?
-    @Published var roiData: SimpleRTStructData?
+    @Published var roiData: MinimalRTStructParser.SimpleRTStructData?
     @Published var patientInfo: PatientInfo?
     @Published var isLoading = false
     @Published var loadingProgress: String = ""
