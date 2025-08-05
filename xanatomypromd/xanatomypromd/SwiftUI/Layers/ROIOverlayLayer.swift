@@ -28,8 +28,10 @@ struct ROIOverlayLayer: View {
     
     var body: some View {
         Canvas { context, size in
+            print("🎨 ROIOverlayLayer.body called - roiData: \(roiData != nil ? "EXISTS" : "NIL"), isVisible: \(roiSettings.isVisible)")
+            
             guard let roiData = roiData, roiSettings.isVisible else { 
-                // Debug: ROI not visible or no data
+                print("   ❌ ROI not rendering: data=\(roiData != nil), visible=\(roiSettings.isVisible)")
                 return 
             }
             

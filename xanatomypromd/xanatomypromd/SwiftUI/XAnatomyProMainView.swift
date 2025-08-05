@@ -479,6 +479,7 @@ struct XAnatomyProMainView: View {
     
     private func testRTStructParsing() {
         print("\n🧪 MANUAL RTStruct Test Called")
+        debugROISystem()  // Call comprehensive debug
         
         Task {
             let rtStructFiles = DICOMFileManager.getRTStructFiles()
