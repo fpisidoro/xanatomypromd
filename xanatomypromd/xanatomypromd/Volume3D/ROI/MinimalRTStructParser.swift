@@ -102,12 +102,11 @@ public class MinimalRTStructParser {
         )
     }
     
-    // MARK: - ENHANCED SCANNING: Find ALL Contours Across Dataset
+    // MARK: - ENHANCED SCANNING: Find ALL Contours in Sequence Structures
     private static func scanEntireDatasetForContours(dataset: DICOMDataset) -> [SimpleContour] {
         var allContours: [SimpleContour] = []
         
-        // Method 1: Scan all dataset elements for (3006,0050) tags - Enhanced for multiple contours
-        print("   🔍 Method 1: Enhanced scanning of all dataset elements...")
+        print("   🔍 Method 1: Scanning for direct (3006,0050) elements...")
         for (tag, element) in dataset.elements {
             if tag.group == 0x3006 && tag.element == 0x0050 {
                 print("     ✅ FOUND Contour Data tag \(tag) in dataset elements!")
@@ -118,58 +117,20 @@ public class MinimalRTStructParser {
             }
         }
         
-        // Method 2: AGGRESSIVE byte scanning in ALL elements that might contain embedded contours
-        print("   🔍 Method 2: AGGRESSIVE scanning for embedded contours...")
-        
-        // Scan ROI Contour Sequence if it exists
+        print("   🔍 Method 2: Deep parsing of ROI Contour Sequence structures...")
         if let roiContourElement = dataset.elements[.roiContourSequence] {
-            print("     📦 Deep scanning ROI Contour Sequence (\(roiContourElement.data.count) bytes)...")
-            let foundContours = scanForContourDataInBytes(roiContourElement.data)
-            allContours.append(contentsOf: foundContours)
-        }
-        
-        // Scan Structure Set ROI Sequence if it exists
-        if let structureSetElement = dataset.elements[.structureSetROISequence] {
-            print("     📦 Deep scanning Structure Set ROI Sequence (\(structureSetElement.data.count) bytes)...")
-            let foundContours = scanForContourDataInBytes(structureSetElement.data)
-            allContours.append(contentsOf: foundContours)
-        }
-        
-        // Method 3: Scan ALL large elements for any embedded coordinate patterns
-        print("   🔍 Method 3: Scanning ALL large elements for coordinate patterns...")
-        for (tag, element) in dataset.elements {
-            if element.data.count > 100 { // Only scan elements with substantial data
-                let foundContours = scanForCoordinatePatterns(element.data)
-                if !foundContours.isEmpty {
-                    print("     ✅ Found \(foundContours.count) coordinate patterns in tag \(tag)!")
-                    allContours.append(contentsOf: foundContours)
+            print("     📦 Processing ROI Contour Sequence (\(roiContourElement.data.count) bytes)...")
+            let sequenceContours = parseROIContourSequenceForAllContours(roiContourElement.data)
+            print("     📊 Found \(sequenceContours.count) contours in sequence structures")
+            
+            // Only add contours that are truly different (different Z-positions)
+            for contour in sequenceContours {
+                let isDifferent = !allContours.contains { existing in
+                    abs(existing.slicePosition - contour.slicePosition) < 0.01
                 }
-            }
-        }
-        
-        // Method 4: DEEP DIVE - Raw byte scanning of entire dataset for any missed contours
-        if allContours.count < 3 { // If we haven't found enough contours, go deeper
-            print("   🔍 Method 4: DEEP DIVE - Raw scanning entire dataset...")
-            
-            // Create one large data block from all elements
-            var combinedData = Data()
-            for (_, element) in dataset.elements {
-                combinedData.append(element.data)
-            }
-            
-            print("     🌊 Deep scanning \(combinedData.count) total bytes...")
-            let deepContours = scanForContourDataInBytes(combinedData)
-            
-            // Only add unique contours (avoid duplicates)
-            for contour in deepContours {
-                let isDuplicate = allContours.contains { existingContour in
-                    abs(existingContour.slicePosition - contour.slicePosition) < 0.01 &&
-                    existingContour.points.count == contour.points.count
-                }
-                
-                if !isDuplicate {
+                if isDifferent {
                     allContours.append(contour)
-                    print("       🆕 New contour: \(contour.points.count) points at Z=\(contour.slicePosition)")
+                    print("       🆕 Added unique contour: \(contour.points.count) points at Z=\(contour.slicePosition)")
                 }
             }
         }
@@ -177,128 +138,119 @@ public class MinimalRTStructParser {
         return allContours
     }
     
-    // MARK: - Direct Byte Scanning (ENHANCED FOR MULTIPLE CONTOURS)
-    private static func scanForContourDataInBytes(_ data: Data) -> [SimpleContour] {
+    // MARK: - ROI Contour Sequence Parser (Multiple Contours)
+    private static func parseROIContourSequenceForAllContours(_ data: Data) -> [SimpleContour] {
         var contours: [SimpleContour] = []
         
-        print("       🔍 Enhanced scanning for ALL (3006,0050) tags in \(data.count) bytes...")
+        print("       🔍 Parsing ROI Contour Sequence for multiple contours...")
         
-        // Scan for ALL (3006,0050) tags - enhanced for multiple contours
-        let contourDataBytes: [UInt8] = [0x06, 0x30, 0x50, 0x00] // Little endian
+        // Parse sequence items manually to find all contour data
+        var offset = 0
+        while offset < data.count - 8 {
+            // Look for Item tags (FFFE,E000)
+            let itemTagBytes: [UInt8] = [0xFE, 0xFF, 0x00, 0xE0] // Item tag
+            
+            // Find next item
+            var itemFound = false
+            for i in offset..<(data.count - 8) {
+                let slice = data.subdata(in: i..<i+4)
+                if Array(slice) == itemTagBytes {
+                    print("         📎 Found sequence item at offset \(i)")
+                    
+                    // Read item length
+                    let itemLength = data.withUnsafeBytes { bytes in
+                        bytes.load(fromByteOffset: i + 4, as: UInt32.self)
+                    }
+                    
+                    var itemEndOffset: Int
+                    if itemLength == 0xFFFFFFFF {
+                        // Undefined length - find delimiter
+                        itemEndOffset = findSequenceDelimiter(in: data, startingAt: i + 8) ?? (data.count - 1)
+                        print("           🔄 Undefined length item, delimiter at \(itemEndOffset)")
+                    } else {
+                        itemEndOffset = i + 8 + Int(itemLength)
+                        print("           📏 Defined length item: \(itemLength) bytes")
+                    }
+                    
+                    if itemEndOffset <= data.count {
+                        let itemData = data.subdata(in: (i + 8)..<itemEndOffset)
+                        
+                        // Scan this item for contour data
+                        let itemContours = scanSingleItemForContours(itemData)
+                        if !itemContours.isEmpty {
+                            print("           ✅ Found \(itemContours.count) contours in this item")
+                            contours.append(contentsOf: itemContours)
+                        }
+                        
+                        offset = itemEndOffset
+                        itemFound = true
+                        break
+                    }
+                }
+            }
+            
+            if !itemFound {
+                break
+            }
+        }
+        
+        return contours
+    }
+    
+    // MARK: - Single Item Contour Scanner
+    private static func scanSingleItemForContours(_ data: Data) -> [SimpleContour] {
+        var contours: [SimpleContour] = []
+        
+        // Look for (3006,0050) Contour Data tags within this item
+        let contourDataBytes: [UInt8] = [0x06, 0x30, 0x50, 0x00]
         
         var searchOffset = 0
         while searchOffset < data.count - 8 {
-            // Find next (3006,0050) tag
-            var found = false
             for i in searchOffset..<(data.count - 8) {
                 let slice = data.subdata(in: i..<i+4)
                 if Array(slice) == contourDataBytes {
-                    print("         ✅ FOUND (3006,0050) at byte \(i)!")
+                    print("             ✅ Found (3006,0050) at item offset \(i)")
                     
-                    // Read length (handle both aligned and unaligned)
                     if i + 8 <= data.count {
                         let length = data.withUnsafeBytes { bytes in
                             bytes.load(fromByteOffset: i + 4, as: UInt32.self)
                         }
-                        
-                        print("           📏 Length: \(length) bytes")
                         
                         if length > 0 && length < 100000 && i + 8 + Int(length) <= data.count {
                             let contourDataRaw = data.subdata(in: (i + 8)..<(i + 8 + Int(length)))
                             
                             if let contour = parseContourDataDirectly(contourDataRaw) {
                                 contours.append(contour)
-                                print("           ✅ SUCCESS: \(contour.points.count) points at Z=\(contour.slicePosition)")
+                                print("               ✅ Parsed: \(contour.points.count) points at Z=\(contour.slicePosition)")
                             }
                             
-                            // Continue searching after this contour data
                             searchOffset = i + 8 + Int(length)
-                        } else {
-                            searchOffset = i + 8
+                            break
                         }
-                        
-                        found = true
-                        break
                     }
                 }
             }
             
-            if !found {
-                break // No more contour data tags found
+            if searchOffset == 0 {
+                break // No contour data found in this item
             }
         }
         
-        print("       📊 Found \(contours.count) contours total in this data block")
         return contours
     }
     
-    // MARK: - Enhanced Coordinate Pattern Scanning (Multiple Contours)
-    private static func scanForCoordinatePatterns(_ data: Data) -> [SimpleContour] {
-        var contours: [SimpleContour] = []
+    // MARK: - Sequence Delimiter Finder
+    private static func findSequenceDelimiter(in data: Data, startingAt offset: Int) -> Int? {
+        let delimiterBytes: [UInt8] = [0xFE, 0xFF, 0x0D, 0xE0] // Sequence delimiter
         
-        // Look for ASCII coordinate patterns with backslashes
-        if let asciiString = String(data: data, encoding: .ascii) {
-            // Look for decimal numbers with backslashes (the PROVEN format)
-            if asciiString.contains("\\") && asciiString.contains(".") {
-                
-                // Try to split into multiple coordinate blocks
-                // Coordinates are often separated by null bytes or other delimiters
-                let coordinateBlocks = asciiString.components(separatedBy: CharacterSet.controlCharacters)
-                    .filter { block in
-                        block.contains("\\") && block.contains(".") && block.count > 10
-                    }
-                
-                print("         🔍 Found \(coordinateBlocks.count) potential coordinate blocks")
-                
-                for (index, block) in coordinateBlocks.enumerated() {
-                    let numbers = extractCoordinateNumbers(from: block)
-                    
-                    if numbers.count >= 6 && numbers.count % 3 == 0 {
-                        var points: [SIMD3<Float>] = []
-                        var zPosition: Float = 0.0
-                        
-                        for i in stride(from: 0, to: numbers.count - 2, by: 3) {
-                            let x = numbers[i]
-                            let y = numbers[i + 1]
-                            let z = numbers[i + 2]
-                            points.append(SIMD3<Float>(x, y, z))
-                            zPosition = z // All points in a contour should have same Z
-                        }
-                        
-                        if !points.isEmpty {
-                            let contour = SimpleContour(points: points, slicePosition: zPosition)
-                            contours.append(contour)
-                            print("         ✅ Block \(index + 1): \(points.count) points at Z=\(zPosition)")
-                        }
-                    }
-                }
-                
-                // Fallback: try parsing as single block if no separate blocks found
-                if contours.isEmpty {
-                    let numbers = extractCoordinateNumbers(from: asciiString)
-                    
-                    if numbers.count >= 6 && numbers.count % 3 == 0 {
-                        var points: [SIMD3<Float>] = []
-                        var zPosition: Float = 0.0
-                        
-                        for i in stride(from: 0, to: numbers.count - 2, by: 3) {
-                            let x = numbers[i]
-                            let y = numbers[i + 1]
-                            let z = numbers[i + 2]
-                            points.append(SIMD3<Float>(x, y, z))
-                            zPosition = z
-                        }
-                        
-                        if !points.isEmpty {
-                            let contour = SimpleContour(points: points, slicePosition: zPosition)
-                            contours.append(contour)
-                        }
-                    }
-                }
+        for i in offset..<(data.count - 4) {
+            let slice = data.subdata(in: i..<i+4)
+            if Array(slice) == delimiterBytes {
+                return i
             }
         }
         
-        return contours
+        return nil
     }
     
     // MARK: - Direct Contour Data Parsing (PROVEN METHOD)
