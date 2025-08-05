@@ -255,11 +255,54 @@ public class MinimalRTStructParser {
             }
         }
         
+        // If no Contour Data found, try scanning the original RTStruct file's approach
+        // The hex dump shows this may be a minimal RTStruct with embedded coordinate data
+        if contours.isEmpty {
+            print("           🔍 No (3006,0050) found, trying direct coordinate scanning...")
+            
+            // Look for ASCII coordinate patterns (decimal strings with backslashes)
+            let asciiData = String(data: data, encoding: .ascii) ?? ""
+            if asciiData.contains("\\") && asciiData.contains(".") {
+                print("           ✅ Found ASCII coordinate pattern!")
+                
+                // Extract coordinate string
+                let cleanString = asciiData.trimmingCharacters(in: .whitespacesAndNewlines.union(.controlCharacters))
+                let components = cleanString.components(separatedBy: "\\")
+                let numbers = components.compactMap { Float($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                
+                if numbers.count >= 6 && numbers.count % 3 == 0 {
+                    var points: [SIMD3<Float>] = []
+                    var zPosition: Float = 0.0
+                    
+                    for i in stride(from: 0, to: numbers.count - 2, by: 3) {
+                        let x = numbers[i]
+                        let y = numbers[i + 1]
+                        let z = numbers[i + 2]
+                        points.append(SIMD3<Float>(x, y, z))
+                        zPosition = z
+                    }
+                    
+                    if !points.isEmpty {
+                        let contour = SimpleContour(points: points, slicePosition: zPosition)
+                        contours.append(contour)
+                        print("           ✅ Parsed ASCII coordinates: \(points.count) points at Z=\(zPosition)")
+                    }
+                }
+            }
+        }
+        
         if contours.isEmpty {
             print("           📝 No Contour Data found in sequence. Hex dump:")
-            let dumpSize = min(32, data.count)
+            let dumpSize = min(64, data.count)
             let hexString = data.prefix(dumpSize).map { String(format: "%02X", $0) }.joined(separator: " ")
             print("             \(hexString)")
+            
+            // Also show ASCII interpretation
+            let asciiString = String(data: data.prefix(dumpSize), encoding: .ascii) ?? "[non-ASCII]"
+            let printableAscii = asciiString.replacingOccurrences(of: "\0", with: "\\0")
+                .replacingOccurrences(of: "\n", with: "\\n")
+                .replacingOccurrences(of: "\r", with: "\\r")
+            print("             ASCII: \"\(printableAscii)\"")
         }
         
         return contours
