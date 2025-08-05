@@ -80,19 +80,13 @@ public class MinimalRTStructParser {
             print("      Z=\(z)mm: \(contoursAtZ.count) contours, \(totalPoints) points")
         }
         
-        // Create a single ROI with all contours (for now)
-        // In a full implementation, we'd parse ROI metadata to group properly
-        let roi = SimpleROIStructure(
-            roiNumber: 1,
-            roiName: "Anatomical Structure",
-            displayColor: SIMD3<Float>(1.0, 0.0, 1.0), // Magenta
-            contours: allContours
-        )
+        // Group contours into separate ROI structures based on Z-position clustering
+        let roiStructures = groupContoursIntoROIs(contours: allContours, dataset: dataset)
         
         return SimpleRTStructData(
             structureSetName: structureSetName,
             patientName: patientName,
-            roiStructures: [roi]
+            roiStructures: roiStructures
         )
     }
     
@@ -417,6 +411,122 @@ public class MinimalRTStructParser {
     private static func findItemDelimiter(in data: Data, startingAt offset: Int) -> Int? {
         let itemDelimiter: [UInt8] = [0xFE, 0xFF, 0x0D, 0xE0]
         return scanForTag(in: data, tag: itemDelimiter, startingAt: offset)
+    }
+    
+    // MARK: - Group Contours into ROI Structures
+    private static func groupContoursIntoROIs(contours: [SimpleContour], dataset: DICOMDataset) -> [SimpleROIStructure] {
+        guard !contours.isEmpty else { return [] }
+        
+        print("\n   🔍 Analyzing contour clustering for ROI separation...")
+        
+        // Sort contours by Z position
+        let sortedContours = contours.sorted { $0.slicePosition < $1.slicePosition }
+        
+        // Group contours that are close together in Z (within 5mm suggests same structure)
+        var roiGroups: [[SimpleContour]] = []
+        var currentGroup: [SimpleContour] = [sortedContours[0]]
+        
+        for i in 1..<sortedContours.count {
+            let prevZ = sortedContours[i-1].slicePosition
+            let currZ = sortedContours[i].slicePosition
+            
+            // If Z-gap is > 10mm, likely a different anatomical structure
+            if abs(currZ - prevZ) > 10.0 {
+                roiGroups.append(currentGroup)
+                currentGroup = [sortedContours[i]]
+                print("      🆕 New ROI group detected (Z-gap: \(abs(currZ - prevZ))mm)")
+            } else {
+                currentGroup.append(sortedContours[i])
+            }
+        }
+        roiGroups.append(currentGroup)
+        
+        print("   📦 Identified \(roiGroups.count) separate ROI structures")
+        
+        // Try to extract ROI metadata from dataset
+        let roiMetadata = extractROIMetadata(from: dataset)
+        
+        // Create ROI structures
+        var roiStructures: [SimpleROIStructure] = []
+        for (index, group) in roiGroups.enumerated() {
+            let roiNumber = index + 1
+            
+            // Try to get metadata for this ROI
+            let metadata = roiMetadata.first { roi in
+                // Match based on Z-range overlap
+                let roiZMin = group.map { $0.slicePosition }.min() ?? 0
+                let roiZMax = group.map { $0.slicePosition }.max() ?? 0
+                return roi.zMin <= roiZMax && roi.zMax >= roiZMin
+            }
+            
+            let roiName = metadata?.name ?? "ROI-\(roiNumber)"
+            let displayColor = metadata?.color ?? generateROIColor(for: index)
+            
+            let roi = SimpleROIStructure(
+                roiNumber: roiNumber,
+                roiName: roiName,
+                displayColor: displayColor,
+                contours: group
+            )
+            
+            let zPositions = group.map { $0.slicePosition }
+            let minZ = zPositions.min() ?? 0
+            let maxZ = zPositions.max() ?? 0
+            let totalPoints = group.reduce(0) { $0 + $1.points.count }
+            
+            print("      🏷️ ROI \(roiNumber): '\(roiName)'")
+            print("         📍 Z-range: \(minZ)mm to \(maxZ)mm")
+            print("         🔢 \(group.count) contours, \(totalPoints) points")
+            
+            roiStructures.append(roi)
+        }
+        
+        return roiStructures
+    }
+    
+    // MARK: - Extract ROI Metadata from Dataset
+    private static func extractROIMetadata(from dataset: DICOMDataset) -> [(name: String, color: SIMD3<Float>, zMin: Float, zMax: Float)] {
+        var metadata: [(name: String, color: SIMD3<Float>, zMin: Float, zMax: Float)] = []
+        
+        // Try to parse Structure Set ROI Sequence (3006,0020)
+        if let structureSetROISeq = dataset.elements[.structureSetROISequence] {
+            print("   📚 Parsing Structure Set ROI Sequence for metadata...")
+            
+            // Parse sequence items to extract ROI names
+            // This is simplified - full implementation would parse the sequence properly
+            let items = parseSequenceItems(structureSetROISeq.data)
+            for (index, _) in items.enumerated() {
+                // Default names if we can't parse them
+                let name = "Structure \(index + 1)"
+                let color = generateROIColor(for: index)
+                metadata.append((name: name, color: color, zMin: -200, zMax: 200))
+            }
+        }
+        
+        // Try to parse ROI Contour Sequence (3006,0039) for colors
+        if let roiContourSeq = dataset.elements[.roiContourSequence] {
+            // Parse for display colors
+            // Simplified - would need proper sequence parsing
+        }
+        
+        return metadata
+    }
+    
+    // MARK: - Generate ROI Colors
+    private static func generateROIColor(for index: Int) -> SIMD3<Float> {
+        let colors: [SIMD3<Float>] = [
+            SIMD3<Float>(1.0, 0.0, 0.0),  // Red
+            SIMD3<Float>(0.0, 1.0, 0.0),  // Green
+            SIMD3<Float>(0.0, 0.0, 1.0),  // Blue
+            SIMD3<Float>(1.0, 1.0, 0.0),  // Yellow
+            SIMD3<Float>(1.0, 0.0, 1.0),  // Magenta
+            SIMD3<Float>(0.0, 1.0, 1.0),  // Cyan
+            SIMD3<Float>(1.0, 0.5, 0.0),  // Orange
+            SIMD3<Float>(0.5, 0.0, 1.0),  // Purple
+            SIMD3<Float>(0.0, 1.0, 0.5),  // Spring Green
+            SIMD3<Float>(1.0, 0.5, 0.5),  // Light Red
+        ]
+        return colors[index % colors.count]
     }
     
     // MARK: - Parse Contour Data (PROVEN METHOD)
