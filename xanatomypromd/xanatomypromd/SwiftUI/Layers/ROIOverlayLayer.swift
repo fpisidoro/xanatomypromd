@@ -122,23 +122,28 @@ struct ROIOverlayLayer: View {
                 }
             }
             
-            // PROPER FIX: Use ROI coordinates as-is and fix slice matching
-            // Both ROI and volume should use same DICOM coordinate system
-            let properContours = roiStructure.contours.filter { contour in
-                // Convert current world position to same coordinate space as ROI
-                let currentZ = coordinateSystem.currentWorldPosition.z
-                let zDifference = abs(contour.slicePosition - currentZ)
-                
-                // Use larger tolerance until coordinate systems are properly aligned
-                let tolerance: Float = 5.0
-                let isNearCurrentSlice = zDifference < tolerance
-                
-                print("      🎯 ROI Z=\(contour.slicePosition) vs Current Z=\(currentZ), diff=\(zDifference), show=\(isNearCurrentSlice)")
-                
-                return isNearCurrentSlice
+            // 3D ROI INTERSECTION: Show ROI when current slice intersects the 3D ROI bounds
+            // Calculate the Z bounds of the entire ROI structure
+            let allZPositions = roiStructure.contours.map { $0.slicePosition }
+            guard let minROIZ = allZPositions.min(), let maxROIZ = allZPositions.max() else {
+                return []
             }
-            print("   📊 Showing \(properContours.count) contours with proper coordinate matching")
-            return properContours
+            
+            let currentZ = coordinateSystem.currentWorldPosition.z
+            let roiZRange = maxROIZ - minROIZ
+            
+            print("      🔍 ROI Z range: \(minROIZ) to \(maxROIZ) (span: \(roiZRange)mm)")
+            print("      📍 Current Z: \(currentZ)")
+            print("      🎯 ROI contains current slice: \(currentZ >= minROIZ && currentZ <= maxROIZ)")
+            
+            // Show ALL ROI contours if current slice intersects the ROI's Z bounds
+            if currentZ >= minROIZ && currentZ <= maxROIZ {
+                print("      ✅ Showing all \(roiStructure.contours.count) ROI contours (3D intersection)")
+                return roiStructure.contours
+            } else {
+                print("      ❌ Current slice outside ROI bounds")
+                return []
+            }
             
         case .sagittal:
             // Sagittal: create cross-section at current X position
