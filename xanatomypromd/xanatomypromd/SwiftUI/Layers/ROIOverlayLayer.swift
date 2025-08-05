@@ -90,13 +90,37 @@ struct ROIOverlayLayer: View {
         
         switch plane {
         case .axial:
-            // TEMP: Show ROI regardless of Z position for debugging
+            // DEBUG: Check coordinate system alignment
             let allContours = roiStructure.contours
-            print("   🔍 DEBUG: Showing all \(allContours.count) contours regardless of Z position")
+            print("   🔍 Coordinate Debug: \(allContours.count) contours")
             if !allContours.isEmpty {
-                print("      📍 First contour at Z=\(allContours[0].slicePosition), current Z=\(currentWorldPos.z)")
+                let contour = allContours[0]
+                print("      📍 ROI Z=\(contour.slicePosition), Current Z=\(currentWorldPos.z)")
+                print("      📍 Volume bounds: \(coordinateSystem.volumeBounds)")
+                print("      📍 Z difference: \(abs(contour.slicePosition - currentWorldPos.z))mm")
+                
+                // Check if ROI Z is within volume bounds
+                let bounds = coordinateSystem.volumeBounds
+                let isWithinBounds = contour.slicePosition >= bounds.min.z && contour.slicePosition <= bounds.max.z
+                print("      ⚠️ ROI within volume bounds: \(isWithinBounds)")
+                
+                // Sample coordinate conversion
+                if let firstPoint = contour.points.first {
+                    let screenPoint = coordinateSystem.worldToScreen(
+                        position: firstPoint,
+                        plane: plane,
+                        viewSize: size
+                    )
+                    print("      📍 Sample: World(\(firstPoint.x), \(firstPoint.y), \(firstPoint.z)) → Screen(\(screenPoint.x), \(screenPoint.y))")
+                }
             }
-            return allContours
+            
+            // For now, show contours only if reasonably close (within ~150mm)
+            let debugContours = roiStructure.contours.filter { contour in
+                abs(contour.slicePosition - currentWorldPos.z) < 150.0
+            }
+            print("   📊 Showing \(debugContours.count) contours within 150mm of current slice")
+            return debugContours
             
         case .sagittal:
             // Sagittal: create cross-section at current X position
