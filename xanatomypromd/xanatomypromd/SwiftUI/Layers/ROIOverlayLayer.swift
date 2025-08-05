@@ -19,7 +19,7 @@ struct ROIOverlayLayer: View {
     let viewSize: CGSize
     
     /// ROI data source
-    let roiData: RTStructData?
+    let roiData: SimpleRTStructData?
     
     /// ROI display settings
     let roiSettings: ROIDisplaySettings
@@ -38,7 +38,7 @@ struct ROIOverlayLayer: View {
             // Render each ROI structure
             var totalContoursDrawn = 0
             for roiStructure in roiData.roiStructures {
-                guard roiStructure.isVisible else { continue }
+                // SimpleROIStructure doesn't have isVisible, assume all are visible
                 
                 // Get contours for current slice - no longer need slice position parameter
                 let contours = getContoursForCurrentSlice(
@@ -48,7 +48,7 @@ struct ROIOverlayLayer: View {
                 )
                 
                 // FALLBACK TEST: If no contours found, try showing the first contour regardless of position
-                let finalContours: [ROIContour]
+                let finalContours: [SimpleContour]
                 if contours.isEmpty && plane == .axial {
                     print("   ⚠️ No contours at current position, showing first contour for testing")
                     finalContours = Array(roiStructure.contours.prefix(1))
@@ -60,7 +60,7 @@ struct ROIOverlayLayer: View {
                 
                 // Draw each contour
                 for (index, contour) in finalContours.enumerated() {
-                    print("      📐 Drawing contour \(index): \(contour.contourData.count) points")
+                    print("      📐 Drawing contour \(index): \(contour.points.count) points")
                     drawContour(
                         contour: contour,
                         roiStructure: roiStructure,
@@ -84,10 +84,10 @@ struct ROIOverlayLayer: View {
     
     /// Get contours that should be visible on the current slice
     private func getContoursForCurrentSlice(
-        roiStructure: ROIStructure,
+        roiStructure: SimpleROIStructure,
         slicePosition: Float,
         plane: MPRPlane
-    ) -> [ROIContour] {
+    ) -> [SimpleContour] {
         // Get current world position from coordinate system
         let currentWorldPos = coordinateSystem.currentWorldPosition
         
@@ -121,9 +121,9 @@ struct ROIOverlayLayer: View {
     
     /// Create sagittal cross-section (YZ plane) at specific X position
     private func createSagittalCrossSection(
-        roiStructure: ROIStructure,
+        roiStructure: SimpleROIStructure,
         xPosition: Float
-    ) -> [ROIContour] {
+    ) -> [SimpleContour] {
         var crossSectionPoints: [SIMD3<Float>] = []
         
         // Find intersections with all contours
@@ -139,11 +139,8 @@ struct ROIOverlayLayer: View {
         // Create contour from intersection points if enough points found
         if crossSectionPoints.count >= 3 {
             let sortedPoints = sortPointsInPlane(crossSectionPoints, plane: .sagittal)
-            return [ROIContour(
-                contourNumber: 1,
-                geometricType: .closedPlanar,
-                numberOfPoints: sortedPoints.count,
-                contourData: sortedPoints,
+            return [SimpleContour(
+                points: sortedPoints,
                 slicePosition: xPosition
             )]
         }
@@ -153,9 +150,9 @@ struct ROIOverlayLayer: View {
     
     /// Create coronal cross-section (XZ plane) at specific Y position
     private func createCoronalCrossSection(
-        roiStructure: ROIStructure,
+        roiStructure: SimpleROIStructure,
         yPosition: Float
-    ) -> [ROIContour] {
+    ) -> [SimpleContour] {
         var crossSectionPoints: [SIMD3<Float>] = []
         
         // Find intersections with all contours
@@ -171,11 +168,8 @@ struct ROIOverlayLayer: View {
         // Create contour from intersection points if enough points found
         if crossSectionPoints.count >= 3 {
             let sortedPoints = sortPointsInPlane(crossSectionPoints, plane: .coronal)
-            return [ROIContour(
-                contourNumber: 1,
-                geometricType: .closedPlanar,
-                numberOfPoints: sortedPoints.count,
-                contourData: sortedPoints,
+            return [SimpleContour(
+                points: sortedPoints,
                 slicePosition: yPosition
             )]
         }
@@ -185,15 +179,15 @@ struct ROIOverlayLayer: View {
     
     /// Find intersections between contour edges and a plane
     private func findPlaneIntersections(
-        contour: ROIContour,
+        contour: SimpleContour,
         planeAxis: Int,
         planePosition: Float
     ) -> [SIMD3<Float>] {
         var intersections: [SIMD3<Float>] = []
         
-        for i in 0..<contour.contourData.count {
-            let p1 = contour.contourData[i]
-            let p2 = contour.contourData[(i + 1) % contour.contourData.count]
+        for i in 0..<contour.points.count {
+            let p1 = contour.points[i]
+            let p2 = contour.points[(i + 1) % contour.points.count]
             
             let coord1 = p1[planeAxis]
             let coord2 = p2[planeAxis]
@@ -273,21 +267,21 @@ struct ROIOverlayLayer: View {
     
     /// Draw a single contour on the canvas
     private func drawContour(
-        contour: ROIContour,
-        roiStructure: ROIStructure,
+        contour: SimpleContour,
+        roiStructure: SimpleROIStructure,
         context: GraphicsContext,
         size: CGSize
     ) {
-        guard contour.contourData.count >= 3 else { 
-            print("         ⚠️ Skipping contour with only \(contour.contourData.count) points")
+        guard contour.points.count >= 3 else { 
+            print("         ⚠️ Skipping contour with only \(contour.points.count) points")
             return 
         }
         
         // Debug: Show first few points
-        print("         📍 Sample world coord: \(contour.contourData.first ?? SIMD3<Float>(0,0,0))")
+        print("         📍 Sample world coord: \(contour.points.first ?? SIMD3<Float>(0,0,0))")
         
         // Convert 3D contour points to 2D screen coordinates using coordinate system
-        let screenPoints = contour.contourData.map { point3D in
+        let screenPoints = contour.points.map { point3D in
             coordinateSystem.worldToScreen(
                 position: point3D,
                 plane: plane,
@@ -333,7 +327,7 @@ struct ROIOverlayLayer: View {
         if roiSettings.showFilled {
             context.fill(
                 path,
-                with: .color(roiColor.opacity(Double(roiStructure.opacity) * roiSettings.fillOpacity))
+                with: .color(roiColor.opacity(roiSettings.fillOpacity))
             )
         }
         
@@ -341,7 +335,7 @@ struct ROIOverlayLayer: View {
         if roiSettings.showOutline {
             context.stroke(
                 path,
-                with: .color(roiColor.opacity(Double(roiStructure.opacity) * roiSettings.outlineOpacity)),
+                with: .color(roiColor.opacity(roiSettings.outlineOpacity)),
                 style: StrokeStyle(
                     lineWidth: roiSettings.outlineWidth,
                     lineCap: .round,

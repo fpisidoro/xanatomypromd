@@ -476,7 +476,7 @@ struct XAnatomyProMainView: View {
 @MainActor
 class XAnatomyDataManager: ObservableObject {
     @Published var volumeData: VolumeData?
-    @Published var roiData: RTStructData?
+    @Published var roiData: SimpleRTStructData?
     @Published var patientInfo: PatientInfo?
     @Published var isLoading = false
     @Published var loadingProgress: String = ""
@@ -579,17 +579,14 @@ class XAnatomyDataManager: ObservableObject {
                 // Use the new direct parser to extract ROI data
                 print("\n🔍 Starting RTStruct parsing...")
                 if let simpleRTStruct = MinimalRTStructParser.parseSimpleRTStruct(from: dataset) {
-                    // Convert to full RTStruct format
-                    let fullRTStruct = MinimalRTStructParser.convertToFullROI(simpleRTStruct)
-                    
                     // Update published property on main actor
-                    roiData = fullRTStruct
+                    roiData = simpleRTStruct
                     
-                    print("\n✅ RTStruct SUCCESS: \(fullRTStruct.roiStructures.count) ROI structures loaded")
-                    for roi in fullRTStruct.roiStructures {
-                        print("   📊 ROI \(roi.roiNumber): '\(roi.roiName)' - \(roi.contours.count) contours, \(roi.totalPoints) points")
+                    print("\n✅ RTStruct SUCCESS: \(simpleRTStruct.roiStructures.count) ROI structures loaded")
+                    for roi in simpleRTStruct.roiStructures {
+                        print("   📊 ROI \(roi.roiNumber): '\(roi.roiName)' - \(roi.contours.count) contours")
                     }
-                    loadingProgress = "RTStruct loaded: \(fullRTStruct.roiStructures.count) ROIs"
+                    loadingProgress = "RTStruct loaded: \(simpleRTStruct.roiStructures.count) ROIs"
                 } else {
                     print("\n❌ RTStruct parsing returned no data")
                     loadingProgress = "RTStruct parsing failed - no geometry found"
