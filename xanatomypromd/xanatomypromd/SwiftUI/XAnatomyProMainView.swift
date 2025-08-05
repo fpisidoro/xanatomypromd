@@ -312,6 +312,13 @@ struct XAnatomyProMainView: View {
                 .foregroundColor(.white)
                 .cornerRadius(8)
             
+            Button("Test RTStruct") { testRTStructParsing() }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.green.opacity(0.6))
+                .foregroundColor(.white)
+                .cornerRadius(8)
+            
             Spacer()
             
             statusIndicator
@@ -467,6 +474,50 @@ struct XAnatomyProMainView: View {
         case .axial: return "Top-Down"
         case .sagittal: return "Side View"
         case .coronal: return "Front View"
+        }
+    }
+    
+    private func testRTStructParsing() {
+        print("\n🧪 MANUAL RTStruct Test Called")
+        
+        Task {
+            let rtStructFiles = DICOMFileManager.getRTStructFiles()
+            
+            if rtStructFiles.isEmpty {
+                print("❌ No RTStruct files found for testing")
+                return
+            }
+            
+            for (index, file) in rtStructFiles.enumerated() {
+                print("\n📄 Testing RTStruct file \(index + 1): \(file.lastPathComponent)")
+                
+                do {
+                    let data = try Data(contentsOf: file)
+                    let dataset = try DICOMParser.parse(data)
+                    
+                    if let result = MinimalRTStructParser.parseSimpleRTStruct(from: dataset) {
+                        print("✅ SUCCESS: Found \(result.roiStructures.count) ROI structures")
+                        
+                        let totalContours = result.roiStructures.reduce(0) { $0 + $1.contours.count }
+                        let totalPoints = result.roiStructures.reduce(0) { total, roi in
+                            total + roi.contours.reduce(0) { $0 + $1.points.count }
+                        }
+                        
+                        print("📊 Total: \(totalContours) contours, \(totalPoints) points")
+                        
+                        for roi in result.roiStructures {
+                            let zPositions = roi.contours.map { $0.slicePosition }
+                            let minZ = zPositions.min() ?? 0
+                            let maxZ = zPositions.max() ?? 0
+                            print("   🏷️ ROI \(roi.roiNumber): '\(roi.roiName)' - \(roi.contours.count) contours (Z: \(minZ) to \(maxZ)mm)")
+                        }
+                    } else {
+                        print("❌ Parsing failed - no data returned")
+                    }
+                } catch {
+                    print("❌ Error testing file: \(error)")
+                }
+            }
         }
     }
 }
