@@ -3,9 +3,11 @@ import Foundation
 /// Represents a parsed DICOM dataset
 public struct DICOMDataset {
     public let elements: [DICOMTag: DICOMElement]
+    public let rawData: Data? // Store raw file data for deep scanning
     
-    public init(elements: [DICOMTag: DICOMElement]) {
+    public init(elements: [DICOMTag: DICOMElement], rawData: Data? = nil) {
         self.elements = elements
+        self.rawData = rawData
     }
     
     // MARK: - Convenience Accessors for Common CT Tags

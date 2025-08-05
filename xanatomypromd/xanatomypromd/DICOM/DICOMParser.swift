@@ -86,7 +86,7 @@ public struct DICOMParser {
             elements[element.tag] = element
         }
         
-        return DICOMDataset(elements: elements)
+        return DICOMDataset(elements: elements, rawData: data)
     }
     
     private func validateDICOMHeader(_ data: Data) throws {
