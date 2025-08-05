@@ -90,15 +90,13 @@ struct ROIOverlayLayer: View {
         
         switch plane {
         case .axial:
-            // Axial: show contours at current Z slice (use world Z position)
-            let axialContours = roiStructure.contours.filter { contour in
-                abs(contour.slicePosition - currentWorldPos.z) < roiSettings.sliceTolerance
+            // TEMP: Show ROI regardless of Z position for debugging
+            let allContours = roiStructure.contours
+            print("   🔍 DEBUG: Showing all \(allContours.count) contours regardless of Z position")
+            if !allContours.isEmpty {
+                print("      📍 First contour at Z=\(allContours[0].slicePosition), current Z=\(currentWorldPos.z)")
             }
-            print("   📍 Axial: Found \(axialContours.count) contours near Z=\(currentWorldPos.z) (tolerance: \(roiSettings.sliceTolerance))")
-            if !axialContours.isEmpty {
-                print("      📍 Contour Z positions: \(axialContours.map { $0.slicePosition })")
-            }
-            return axialContours
+            return allContours
             
         case .sagittal:
             // Sagittal: create cross-section at current X position
