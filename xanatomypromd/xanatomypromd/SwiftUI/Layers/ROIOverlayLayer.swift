@@ -109,7 +109,7 @@ struct ROIOverlayLayer: View {
                     let screenPoint = coordinateSystem.worldToScreen(
                         position: firstPoint,
                         plane: plane,
-                        viewSize: size
+                        viewSize: viewSize
                     )
                     print("      📍 Sample: World(\(firstPoint.x), \(firstPoint.y), \(firstPoint.z)) → Screen(\(screenPoint.x), \(screenPoint.y))")
                 }
