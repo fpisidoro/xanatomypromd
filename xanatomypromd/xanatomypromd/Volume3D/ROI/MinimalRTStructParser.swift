@@ -197,9 +197,21 @@ public class MinimalRTStructParser {
             if let tagOffset = found {
                 print("         🎯 Found Contour Sequence (3006,0040) at offset \(tagOffset)")
                 
-                // Read length
-                let length = data.withUnsafeBytes { bytes in
-                    bytes.load(fromByteOffset: tagOffset + 4, as: UInt32.self)
+                // Read length (safely handle unaligned data)
+                let length: UInt32
+                if tagOffset + 8 <= data.count {
+                    // Read 4 bytes safely without assuming alignment
+                    let lengthData = data.subdata(in: (tagOffset + 4)..<(tagOffset + 8))
+                    length = lengthData.withUnsafeBytes { bytes in
+                        // Create aligned copy for safe reading
+                        var value: UInt32 = 0
+                        withUnsafeMutableBytes(of: &value) { dest in
+                            dest.copyMemory(from: bytes)
+                        }
+                        return value
+                    }
+                } else {
+                    length = 0
                 }
                 
                 let seqStart = tagOffset + 8
@@ -247,9 +259,21 @@ public class MinimalRTStructParser {
             let found = scanForTag(in: data, tag: contourDataTag, startingAt: offset)
             
             if let tagOffset = found {
-                // Read length
-                let length = data.withUnsafeBytes { bytes in
-                    bytes.load(fromByteOffset: tagOffset + 4, as: UInt32.self)
+                // Read length (safely handle unaligned data)
+                let length: UInt32
+                if tagOffset + 8 <= data.count {
+                    // Read 4 bytes safely without assuming alignment
+                    let lengthData = data.subdata(in: (tagOffset + 4)..<(tagOffset + 8))
+                    length = lengthData.withUnsafeBytes { bytes in
+                        // Create aligned copy for safe reading
+                        var value: UInt32 = 0
+                        withUnsafeMutableBytes(of: &value) { dest in
+                            dest.copyMemory(from: bytes)
+                        }
+                        return value
+                    }
+                } else {
+                    length = 0
                 }
                 
                 if length > 0 && length < 1000000 && tagOffset + 8 + Int(length) <= data.count {
@@ -284,9 +308,21 @@ public class MinimalRTStructParser {
             if let tagOffset = found {
                 tagCount += 1
                 
-                // Read length (4 bytes after tag)
-                let length = data.withUnsafeBytes { bytes in
-                    bytes.load(fromByteOffset: tagOffset + 4, as: UInt32.self)
+                // Read length (4 bytes after tag, safely handle unaligned data)
+                let length: UInt32
+                if tagOffset + 8 <= data.count {
+                    // Read 4 bytes safely without assuming alignment
+                    let lengthData = data.subdata(in: (tagOffset + 4)..<(tagOffset + 8))
+                    length = lengthData.withUnsafeBytes { bytes in
+                        // Create aligned copy for safe reading
+                        var value: UInt32 = 0
+                        withUnsafeMutableBytes(of: &value) { dest in
+                            dest.copyMemory(from: bytes)
+                        }
+                        return value
+                    }
+                } else {
+                    length = 0
                 }
                 
                 print("       🔍 Raw scan found (3006,0050) #\(tagCount) at byte \(tagOffset), length: \(length)")
@@ -320,9 +356,21 @@ public class MinimalRTStructParser {
             let found = scanForTag(in: data, tag: itemTag, startingAt: offset)
             
             if let tagOffset = found {
-                // Read item length
-                let length = data.withUnsafeBytes { bytes in
-                    bytes.load(fromByteOffset: tagOffset + 4, as: UInt32.self)
+                // Read item length (safely handle unaligned data)
+                let length: UInt32
+                if tagOffset + 8 <= data.count {
+                    // Read 4 bytes safely without assuming alignment
+                    let lengthData = data.subdata(in: (tagOffset + 4)..<(tagOffset + 8))
+                    length = lengthData.withUnsafeBytes { bytes in
+                        // Create aligned copy for safe reading
+                        var value: UInt32 = 0
+                        withUnsafeMutableBytes(of: &value) { dest in
+                            dest.copyMemory(from: bytes)
+                        }
+                        return value
+                    }
+                } else {
+                    length = 0
                 }
                 
                 let itemStart = tagOffset + 8
