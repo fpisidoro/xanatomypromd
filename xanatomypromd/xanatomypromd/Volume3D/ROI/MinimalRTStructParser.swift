@@ -2,8 +2,6 @@ import Foundation
 import simd
 
 // MARK: - Safe Data Reading Extension
-// Prevents memory alignment crashes when reading binary data
-
 extension Data {
     /// Safely read UInt16 from data at offset
     func safeReadUInt16(at offset: Int) -> UInt16 {
@@ -27,13 +25,21 @@ extension Data {
     }
 }
 
-// MARK: - Minimal Working RTStruct Parser
-// Simplified parser for testing ROI functionality without breaking existing code
+// MARK: - Enhanced DICOM Sequence Structures
+struct DICOMSequenceItem {
+    let data: Data
+    let elements: [DICOMTag: Data]
+    let nestedSequences: [DICOMTag: DICOMSequence]
+}
 
+struct DICOMSequence {
+    let items: [DICOMSequenceItem]
+}
+
+// MARK: - Fixed RTStruct Parser with Proper FFFE Handling
 public class MinimalRTStructParser {
     
-    // MARK: - Simple RTStruct Data Models
-    
+    // MARK: - Data Models
     public struct SimpleROIStructure {
         public let roiNumber: Int
         public let roiName: String
@@ -70,30 +76,39 @@ public class MinimalRTStructParser {
         }
     }
     
-    // MARK: - Parsing Interface
-    
-    /// Parse RTStruct from DICOM dataset (simplified)
+    // MARK: - Main Parsing Interface
     public static func parseSimpleRTStruct(from dataset: DICOMDataset) -> SimpleRTStructData? {
-        print("📊 Parsing RTStruct with minimal parser...")
+        print("🔧 FIXED RTStruct Parser - Starting parse...")
         
-        // Check if this is an RTStruct
+        // Verify RTStruct modality
         guard let modality = dataset.getString(tag: .modality),
               modality == "RTSTRUCT" else {
             print("❌ Not an RTStruct file")
             return nil
         }
         
-        // Extract basic metadata
+        // Extract metadata
         let structureSetName = dataset.getString(tag: .structureSetName)
         let patientName = dataset.getString(tag: .patientName)
         
         print("   📋 Structure Set: \(structureSetName ?? "Unknown")")
         print("   👤 Patient: \(patientName ?? "Unknown")")
         
-        // Try to extract ROI structures
-        let roiStructures = extractSimpleROIStructures(from: dataset)
-        print("   🎯 Found \(roiStructures.count) ROI structures")
+        // Parse ROI structures with fixed sequence parsing
+        let roiStructures = parseROIStructuresWithFixedFFEHandling(dataset: dataset)
         
+        if roiStructures.isEmpty {
+            print("   ❌ No ROI structures with contour data found")
+            print("   💡 SUGGESTION: Try test_rtstruct2.dcm instead of test_rtstruct.dcm")
+            print("   💡 Current file may be reference-only (no geometry data)")
+            return SimpleRTStructData(
+                structureSetName: structureSetName,
+                patientName: patientName,
+                roiStructures: []
+            )
+        }
+        
+        print("   ✅ Successfully parsed \(roiStructures.count) ROI structures with contour data")
         return SimpleRTStructData(
             structureSetName: structureSetName,
             patientName: patientName,
@@ -101,386 +116,194 @@ public class MinimalRTStructParser {
         )
     }
     
-    /// Parse contour data from DICOM bytes (handles both binary floats and decimal strings)
-    private static func parseContourDataFromBytes(_ data: Data) -> SimpleContour? {
-        print("           📍 Parsing contour data from \(data.count) bytes...")
+    // MARK: - Fixed ROI Structure Parsing
+    private static func parseROIStructuresWithFixedFFEHandling(dataset: DICOMDataset) -> [SimpleROIStructure] {
+        print("   🔧 Using FIXED FFFE sequence parsing...")
         
-        // Try as decimal string format first (most common in RTStruct)
-        if let asciiString = String(data: data, encoding: .ascii) {
-            print("           📍 Trying ASCII decimal string format: '\(asciiString.prefix(100))'")
-            
-            // Split by backslashes and parse as floats
-            let components = asciiString.components(separatedBy: "\\")
-            let numbers = components.compactMap { Float($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-            
-            if numbers.count >= 6 && numbers.count % 3 == 0 {
-                print("           ✅ Successfully parsed \(numbers.count) coordinates from decimal string")
-                
-                var points: [SIMD3<Float>] = []
-                var zPosition: Float = 0.0
-                
-                for i in stride(from: 0, to: numbers.count - 2, by: 3) {
-                    let x = numbers[i]
-                    let y = numbers[i + 1]
-                    let z = numbers[i + 2]
-                    
-                    points.append(SIMD3<Float>(x, y, z))
-                    zPosition = z
-                }
-                
-                return SimpleContour(points: points, slicePosition: zPosition)
-            }
-        }
-        
-        // Try as binary float array
-        if data.count % 4 == 0 && data.count >= 12 {
-            print("           📍 Trying binary float array format...")
-            
-            var numbers: [Float] = []
-            for i in stride(from: 0, to: data.count - 3, by: 4) {
-                let floatValue = data.safeReadFloat(at: i)
-                numbers.append(floatValue)
-            }
-            
-            if numbers.count >= 6 && numbers.count % 3 == 0 {
-                print("           ✅ Successfully parsed \(numbers.count) coordinates from binary floats")
-                
-                var points: [SIMD3<Float>] = []
-                var zPosition: Float = 0.0
-                
-                for i in stride(from: 0, to: numbers.count - 2, by: 3) {
-                    let x = numbers[i]
-                    let y = numbers[i + 1]
-                    let z = numbers[i + 2]
-                    
-                    points.append(SIMD3<Float>(x, y, z))
-                    zPosition = z
-                }
-                
-                return SimpleContour(points: points, slicePosition: zPosition)
-            }
-        }
-        
-        print("           ⚠️ Could not parse contour data in any known format")
-        return nil
-    }
-    
-    // MARK: - Simple ROI Extraction
-    
-    private static func extractSimpleROIStructures(from dataset: DICOMDataset) -> [SimpleROIStructure] {
-        var roiStructures: [SimpleROIStructure] = []
-        
-        // Look for Structure Set ROI Sequence
+        // Step 1: Parse Structure Set ROI Sequence for metadata
         guard let roiSequenceElement = dataset.elements[.structureSetROISequence] else {
-            print("   ❌ No Structure Set ROI Sequence found - using test data")
-            return createSampleROIStructures()
+            print("   ❌ Structure Set ROI Sequence (3006,0020) not found")
+            return []
         }
         
-        print("   📋 Found Structure Set ROI Sequence (\(roiSequenceElement.data.count) bytes)")
+        let roiMetadata = parseStructureSetROIWithFixedDelimiters(roiSequenceElement.data)
+        if roiMetadata.isEmpty {
+            print("   ❌ No ROI metadata found")
+            return []
+        }
         
-        // Look for ROI Contour Sequence (the actual 3D contour data)
+        print("   📋 Found \(roiMetadata.count) ROI metadata entries")
+        
+        // Step 2: Parse ROI Contour Sequence with FIXED FFFE handling
         guard let contourSequenceElement = dataset.elements[.roiContourSequence] else {
-            print("   ❌ No ROI Contour Sequence found - using test data")
-            return createSampleROIStructures()
+            print("   ❌ ROI Contour Sequence (3006,0039) not found")
+            return []
         }
         
-        print("   📊 Found ROI Contour Sequence (\(contourSequenceElement.data.count) bytes)")
+        let contourData = parseROIContourSequenceWithFixedDelimiters(contourSequenceElement.data)
         
-        // Try to parse actual DICOM sequence data
-        do {
-            roiStructures = try parseRealROIStructures(roiSequence: roiSequenceElement, contourSequence: contourSequenceElement)
-            
-            if !roiStructures.isEmpty {
-                print("   ✅ Successfully parsed \(roiStructures.count) real ROI structures from RTStruct")
-                return roiStructures
-            }
-        } catch {
-            print("   ❌ Error parsing real RTStruct data: \(error)")
-        }
+        print("   📐 Found contour data for \(contourData.count) ROIs")
         
-        // Fallback to test data if real parsing fails
-        print("   🧪 Falling back to test ROI structures")
-        return createSampleROIStructures()
+        // Step 3: Combine metadata with contour data
+        return combineROIMetadataWithContours(metadata: roiMetadata, contours: contourData)
     }
     
-    // MARK: - Real RTStruct Parsing
-    
-    /// Parse actual RTStruct DICOM sequences
-    private static func parseRealROIStructures(roiSequence: DICOMElement, contourSequence: DICOMElement) throws -> [SimpleROIStructure] {
-        print("   🔍 Parsing real RTStruct sequences...")
+    // MARK: - FIXED Structure Set ROI Sequence Parser
+    private static func parseStructureSetROIWithFixedDelimiters(_ data: Data) -> [(roiNumber: Int, roiName: String, displayColor: SIMD3<Float>)] {
+        print("     🔧 FIXED Structure Set ROI parsing...")
         
-        var roiStructures: [SimpleROIStructure] = []
+        let sequence = parseSequenceWithProperFFEHandling(data)
+        var metadata: [(roiNumber: Int, roiName: String, displayColor: SIMD3<Float>)] = []
         
-        let roiData = roiSequence.data
-        let contourData = contourSequence.data
-        
-        print("   📊 ROI sequence data: \(roiData.count) bytes")
-        print("   📊 Contour sequence data: \(contourData.count) bytes")
-        
-        // Use enhanced sequence parsing that actually works
-        do {
-            let roiItems = try parseEnhancedSequenceItems(from: roiData)
-            let contourItems = try parseEnhancedSequenceItems(from: contourData)
+        for (index, item) in sequence.items.enumerated() {
+            // Extract ROI Number (3006,0022)
+            let roiNumber = extractIntegerFromSequenceItem(item, group: 0x3006, element: 0x0022) ?? (8240 + index + 1)
             
-            print("   📋 Parsed \(roiItems.count) ROI items")
-            print("   📋 Parsed \(contourItems.count) contour items")
+            // Extract ROI Name (3006,0026)
+            let roiName = extractStringFromSequenceItem(item, group: 0x3006, element: 0x0026) ?? "ROI-\(index + 1)"
             
-            // Extract ROI information from sequence items
-            for (index, roiItem) in roiItems.enumerated() {
-                if let roiStructure = extractEnhancedROIFromSequenceItem(roiItem, index: index, contourItems: contourItems) {
-                    roiStructures.append(roiStructure)
-                }
-            }
+            // Generate color
+            let color = generateROIColor(for: index)
             
-            if roiStructures.isEmpty {
-                print("   ⚠️ No ROI structures extracted from sequences")
-            }
-            
-        } catch {
-            print("   ❌ Error parsing sequence items: \(error)")
-            throw error
+            metadata.append((roiNumber: roiNumber, roiName: roiName, displayColor: color))
+            print("     📋 ROI \(roiNumber): '\(roiName)'")
         }
         
-        return roiStructures
+        return metadata
     }
     
-    /// Enhanced DICOM sequence parsing that actually works with RTStruct files
-    private static func parseEnhancedSequenceItems(from data: Data) throws -> [Data] {
-        var items: [Data] = []
-        var offset = 0
+    // MARK: - FIXED ROI Contour Sequence Parser
+    private static func parseROIContourSequenceWithFixedDelimiters(_ data: Data) -> [Int: [SimpleContour]] {
+        print("     🔧 FIXED ROI Contour Sequence parsing (\(data.count) bytes)...")
         
-        print("     🔍 Enhanced sequence parsing of \(data.count) bytes...")
+        // Show diagnostic info
+        if data.count < 1000 {
+            print("     ⚠️ WARNING: Very small ROI Contour Sequence (\(data.count) bytes)")
+            print("     💡 This suggests reference-only RTStruct (no geometry)")
+        }
         
-        while offset + 8 <= data.count {
-            // Read potential sequence item tag using safe data reading
-            let group = data.safeReadUInt16(at: offset)
-            let element = data.safeReadUInt16(at: offset + 2)
+        let sequence = parseSequenceWithProperFFEHandling(data)
+        var contoursByROI: [Int: [SimpleContour]] = [:]
+        
+        print("     📊 Found \(sequence.items.count) ROI Contour items")
+        
+        for (itemIndex, item) in sequence.items.enumerated() {
+            print("     📦 ROI Contour item \(itemIndex + 1): \(item.data.count) bytes, \(item.elements.count) elements")
             
-            if group == 0xFFFE && element == 0xE000 {
-                // Found sequence item (FFFE,E000)
-                let length = data.safeReadUInt32(at: offset + 4)
-                
-                print("     📦 Found sequence item at offset \(offset), length: \(length == 0xFFFFFFFF ? "undefined" : String(length))")
-                
-                offset += 8 // Skip item header
-                
-                if length == 0xFFFFFFFF {
-                    // Undefined length - search for item delimiter
-                    let itemStart = offset
-                    var foundDelimiter = false
-                    
-                    while offset + 8 <= data.count {
-                        let delimGroup = data.safeReadUInt16(at: offset)
-                        let delimElement = data.safeReadUInt16(at: offset + 2)
-                        
-                        if delimGroup == 0xFFFE && delimElement == 0xE00D {
-                            // Item delimiter (FFFE,E00D)
-                            let itemData = data.subdata(in: itemStart..<offset)
-                            items.append(itemData)
-                            offset += 8 // Skip delimiter
-                            foundDelimiter = true
-                            print("     ✅ Extracted item with \(itemData.count) bytes")
-                            break
-                        } else if delimGroup == 0xFFFE && delimElement == 0xE0DD {
-                            // Sequence delimiter (FFFE,E0DD) - end of sequence
-                            let itemData = data.subdata(in: itemStart..<offset)
-                            if !itemData.isEmpty {
-                                items.append(itemData)
-                                print("     ✅ Extracted final item with \(itemData.count) bytes")
-                            }
-                            foundDelimiter = true
-                            break
-                        } else {
-                            offset += 2 // Move forward more carefully
-                        }
-                    }
-                    
-                    if !foundDelimiter {
-                        print("     ⚠️ No delimiter found, treating rest as single item")
-                        let itemData = data.subdata(in: itemStart..<data.count)
-                        if !itemData.isEmpty {
-                            items.append(itemData)
-                        }
-                        break
-                    }
-                } else {
-                    // Explicit length
-                    if offset + Int(length) <= data.count {
-                        let itemData = data.subdata(in: offset..<offset + Int(length))
-                        items.append(itemData)
-                        offset += Int(length)
-                        print("     ✅ Extracted explicit length item with \(itemData.count) bytes")
-                    } else {
-                        print("     ❌ Explicit length \(length) exceeds remaining data")
-                        break
-                    }
-                }
+            // Debug: Show what elements we have
+            for (tag, elementData) in item.elements {
+                let tagStr = String(format: "(%04X,%04X)", tag.group, tag.element)
+                print("         📋 Element \(tagStr): \(elementData.count) bytes")
+            }
+            
+            // Extract Referenced ROI Number (3006,0084)
+            let roiNumber = extractIntegerFromSequenceItem(item, group: 0x3006, element: 0x0084) ?? (itemIndex + 1)
+            
+            print("     📐 Processing contours for ROI \(roiNumber)...")
+            
+            // CRITICAL FIX: Look for nested Contour Sequence (3006,0040) within this item
+            let contours = parseNestedContourSequence(item, roiNumber: roiNumber)
+            
+            if !contours.isEmpty {
+                contoursByROI[roiNumber] = contours
+                print("     ✅ Found \(contours.count) contours for ROI \(roiNumber)")
             } else {
-                offset += 2 // Move forward to find next potential item
+                print("     ⚠️ No contour data found for ROI \(roiNumber) - may be reference-only")
             }
         }
         
-        print("     📊 Total items extracted: \(items.count)")
-        return items
-    }
-    
-    /// Enhanced ROI extraction from sequence item data
-    private static func extractEnhancedROIFromSequenceItem(_ itemData: Data, index: Int, contourItems: [Data]) -> SimpleROIStructure? {
-        print("     🔍 Extracting ROI from item \(index + 1) (\(itemData.count) bytes)...")
-        
-        // Debug: Show first 64 bytes of the item data in hex
-        let previewBytes = itemData.prefix(min(64, itemData.count))
-        let hexString = previewBytes.map { String(format: "%02X", $0) }.joined(separator: " ")
-        print("     🔍 Item data preview: \(hexString)")
-        
-        var roiNumber = index + 1
-        var roiName = "ROI_\(roiNumber)"
-        let color = generateROIColor(for: index)
-        
-        // Enhanced extraction using proper DICOM element parsing
-        if let extractedNumber = extractEnhancedROINumber(from: itemData) {
-            roiNumber = extractedNumber
-            print("     📊 Found ROI Number: \(roiNumber)")
-        } else {
-            print("     ⚠️ Could not extract ROI Number from item data")
+        if contoursByROI.isEmpty {
+            print("     ❌ CRITICAL: No contour data found in any ROI Contour items")
+            print("     💡 This RTStruct file appears to be reference-only (no geometry data)")
+            print("     💡 SUGGESTION: Try test_rtstruct2.dcm instead")
         }
         
-        if let extractedName = extractEnhancedROIName(from: itemData) {
-            roiName = extractedName
-            print("     🏷️ Found ROI Name: '\(roiName)'")
-        } else {
-            print("     ⚠️ Could not extract ROI Name from item data")
-        }
-        
-        // Create contours for this ROI
-        let contours = createEnhancedContoursForROI(roiNumber: roiNumber, contourItems: contourItems)
-        
-        print("     ✅ Extracted ROI: #\(roiNumber) '\(roiName)' with \(contours.count) contours")
-        
-        return SimpleROIStructure(
-            roiNumber: roiNumber,
-            roiName: roiName,
-            displayColor: color,
-            contours: contours
-        )
+        return contoursByROI
     }
     
-    /// Enhanced ROI number extraction
-    private static func extractEnhancedROINumber(from data: Data) -> Int? {
-        // Look for ROI Number tag (3006,0022) with better parsing
-        print("       🔍 Searching for ROI Number tag (3006,0022)...")
-        return findEnhancedIntegerInData(data, group: 0x3006, element: 0x0022)
-    }
-    
-    /// Enhanced ROI name extraction
-    private static func extractEnhancedROIName(from data: Data) -> String? {
-        // Look for ROI Name tag (3006,0026) with better parsing
-        print("       🔍 Searching for ROI Name tag (3006,0026)...")
-        return findEnhancedStringInData(data, group: 0x3006, element: 0x0026)
-    }
-    
-    /// Enhanced contour creation from contour sequence items
-    private static func createEnhancedContoursForROI(roiNumber: Int, contourItems: [Data]) -> [SimpleContour] {
+    // MARK: - CRITICAL FIX: Parse Nested Contour Sequence (3006,0040)
+    private static func parseNestedContourSequence(_ roiContourItem: DICOMSequenceItem, roiNumber: Int) -> [SimpleContour] {
+        print("       🔧 FIXED nested Contour Sequence (3006,0040) parsing...")
+        
         var contours: [SimpleContour] = []
         
-        print("       📝 Creating contours for ROI \(roiNumber) from \(contourItems.count) contour items")
-        
-        // The contour items contain nested ROI Contour sequences
-        // We need to parse the nested structure to find actual contour data
-        for (itemIndex, contourItem) in contourItems.enumerated() {
-            print("       🔍 Processing contour item \(itemIndex + 1) (\(contourItem.count) bytes)...")
+        // Method 1: Look for nested sequence in parsed elements
+        let contourSequenceTag = DICOMTag(group: 0x3006, element: 0x0040)
+        if let nestedSequence = roiContourItem.nestedSequences[contourSequenceTag] {
+            print("       ✅ Found nested Contour Sequence with \(nestedSequence.items.count) items")
             
-            // Look for nested contour sequences in this item
-            let nestedContours = extractNestedContourSequences(from: contourItem, roiNumber: roiNumber)
-            contours.append(contentsOf: nestedContours)
-            
-            if !nestedContours.isEmpty {
-                print("       ✅ Extracted \(nestedContours.count) nested contours from item \(itemIndex + 1)")
+            for (contourIndex, contourItem) in nestedSequence.items.enumerated() {
+                if let contour = parseIndividualContour(contourItem, index: contourIndex) {
+                    contours.append(contour)
+                }
             }
         }
         
-        // If no real contours extracted, create simplified ones
+        // Method 2: Manual search for Contour Sequence (3006,0040) in raw data
         if contours.isEmpty {
-            print("       🔄 No real contours found, creating simplified contours")
-            for i in 0..<min(max(1, contourItems.count), 10) { // At least 1, max 10
-                let z = Float(20 + i * 3) // 3mm spacing
-                let points = createCircularContour(center: SIMD3<Float>(256, 256, z), radius: 30 + Float(roiNumber % 100 * 10))
-                
-                contours.append(SimpleContour(points: points, slicePosition: z))
+            print("       🔍 Manual search for Contour Sequence (3006,0040)...")
+            contours = manualSearchForContourSequence(roiContourItem.data, roiNumber: roiNumber)
+        }
+        
+        // Method 3: Direct search for Contour Data (3006,0050) tags
+        if contours.isEmpty {
+            print("       🔍 Direct search for Contour Data (3006,0050) tags...")
+            contours = directSearchForContourData(roiContourItem.data, roiNumber: roiNumber)
+        }
+        
+        // CRITICAL DEBUG: Show what we found
+        if contours.isEmpty {
+            print("       ❌ NO CONTOUR DATA FOUND - This RTStruct file appears to be reference-only")
+            print("       💡 Try test_rtstruct2.dcm instead of test_rtstruct.dcm")
+            
+            // Show what elements we do have
+            print("       📋 Available elements in this ROI item:")
+            for (tag, data) in roiContourItem.elements {
+                let tagStr = String(format: "(%04X,%04X)", tag.group, tag.element)
+                print("         • \(tagStr): \(data.count) bytes")
             }
         }
         
         return contours
     }
     
-    /// Extract nested contour sequences from ROI contour item
-    private static func extractNestedContourSequences(from contourItem: Data, roiNumber: Int) -> [SimpleContour] {
+    // MARK: - Manual Search for Contour Sequence (3006,0040)
+    private static func manualSearchForContourSequence(_ data: Data, roiNumber: Int) -> [SimpleContour] {
+        print("         🔍 Manual search for (3006,0040) in \(data.count) bytes...")
+        
         var contours: [SimpleContour] = []
         var offset = 0
         
-        print("         🔍 Scanning for nested contour sequences in \(contourItem.count)-byte item...")
-        
-        // Look for sequence item tags (FFFE,E000) which contain individual contours
-        while offset + 8 <= contourItem.count {
-            let group = contourItem.safeReadUInt16(at: offset)
-            let element = contourItem.safeReadUInt16(at: offset + 2)
+        while offset + 8 <= data.count {
+            let group = data.safeReadUInt16(at: offset)
+            let element = data.safeReadUInt16(at: offset + 2)
             
-            if group == 0xFFFE && element == 0xE000 {
-                // Found nested sequence item
-                let length = contourItem.safeReadUInt32(at: offset + 4)
-                print("         📦 Found nested sequence item at offset \(offset), length: \(length == 0xFFFFFFFF ? "undefined" : String(length))")
+            // Found Contour Sequence tag!
+            if group == 0x3006 && element == 0x0040 {
+                print("         ✅ FOUND Contour Sequence (3006,0040) at offset \(offset)!")
                 
-                offset += 8 // Skip item header
+                let length = data.safeReadUInt32(at: offset + 4)
+                let sequenceStart = offset + 8
                 
+                let sequenceData: Data
                 if length == 0xFFFFFFFF {
-                    // Undefined length - find item delimiter
-                    let itemStart = offset
-                    var foundDelimiter = false
-                    
-                    while offset + 8 <= contourItem.count {
-                        let delimGroup = contourItem.safeReadUInt16(at: offset)
-                        let delimElement = contourItem.safeReadUInt16(at: offset + 2)
-                        
-                        if delimGroup == 0xFFFE && delimElement == 0xE00D {
-                            // Item delimiter
-                            let nestedData = contourItem.subdata(in: itemStart..<offset)
-                            if let extractedContour = extractSingleContourFromData(nestedData, roiNumber: roiNumber) {
-                                contours.append(extractedContour)
-                            }
-                            offset += 8 // Skip delimiter
-                            foundDelimiter = true
-                            break
-                        } else if delimGroup == 0xFFFE && delimElement == 0xE0DD {
-                            // Sequence delimiter
-                            let nestedData = contourItem.subdata(in: itemStart..<offset)
-                            if let extractedContour = extractSingleContourFromData(nestedData, roiNumber: roiNumber) {
-                                contours.append(extractedContour)
-                            }
-                            foundDelimiter = true
-                            break
-                        } else {
-                            offset += 2
-                        }
-                    }
-                    
-                    if !foundDelimiter {
-                        // No delimiter found, use rest of data
-                        let nestedData = contourItem.subdata(in: itemStart..<contourItem.count)
-                        if let extractedContour = extractSingleContourFromData(nestedData, roiNumber: roiNumber) {
-                            contours.append(extractedContour)
-                        }
-                        break
-                    }
-                } else if length > 0 && length < 10000 && offset + Int(length) <= contourItem.count {
-                    // Explicit length
-                    let nestedData = contourItem.subdata(in: offset..<offset + Int(length))
-                    if let extractedContour = extractSingleContourFromData(nestedData, roiNumber: roiNumber) {
-                        contours.append(extractedContour)
-                    }
-                    offset += Int(length)
+                    // Undefined length - search for sequence delimiter
+                    sequenceData = findUndefinedLengthSequenceData(data, startOffset: sequenceStart)
+                } else if length > 0 && sequenceStart + Int(length) <= data.count {
+                    sequenceData = data.subdata(in: sequenceStart..<sequenceStart + Int(length))
                 } else {
-                    offset += 8
+                    offset += 2
+                    continue
                 }
+                
+                // Parse the contour sequence
+                let nestedContours = parseContourSequenceItems(sequenceData)
+                contours.append(contentsOf: nestedContours)
+                
+                print("         ✅ Parsed \(nestedContours.count) contours from nested sequence")
+                
+                // Move past this sequence
+                offset = sequenceStart + sequenceData.count
             } else {
                 offset += 2
             }
@@ -489,338 +312,141 @@ public class MinimalRTStructParser {
         return contours
     }
     
-    /// Extract single contour from nested contour data
-    private static func extractSingleContourFromData(_ data: Data, roiNumber: Int) -> SimpleContour? {
-        print("           📍 Extracting single contour from \(data.count)-byte nested data...")
+    // MARK: - Direct Search for Contour Data
+    private static func directSearchForContourData(_ data: Data, roiNumber: Int) -> [SimpleContour] {
+        print("         🔍 Direct search for Contour Data (3006,0050) tags...")
         
-        // Debug: Show COMPLETE hex dump of the nested data
-        let completeHexString = data.map { String(format: "%02X", $0) }.joined(separator: " ")
-        print("           📍 COMPLETE nested data hex: \(completeHexString)")
-        
-        // Try every possible offset to find DICOM tags
-        print("           🔍 DETAILED tag scanning - trying every byte offset...")
-        for tryOffset in 0..<min(data.count - 8, 100) { // Check first 100 bytes
-            let group = data.safeReadUInt16(at: tryOffset)
-            let element = data.safeReadUInt16(at: tryOffset + 2)
-            
-            // Show ALL potential tag combinations
-            if group != 0 {
-                print("           🔍 Offset \(tryOffset): potential tag (\(String(format: "%04X", group)),\(String(format: "%04X", element)))")
-                
-                // Check if this looks like a known RTStruct tag
-                let tagHex = String(format: "%04X%04X", group, element)
-                if ["3006002A", "30060040", "30060016", "30060050", "30060042", "30060046"].contains(tagHex) {
-                    print("           ✅ FOUND KNOWN RTStruct tag at offset \(tryOffset): (\(String(format: "%04X", group)),\(String(format: "%04X", element)))")
-                    
-                    let length = data.safeReadUInt32(at: tryOffset + 4)
-                    print("           📊 Tag length: \(length)")
-                    
-                    if length > 0 && length < 10000 && tryOffset + 8 + Int(length) <= data.count {
-                        let valueData = data.subdata(in: (tryOffset + 8)..<(tryOffset + 8 + Int(length)))
-                        let valueHex = valueData.map { String(format: "%02X", $0) }.joined(separator: " ")
-                        print("           📍 Tag value hex: \(valueHex)")
-                        
-                        if let stringValue = String(data: valueData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines) {
-                            print("           📍 Tag value as string: '\(stringValue)'")
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Try to find sequences and nested structures
-        print("           🔍 Looking for sequence delimiters (FFFE tags)...")
+        var contours: [SimpleContour] = []
         var offset = 0
+        
         while offset + 8 <= data.count {
             let group = data.safeReadUInt16(at: offset)
             let element = data.safeReadUInt16(at: offset + 2)
             
-            if group == 0xFFFE {
-                print("           🔍 Found FFFE sequence at offset \(offset): (\(String(format: "%04X", group)),\(String(format: "%04X", element)))")
-            }
-            
-            offset += 2
-        }
-        
-        // Look for Contour Data tag (3006,0050) in the nested data
-        if let contourPointsData = findEnhancedFloatArrayInData(data, group: 0x3006, element: 0x0050) {
-            print("           ✅ Found contour data: \(contourPointsData.count) coordinates")
-            
-            // Convert flat array to 3D points (x,y,z triplets)
-            var points: [SIMD3<Float>] = []
-            var zPosition: Float = 0.0
-            
-            for i in stride(from: 0, to: contourPointsData.count - 2, by: 3) {
-                let x = contourPointsData[i]
-                let y = contourPointsData[i + 1]
-                let z = contourPointsData[i + 2]
+            // Found Contour Data tag!
+            if group == 0x3006 && element == 0x0050 {
+                print("         ✅ FOUND Contour Data (3006,0050) at offset \(offset)!")
                 
-                points.append(SIMD3<Float>(x, y, z))
-                zPosition = z
-            }
-            
-            if !points.isEmpty {
-                print("           ✅ Extracted \(points.count) real contour points at Z=\(zPosition)")
-                return SimpleContour(points: points, slicePosition: zPosition)
-            }
-        } else {
-            print("           ⚠️ No contour data tag (3006,0050) found in nested item")
-            
-            // NEW: Handle the actual RTStruct structure we discovered
-            // The data starts with (3006,0016) Referenced Frame of Reference UID
-            // Then has FFFE,E000 nested sequence at offset 8
-            // We need to dive deeper into the nested sequence
-            
-            print("           🔍 Trying to parse nested FFFE sequence at offset 8...")
-            if data.count > 16 {
-                // Skip the FFFE,E000 header (8 bytes) and parse what's inside
-                let nestedSequenceStart = 16 // After FFFE,E000 + length
-                if nestedSequenceStart < data.count {
-                    let remainingData = data.subdata(in: nestedSequenceStart..<data.count)
-                    print("           📍 Parsing \(remainingData.count) bytes of nested sequence data...")
+                let length = data.safeReadUInt32(at: offset + 4)
+                let valueOffset = offset + 8
+                
+                if length > 0 && length < 100000 && valueOffset + Int(length) <= data.count {
+                    let contourDataRaw = data.subdata(in: valueOffset..<valueOffset + Int(length))
                     
-                    // Show what's in the remaining data
-                    let remainingHex = remainingData.prefix(64).map { String(format: "%02X", $0) }.joined(separator: " ")
-                    print("           📍 Remaining data: \(remainingHex)")
-                    
-                    // The data appears to contain ASCII strings - try to extract them
-                    let asciiContent = String(data: remainingData, encoding: .ascii)?.trimmingCharacters(in: .controlCharacters)
-                    if let content = asciiContent {
-                        print("           📍 ASCII content: '\(content)'")
-                        
-                        // Look for patterns that might be coordinates
-                        // RTStruct contour data is often in DICOM decimal string format
-                        let components = content.components(separatedBy: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\\\0")))
-                        let numbers = components.compactMap { Float($0) }
-                        
-                        if numbers.count >= 6 && numbers.count % 3 == 0 {
-                            print("           ✅ Found \(numbers.count) coordinate values in ASCII data")
-                            
+                    if let coordinates = parseContourCoordinatesWithAllMethods(contourDataRaw) {
+                        if coordinates.count >= 6 && coordinates.count % 3 == 0 {
+                            // Convert to 3D points
                             var points: [SIMD3<Float>] = []
                             var zPosition: Float = 0.0
                             
-                            for i in stride(from: 0, to: numbers.count - 2, by: 3) {
-                                let x = numbers[i]
-                                let y = numbers[i + 1]
-                                let z = numbers[i + 2]
-                                
+                            for i in stride(from: 0, to: coordinates.count - 2, by: 3) {
+                                let x = coordinates[i]
+                                let y = coordinates[i + 1]
+                                let z = coordinates[i + 2]
                                 points.append(SIMD3<Float>(x, y, z))
                                 zPosition = z
                             }
                             
-                            if !points.isEmpty {
-                                print("           ✅ Extracted \(points.count) real contour points from ASCII data at Z=\(zPosition)")
-                                return SimpleContour(points: points, slicePosition: zPosition)
-                            }
-                        } else {
-                            print("           ⚠️ ASCII content doesn't look like coordinate data: \(numbers.count) numbers")
-                            
-                            // FINAL ATTEMPT: This appears to be a reference-only RTStruct
-                            // Look for the actual RT ROI Observations Sequence which might contain contour data
-                            print("           🔍 This appears to be a reference-only RTStruct file")
-                            print("           🔍 Looking for RT ROI Observations Sequence in main dataset...")
-                            
-                            // The RTStruct might have contour data in the main RT Struct ROI Sequence
-                            // Let's create some test contour data based on the structure we found
-                            print("           🎯 Creating test contour data for ROI \(roiNumber)...")
-                            
-                            // Generate realistic test coordinates within the scan volume
-                            let centerX: Float = 256.0
-                            let centerY: Float = 256.0  
-                            // Use realistic Z coordinates that fit within the 53-slice scan (0-159mm range)
-                            let roiIndex = (roiNumber % 100) % 3 // Convert to 0, 1, 2
-                            let baseZ: Float = Float(60 + roiIndex * 20) // Z=60, 80, 100mm
-                            let radius: Float = Float(30 + (roiNumber % 100) * 10)
-                            
-                            var testPoints: [SIMD3<Float>] = []
-                            let numPoints = 8
-                            
-                            for i in 0..<numPoints {
-                                let angle = Float(i) * 2.0 * Float.pi / Float(numPoints)
-                                let x = centerX + radius * cos(angle)
-                                let y = centerY + radius * sin(angle)
-                                testPoints.append(SIMD3<Float>(x, y, baseZ))
-                            }
-                            
-                            print("           ✅ Generated \(testPoints.count) test contour points at Z=\(baseZ)")
-                            return SimpleContour(points: testPoints, slicePosition: baseZ)
-                        }
-                    } else {
-                        print("           ⚠️ Could not decode nested data as ASCII")
-                        
-                        // Try to look for more DICOM tags in the remaining data
-                        print("           🔍 Scanning remaining data for DICOM tags...")
-                        var offset = 0
-                        while offset + 8 <= remainingData.count {
-                            let group = remainingData.safeReadUInt16(at: offset)
-                            let element = remainingData.safeReadUInt16(at: offset + 2)
-                            
-                            if group != 0 && group < 0x7FFF && element < 0x7FFF {
-                                let tagHex = String(format: "%04X%04X", group, element)
-                                if ["30060050", "30060042", "30060046"].contains(tagHex) {
-                                    print("           ✅ Found contour tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) at offset \(offset)")
-                                    
-                                    let length = remainingData.safeReadUInt32(at: offset + 4)
-                                    if length > 0 && length < 10000 && offset + 8 + Int(length) <= remainingData.count {
-                                        let valueData = remainingData.subdata(in: (offset + 8)..<(offset + 8 + Int(length)))
-                                        
-                                        if tagHex == "30060050" { // Contour Data
-                                            print("           ✅ Found Contour Data tag with \(length) bytes")
-                                            // Try to parse as float array or decimal strings
-                                            return parseContourDataFromBytes(valueData)
-                                        }
-                                    }
-                                }
-                            }
-                            offset += 2
+                            print("         ✅ SUCCESS: Direct search found \(points.count) contour points at Z=\(String(format: "%.1f", zPosition))")
+                            contours.append(SimpleContour(points: points, slicePosition: zPosition))
                         }
                     }
                 }
+                
+                // Move past this tag
+                offset = valueOffset + Int(length)
+            } else {
+                offset += 2
             }
         }
         
-        return nil
+        return contours
     }
     
-    /// Extract real contour data from contour sequence item
-    private static func extractRealContourData(from contourItem: Data, roiNumber: Int) -> SimpleContour? {
-        print("         📍 Extracting real contour data from \(contourItem.count)-byte item for ROI \(roiNumber)...")
+    // MARK: - Parse Contour Sequence Items
+    private static func parseContourSequenceItems(_ data: Data) -> [SimpleContour] {
+        print("           🔍 Parsing contour sequence items from \(data.count) bytes...")
         
-        // Debug: Show contour item structure
-        let previewBytes = contourItem.prefix(min(64, contourItem.count))
-        let hexString = previewBytes.map { String(format: "%02X", $0) }.joined(separator: " ")
-        print("         📍 Contour item preview: \(hexString)")
-        
-        // Look for Contour Data tag (3006,0050) - this contains the actual point coordinates
-        if let contourPointsData = findEnhancedFloatArrayInData(contourItem, group: 0x3006, element: 0x0050) {
-            print("         📍 Found real contour data: \(contourPointsData.count) coordinates")
-            
-            // Convert flat array to 3D points (x,y,z triplets)
-            var points: [SIMD3<Float>] = []
-            var zPosition: Float = 0.0
-            
-            for i in stride(from: 0, to: contourPointsData.count - 2, by: 3) {
-                let x = contourPointsData[i]
-                let y = contourPointsData[i + 1]
-                let z = contourPointsData[i + 2]
-                
-                points.append(SIMD3<Float>(x, y, z))
-                zPosition = z // Use Z from last point
-            }
-            
-            if !points.isEmpty {
-                print("         ✅ Extracted \(points.count) real contour points at Z=\(zPosition)")
-                return SimpleContour(points: points, slicePosition: zPosition)
-            }
-        } else {
-            print("         ⚠️ Contour Data tag (3006,0050) not found, checking for other contour tags...")
-            
-            // Try alternative approaches for different RTStruct formats
-            // Look for Number of Contour Points tag (3006,0046)
-            if let numberOfPoints = findEnhancedIntegerInData(contourItem, group: 0x3006, element: 0x0046) {
-                print("         📍 Found Number of Contour Points: \(numberOfPoints)")
-            }
-            
-            // Look for Contour Geometric Type tag (3006,0042)
-            if let geometricType = findEnhancedStringInData(contourItem, group: 0x3006, element: 0x0042) {
-                print("         📍 Found Contour Geometric Type: '\(geometricType)'")
-            }
-            
-            // Scan through the contour data to see what tags are actually present
-            print("         🔍 Scanning contour item for all DICOM tags...")
-            var offset = 0
-            while offset + 8 <= contourItem.count {
-                let group = contourItem.safeReadUInt16(at: offset)
-                let element = contourItem.safeReadUInt16(at: offset + 2)
-                
-                if group != 0 { // Skip zero padding
-                    print("         🔍 At offset \(offset): found tag (\(String(format: "%04X", group)),\(String(format: "%04X", element)))")
-                }
-                
-                offset += 8 // Move by larger steps to find tags
-            }
-        }
-        
-        return nil
-    }
-    
-    /// Helper function to create circular contour
-    private static func createCircularContour(center: SIMD3<Float>, radius: Float) -> [SIMD3<Float>] {
-        var points: [SIMD3<Float>] = []
-        let numPoints = 12
-        
-        for i in 0..<numPoints {
-            let angle = Float(i) * 2.0 * Float.pi / Float(numPoints)
-            let x = center.x + radius * cos(angle)
-            let y = center.y + radius * sin(angle)
-            points.append(SIMD3<Float>(x, y, center.z))
-        }
-        
-        return points
-    }
-    
-    /// Enhanced float array extraction from DICOM data (for contour points)
-    private static func findEnhancedFloatArrayInData(_ data: Data, group: UInt16, element: UInt16) -> [Float]? {
+        var contours: [SimpleContour] = []
         var offset = 0
         
         while offset + 8 <= data.count {
-            let foundGroup = data.safeReadUInt16(at: offset)
-            let foundElement = data.safeReadUInt16(at: offset + 2)
+            let group = data.safeReadUInt16(at: offset)
+            let element = data.safeReadUInt16(at: offset + 2)
             
-            if foundGroup == group && foundElement == element {
-                // Found contour data tag, extract float array
+            // Look for sequence item start (FFFE,E000)
+            if group == 0xFFFE && element == 0xE000 {
+                let length = data.safeReadUInt32(at: offset + 4)
+                let itemStart = offset + 8
                 
-                // Skip VR if present
-                let potentialVR = data.subdata(in: (offset + 4)..<(offset + 6))
-                let vrString = String(data: potentialVR, encoding: .ascii)
-                
-                var lengthOffset = offset + 6
-                var valueOffset = offset + 8
-                
-                // Check for explicit VR
-                if let vr = vrString, vr.allSatisfy({ $0.isLetter }) {
-                    if ["DS", "FL", "FD"].contains(vr) {
-                        lengthOffset = offset + 6
-                        valueOffset = offset + 8
-                    } else if ["OB", "OW", "OF", "OD"].contains(vr) {
-                        lengthOffset = offset + 8
-                        valueOffset = offset + 12
-                    }
+                let itemData: Data
+                if length == 0xFFFFFFFF {
+                    // Undefined length - find item delimiter
+                    itemData = findUndefinedLengthItemData(data, startOffset: itemStart)
+                    offset = itemStart + itemData.count + 8 // Skip item delimiter
+                } else if length > 0 && itemStart + Int(length) <= data.count {
+                    itemData = data.subdata(in: itemStart..<itemStart + Int(length))
+                    offset = itemStart + Int(length)
+                } else {
+                    offset += 2
+                    continue
                 }
                 
-                if lengthOffset + 4 <= data.count {
-                    let length = data.safeReadUInt32(at: lengthOffset)
+                // Parse this contour item
+                if let contour = parseContourItemForContourData(itemData) {
+                    contours.append(contour)
+                    print("           ✅ Parsed contour with \(contour.points.count) points")
+                }
+                
+            } else if group == 0xFFFE && element == 0xE0DD {
+                // Sequence delimiter - end
+                print("           🏁 Found sequence delimiter")
+                break
+            } else {
+                offset += 2
+            }
+        }
+        
+        return contours
+    }
+    
+    // MARK: - Parse Individual Contour Item for Contour Data
+    private static func parseContourItemForContourData(_ data: Data) -> SimpleContour? {
+        print("             🔍 Searching for Contour Data (3006,0050) in item...")
+        
+        var offset = 0
+        
+        while offset + 8 <= data.count {
+            let group = data.safeReadUInt16(at: offset)
+            let element = data.safeReadUInt16(at: offset + 2)
+            
+            // Found Contour Data!
+            if group == 0x3006 && element == 0x0050 {
+                print("             ✅ FOUND Contour Data (3006,0050) at offset \(offset)!")
+                
+                let length = data.safeReadUInt32(at: offset + 4)
+                let valueOffset = offset + 8
+                
+                if length > 0 && length < 1000000 && valueOffset + Int(length) <= data.count {
+                    let contourDataRaw = data.subdata(in: valueOffset..<valueOffset + Int(length))
                     
-                    if length > 0 && valueOffset + Int(length) <= data.count {
-                        let floatData = data.subdata(in: valueOffset..<(valueOffset + Int(length)))
-                        
-                        // Try to parse as string first (DS VR)
-                        if let stringValue = String(data: floatData, encoding: .ascii) {
-                            let components = stringValue.split(separator: "\\")
-                            var floats: [Float] = []
+                    // Parse the coordinate data
+                    if let coordinates = parseContourCoordinatesWithAllMethods(contourDataRaw) {
+                        if coordinates.count >= 6 && coordinates.count % 3 == 0 {
+                            // Convert to 3D points
+                            var points: [SIMD3<Float>] = []
+                            var zPosition: Float = 0.0
                             
-                            for component in components {
-                                if let floatValue = Float(component.trimmingCharacters(in: .whitespacesAndNewlines)) {
-                                    floats.append(floatValue)
-                                }
-                            }
-                            
-                            if !floats.isEmpty {
-                                return floats
-                            }
-                        }
-                        
-                        // Try to parse as binary float data
-                        if floatData.count % 4 == 0 {
-                            var floats: [Float] = []
-                            for i in stride(from: 0, to: floatData.count, by: 4) {
-                                let floatValue = floatData.safeReadFloat(at: i)
-                                floats.append(floatValue)
+                            for i in stride(from: 0, to: coordinates.count - 2, by: 3) {
+                                let x = coordinates[i]
+                                let y = coordinates[i + 1]
+                                let z = coordinates[i + 2]
+                                points.append(SIMD3<Float>(x, y, z))
+                                zPosition = z
                             }
                             
-                            if !floats.isEmpty {
-                                return floats
-                            }
+                            print("             ✅ SUCCESS: Parsed \(points.count) contour points at Z=\(String(format: "%.1f", zPosition))")
+                            return SimpleContour(points: points, slicePosition: zPosition)
                         }
                     }
                 }
@@ -832,347 +458,567 @@ public class MinimalRTStructParser {
         return nil
     }
     
-    /// Enhanced integer extraction from DICOM data
-    private static func findEnhancedIntegerInData(_ data: Data, group: UInt16, element: UInt16) -> Int? {
+    // MARK: - Direct Search for Contour Data (Fallback)
+    private static func directSearchForContourData(_ data: Data, roiNumber: Int) -> [SimpleContour] {
+        print("         🔍 Direct search for Contour Data (3006,0050) tags...")
+        
+        var contours: [SimpleContour] = []
         var offset = 0
         
-        print("         🔍 Scanning \(data.count) bytes for tag (\(String(format: "%04X", group)),\(String(format: "%04X", element)))...")
-        
         while offset + 8 <= data.count {
-            let foundGroup = data.safeReadUInt16(at: offset)
-            let foundElement = data.safeReadUInt16(at: offset + 2)
+            let group = data.safeReadUInt16(at: offset)
+            let element = data.safeReadUInt16(at: offset + 2)
             
-            // Debug: Show tags we're finding
-            if offset % 20 == 0 { // Log every 10th tag to avoid spam
-                print("         🔍 At offset \(offset): found tag (\(String(format: "%04X", foundGroup)),\(String(format: "%04X", foundElement)))")
-            }
-            
-            if foundGroup == group && foundElement == element {
-                print("         ✅ Found target tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) at offset \(offset)")
+            // Found Contour Data tag directly!
+            if group == 0x3006 && element == 0x0050 {
+                print("         ✅ DIRECT FIND: Contour Data (3006,0050) at offset \(offset)!")
                 
-                // These are sequence items - likely implicit VR
-                // Structure: Tag(4) + Length(4) + Value(length)
-                if offset + 8 <= data.count {
-                    let length = data.safeReadUInt32(at: offset + 4) // Read as 32-bit length
-                    print("         📊 Length (32-bit): \(length) bytes")
+                let length = data.safeReadUInt32(at: offset + 4)
+                let valueOffset = offset + 8
+                
+                if length > 0 && length < 1000000 && valueOffset + Int(length) <= data.count {
+                    let contourDataRaw = data.subdata(in: valueOffset..<valueOffset + Int(length))
                     
-                    let valueOffset = offset + 8
-                    
-                    if length > 0 && length < 1000 && valueOffset + Int(length) <= data.count {
-                        // Try different integer formats
-                        if length == 2 {
-                            let value = data.safeReadUInt16(at: valueOffset)
-                            print("         ✅ Extracted UInt16 value: \(value)")
-                            return Int(value)
-                        } else if length == 4 {
-                            let value = data.safeReadUInt32(at: valueOffset)
-                            print("         ✅ Extracted UInt32 value: \(value)")
-                            return Int(value)
-                        } else {
-                            // Try parsing as string
-                            let stringData = data.subdata(in: valueOffset..<(valueOffset + Int(length)))
-                            let hexString = stringData.map { String(format: "%02X", $0) }.joined(separator: " ")
-                            print("         🔍 String data hex: \(hexString)")
+                    if let coordinates = parseContourCoordinatesWithAllMethods(contourDataRaw) {
+                        if coordinates.count >= 6 && coordinates.count % 3 == 0 {
+                            var points: [SIMD3<Float>] = []
+                            var zPosition: Float = 0.0
                             
-                            if let stringValue = String(data: stringData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                               let intValue = Int(stringValue) {
-                                print("         ✅ Extracted string-encoded value: \(intValue) from '\(stringValue)'")
-                                return intValue
+                            for i in stride(from: 0, to: coordinates.count - 2, by: 3) {
+                                let x = coordinates[i]
+                                let y = coordinates[i + 1]
+                                let z = coordinates[i + 2]
+                                points.append(SIMD3<Float>(x, y, z))
+                                zPosition = z
                             }
+                            
+                            let contour = SimpleContour(points: points, slicePosition: zPosition)
+                            contours.append(contour)
+                            
+                            print("         ✅ DIRECT SUCCESS: \(points.count) points at Z=\(String(format: "%.1f", zPosition))")
                         }
-                    } else {
-                        print("         ⚠️ Invalid length or bounds: length=\(length), remaining=\(data.count - valueOffset)")
                     }
                 }
+                
+                // Move past this contour data
+                offset = valueOffset + Int(length)
+            } else {
+                offset += 2
             }
-            
-            offset += 2 // Move forward more carefully
         }
         
-        print("         ❌ Target tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) not found")
+        return contours
+    }
+    
+    // MARK: - Enhanced Contour Coordinate Parser with All Methods
+    private static func parseContourCoordinatesWithAllMethods(_ data: Data) -> [Float]? {
+        print("             📍 ENHANCED coordinate parsing from \(data.count) bytes...")
+        
+        // Show more detailed hex preview
+        let hexPreview = data.prefix(min(128, data.count)).map { String(format: "%02X", $0) }.joined(separator: " ")
+        print("             📍 Hex: \(hexPreview)")
+        
+        // Method 1: DICOM Decimal String (DS) with backslash separators
+        if let coordinates = parseAsDecimalString(data) {
+            return coordinates
+        }
+        
+        // Method 2: Space-separated decimal string
+        if let coordinates = parseAsSpaceSeparatedString(data) {
+            return coordinates
+        }
+        
+        // Method 3: Comma-separated decimal string
+        if let coordinates = parseAsCommaSeparatedString(data) {
+            return coordinates
+        }
+        
+        // Method 4: Binary IEEE 754 float array
+        if let coordinates = parseAsBinaryFloats(data) {
+            return coordinates
+        }
+        
+        // Method 5: ASCII numbers without separators (continuous string)
+        if let coordinates = parseAsContinuousNumbers(data) {
+            return coordinates
+        }
+        
+        print("             ❌ All coordinate parsing methods failed")
         return nil
     }
     
-    /// Enhanced string extraction from DICOM data
-    private static func findEnhancedStringInData(_ data: Data, group: UInt16, element: UInt16) -> String? {
+    // MARK: - Coordinate Parsing Methods
+    private static func parseAsDecimalString(_ data: Data) -> [Float]? {
+        guard let asciiString = String(data: data, encoding: .ascii) else { return nil }
+        
+        let cleanString = asciiString.trimmingCharacters(in: .whitespacesAndNewlines.union(.controlCharacters))
+        guard !cleanString.isEmpty else { return nil }
+        
+        print("             📍 DS format: '\(cleanString.prefix(100))'...")
+        
+        let components = cleanString.components(separatedBy: "\\")
+        let numbers = components.compactMap { 
+            Float($0.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        
+        if numbers.count >= 6 && numbers.count % 3 == 0 {
+            print("             ✅ DS SUCCESS: \(numbers.count) coordinates")
+            return numbers
+        }
+        
+        return nil
+    }
+    
+    private static func parseAsSpaceSeparatedString(_ data: Data) -> [Float]? {
+        guard let asciiString = String(data: data, encoding: .ascii) else { return nil }
+        
+        let cleanString = asciiString.trimmingCharacters(in: .whitespacesAndNewlines.union(.controlCharacters))
+        guard !cleanString.isEmpty else { return nil }
+        
+        let components = cleanString.components(separatedBy: .whitespacesAndNewlines)
+        let numbers = components.compactMap { Float($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        
+        if numbers.count >= 6 && numbers.count % 3 == 0 {
+            print("             ✅ SPACE SUCCESS: \(numbers.count) coordinates")
+            return numbers
+        }
+        
+        return nil
+    }
+    
+    private static func parseAsCommaSeparatedString(_ data: Data) -> [Float]? {
+        guard let asciiString = String(data: data, encoding: .ascii) else { return nil }
+        
+        let cleanString = asciiString.trimmingCharacters(in: .whitespacesAndNewlines.union(.controlCharacters))
+        guard !cleanString.isEmpty else { return nil }
+        
+        let components = cleanString.components(separatedBy: ",")
+        let numbers = components.compactMap { Float($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        
+        if numbers.count >= 6 && numbers.count % 3 == 0 {
+            print("             ✅ COMMA SUCCESS: \(numbers.count) coordinates")
+            return numbers
+        }
+        
+        return nil
+    }
+    
+    private static func parseAsBinaryFloats(_ data: Data) -> [Float]? {
+        guard data.count % 4 == 0 && data.count >= 12 else { return nil }
+        
+        var numbers: [Float] = []
+        for i in stride(from: 0, to: data.count - 3, by: 4) {
+            let floatValue = data.safeReadFloat(at: i)
+            // Validate reasonable coordinate range for medical imaging
+            if abs(floatValue) < 10000 && !floatValue.isNaN && !floatValue.isInfinite {
+                numbers.append(floatValue)
+            } else {
+                return nil // Invalid binary data
+            }
+        }
+        
+        if numbers.count >= 6 && numbers.count % 3 == 0 {
+            print("             ✅ BINARY SUCCESS: \(numbers.count) coordinates")
+            return numbers
+        }
+        
+        return nil
+    }
+    
+    private static func parseAsContinuousNumbers(_ data: Data) -> [Float]? {
+        guard let asciiString = String(data: data, encoding: .ascii) else { return nil }
+        
+        let cleanString = asciiString.trimmingCharacters(in: .whitespacesAndNewlines.union(.controlCharacters))
+        guard cleanString.count > 10 else { return nil } 
+        
+        // Try to split continuous numbers by detecting patterns
+        let regex = try? NSRegularExpression(pattern: "-?\\d+\\.?\\d*", options: [])
+        let matches = regex?.matches(in: cleanString, options: [], range: NSRange(location: 0, length: cleanString.count)) ?? []
+        
+        let numbers = matches.compactMap { match -> Float? in
+            let range = Range(match.range, in: cleanString)!
+            return Float(String(cleanString[range]))
+        }
+        
+        if numbers.count >= 6 && numbers.count % 3 == 0 {
+            print("             ✅ CONTINUOUS SUCCESS: \(numbers.count) coordinates")
+            return numbers
+        }
+        
+        return nil
+    }
+    
+    // MARK: - FIXED FFFE Sequence Parser
+    private static func parseSequenceWithProperFFEHandling(_ data: Data) -> DICOMSequence {
+        print("       🔧 FIXED FFFE sequence parsing (\(data.count) bytes)...")
+        
+        var items: [DICOMSequenceItem] = []
         var offset = 0
         
-        print("         🔍 Scanning \(data.count) bytes for tag (\(String(format: "%04X", group)),\(String(format: "%04X", element)))...")
-        
         while offset + 8 <= data.count {
-            let foundGroup = data.safeReadUInt16(at: offset)
-            let foundElement = data.safeReadUInt16(at: offset + 2)
+            let group = data.safeReadUInt16(at: offset)
+            let element = data.safeReadUInt16(at: offset + 2)
             
-            // Debug: Show tags we're finding
-            if offset % 20 == 0 {
-                print("         🔍 At offset \(offset): found tag (\(String(format: "%04X", foundGroup)),\(String(format: "%04X", foundElement)))")
-            }
-            
-            if foundGroup == group && foundElement == element {
-                print("         ✅ Found target tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) at offset \(offset)")
+            // Sequence item start (FFFE,E000)
+            if group == 0xFFFE && element == 0xE000 {
+                let length = data.safeReadUInt32(at: offset + 4)
+                offset += 8 // Skip item header
                 
-                // These are sequence items - likely implicit VR
-                // Structure: Tag(4) + Length(4) + Value(length)
-                if offset + 8 <= data.count {
-                    let length = data.safeReadUInt32(at: offset + 4) // Read as 32-bit length
-                    print("         📊 Length (32-bit): \(length) bytes")
-                    
-                    let valueOffset = offset + 8
-                    
-                    if length > 0 && length < 1000 && valueOffset + Int(length) <= data.count {
-                        let stringData = data.subdata(in: valueOffset..<(valueOffset + Int(length)))
-                        let hexString = stringData.map { String(format: "%02X", $0) }.joined(separator: " ")
-                        print("         🔍 String data hex: \(hexString)")
-                        
-                        let result = String(data: stringData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                        
-                        // Filter out empty or whitespace-only strings
-                        if let cleanResult = result, !cleanResult.isEmpty {
-                            print("         ✅ Extracted string value: '\(cleanResult)'")
-                            return cleanResult
-                        } else {
-                            print("         ⚠️ String extraction failed or empty")
-                        }
+                let itemData: Data
+                
+                if length == 0xFFFFFFFF {
+                    // Undefined length - find proper delimiter
+                    itemData = findUndefinedLengthItemData(data, startOffset: offset)
+                    offset += itemData.count + 8 // Skip past item and delimiter
+                } else {
+                    // Explicit length
+                    if offset + Int(length) <= data.count {
+                        itemData = data.subdata(in: offset..<offset + Int(length))
+                        offset += Int(length)
                     } else {
-                        print("         ⚠️ Invalid length or bounds: length=\(length), remaining=\(data.count - valueOffset)")
+                        break
                     }
                 }
+                
+                // Parse elements and nested sequences within this item
+                let (elements, nestedSequences) = parseSequenceItemWithNestedSequences(itemData)
+                let item = DICOMSequenceItem(data: itemData, elements: elements, nestedSequences: nestedSequences)
+                items.append(item)
+                
+                print("       📦 Parsed item: \(elements.count) elements, \(nestedSequences.count) nested sequences")
+                
+            } else if group == 0xFFFE && element == 0xE0DD {
+                // Sequence delimiter - end of sequence
+                print("       🏁 Found sequence delimiter")
+                break
+            } else {
+                offset += 2
             }
-            
-            offset += 2 // Move forward more carefully
         }
         
-        print("         ❌ Target tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) not found")
+        print("       ✅ FIXED sequence parsing: \(items.count) items")
+        return DICOMSequence(items: items)
+    }
+    
+    // MARK: - Find Undefined Length Data with Proper Delimiter Detection
+    private static func findUndefinedLengthItemData(_ data: Data, startOffset: Int) -> Data {
+        var offset = startOffset
+        
+        while offset + 8 <= data.count {
+            let group = data.safeReadUInt16(at: offset)
+            let element = data.safeReadUInt16(at: offset + 2)
+            
+            // Item delimiter (FFFE,E00D) or Sequence delimiter (FFFE,E0DD)
+            if group == 0xFFFE && (element == 0xE00D || element == 0xE0DD) {
+                return data.subdata(in: startOffset..<offset)
+            }
+            
+            offset += 2
+        }
+        
+        // No delimiter found - return rest of data
+        return data.subdata(in: startOffset..<data.count)
+    }
+    
+    private static func findUndefinedLengthSequenceData(_ data: Data, startOffset: Int) -> Data {
+        var offset = startOffset
+        
+        while offset + 8 <= data.count {
+            let group = data.safeReadUInt16(at: offset)
+            let element = data.safeReadUInt16(at: offset + 2)
+            
+            // Sequence delimiter (FFFE,E0DD)
+            if group == 0xFFFE && element == 0xE0DD {
+                return data.subdata(in: startOffset..<offset)
+            }
+            
+            offset += 2
+        }
+        
+        // No delimiter found - return rest of data
+        return data.subdata(in: startOffset..<data.count)
+    }
+    
+    // MARK: - Parse Sequence Item with Nested Sequences
+    private static func parseSequenceItemWithNestedSequences(_ data: Data) -> ([DICOMTag: Data], [DICOMTag: DICOMSequence]) {
+        var elements: [DICOMTag: Data] = [:]
+        var nestedSequences: [DICOMTag: DICOMSequence] = [:]
+        var offset = 0
+        
+        while offset + 8 <= data.count {
+            let group = data.safeReadUInt16(at: offset)
+            let element = data.safeReadUInt16(at: offset + 2)
+            
+            // Skip FFFE delimiters
+            if group == 0xFFFE {
+                offset += 8
+                continue
+            }
+            
+            guard group > 0 && group < 0x7FFF && element < 0x7FFF else {
+                offset += 2
+                continue
+            }
+            
+            let tag = DICOMTag(group: group, element: element)
+            
+            // Check for explicit VR
+            let vr = String(data: data.subdata(in: (offset + 4)..<min(offset + 6, data.count)), encoding: .ascii)
+            let isExplicitVR = vr?.count == 2 && vr!.allSatisfy({ $0.isLetter })
+            
+            let lengthOffset: Int
+            let valueOffset: Int
+            
+            if isExplicitVR {
+                if ["OB", "OW", "OF", "SQ", "UT", "UN"].contains(vr!) {
+                    lengthOffset = offset + 8
+                    valueOffset = offset + 12
+                } else {
+                    lengthOffset = offset + 6
+                    valueOffset = offset + 8
+                }
+            } else {
+                lengthOffset = offset + 4
+                valueOffset = offset + 8
+            }
+            
+            guard lengthOffset + 4 <= data.count else {
+                offset += 2
+                continue
+            }
+            
+            let length: UInt32
+            if valueOffset == offset + 8 && !isExplicitVR {
+                length = data.safeReadUInt32(at: lengthOffset)
+            } else if valueOffset == offset + 8 {
+                length = UInt32(data.safeReadUInt16(at: lengthOffset))
+            } else {
+                length = data.safeReadUInt32(at: lengthOffset)
+            }
+            
+            if length == 0xFFFFFFFF {
+                // Undefined length - this is a sequence
+                let sequenceData = findUndefinedLengthSequenceData(data, startOffset: valueOffset)
+                let sequence = parseSequenceWithProperFFEHandling(sequenceData)
+                nestedSequences[tag] = sequence
+                
+                print("         📦 Found nested sequence (\(String(format: "%04X", group)),\(String(format: "%04X", element))) with \(sequence.items.count) items")
+                
+                offset = valueOffset + sequenceData.count + 8 // Skip sequence delimiter
+                
+            } else if length > 0 && length < 1000000 && valueOffset + Int(length) <= data.count {
+                let elementData = data.subdata(in: valueOffset..<valueOffset + Int(length))
+                
+                // Check if this is a sequence by VR or content
+                if vr == "SQ" || (group == 0x3006 && element == 0x0040) {
+                    let sequence = parseSequenceWithProperFFEHandling(elementData)
+                    nestedSequences[tag] = sequence
+                    print("         📦 Found nested sequence (\(String(format: "%04X", group)),\(String(format: "%04X", element))) with \(sequence.items.count) items")
+                } else {
+                    elements[tag] = elementData
+                }
+                
+                offset = valueOffset + Int(length)
+            } else {
+                offset += 2
+            }
+        }
+        
+        return (elements, nestedSequences)
+    }
+    
+    // MARK: - Contour Coordinate Parsing
+    private static func parseContourCoordinatesWithAllMethods(_ data: Data) -> [Float]? {
+        print("           🔢 Parsing contour coordinates from \(data.count) bytes...")
+        
+        // Method 1: Try as DICOM Decimal String (DS) format with backslash separators
+        if let coordinates = parseAsDecimalString(data) {
+            print("           ✅ SUCCESS: Parsed \(coordinates.count) coordinates as decimal string")
+            return coordinates
+        }
+        
+        // Method 2: Try as binary float array
+        if let coordinates = parseAsBinaryFloats(data) {
+            print("           ✅ SUCCESS: Parsed \(coordinates.count) coordinates as binary floats")
+            return coordinates
+        }
+        
+        // Method 3: Try as space-separated decimal string
+        if let coordinates = parseAsSpaceSeparatedDecimals(data) {
+            print("           ✅ SUCCESS: Parsed \(coordinates.count) coordinates as space-separated decimals")
+            return coordinates
+        }
+        
+        print("           ❌ FAILED: Could not parse coordinate data")
+        // Debug: Show first 100 bytes as hex and text
+        let debugBytes = data.prefix(100)
+        let hexString = debugBytes.map { String(format: "%02X", $0) }.joined(separator: " ")
+        print("           🔍 First 100 bytes (hex): \(hexString)")
+        
+        if let textString = String(data: debugBytes, encoding: .ascii) {
+            print("           🔍 As ASCII text: '\(textString)'")
+        }
+        
         return nil
     }
     
-    /// Create basic ROI structures from data analysis
-    private static func createBasicROIFromData(roiDataSize: Int, contourDataSize: Int) -> [SimpleROIStructure] {
-        print("   🏢 Creating basic ROI structures from RTStruct data analysis")
+    private static func parseAsDecimalString(_ data: Data) -> [Float]? {
+        guard let string = String(data: data, encoding: .ascii) else { return nil }
         
-        // Estimate number of ROIs based on data size
-        let estimatedROICount = min(10, max(1, roiDataSize / 1000))
+        let trimmedString = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedString.isEmpty else { return nil }
         
-        var rois: [SimpleROIStructure] = []
+        // Split by backslashes (DICOM DS format)
+        let components = trimmedString.components(separatedBy: "\\")
         
-        for i in 0..<estimatedROICount {
-            let roiName = "RTStruct_ROI_\(i + 1)"
-            let color = generateROIColor(for: i)
-            
-            // Create simplified contours for this ROI
-            let contours = createSimplifiedContours(roiIndex: i, totalROIs: estimatedROICount)
-            
-            let roi = SimpleROIStructure(
-                roiNumber: i + 1,
-                roiName: roiName,
-                displayColor: color,
-                contours: contours
-            )
-            
-            rois.append(roi)
+        var coordinates: [Float] = []
+        for component in components {
+            let trimmed = component.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, let value = Float(trimmed) {
+                coordinates.append(value)
+            }
         }
         
-        print("   ✅ Created \(rois.count) ROI structures from RTStruct data")
-        return rois
+        return coordinates.count >= 6 && coordinates.count % 3 == 0 ? coordinates : nil
     }
     
-    /// Generate colors for RTStruct ROIs
+    private static func parseAsBinaryFloats(_ data: Data) -> [Float]? {
+        guard data.count >= 12 && data.count % 4 == 0 else { return nil }
+        
+        let floatCount = data.count / 4
+        var coordinates: [Float] = []
+        
+        for i in 0..<floatCount {
+            let offset = i * 4
+            if offset + 4 <= data.count {
+                let floatValue = data.safeReadFloat(at: offset)
+                coordinates.append(floatValue)
+            }
+        }
+        
+        return coordinates.count >= 6 && coordinates.count % 3 == 0 ? coordinates : nil
+    }
+    
+    private static func parseAsSpaceSeparatedDecimals(_ data: Data) -> [Float]? {
+        guard let string = String(data: data, encoding: .ascii) else { return nil }
+        
+        let components = string.components(separatedBy: .whitespacesAndNewlines)
+        var coordinates: [Float] = []
+        
+        for component in components {
+            let trimmed = component.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, let value = Float(trimmed) {
+                coordinates.append(value)
+            }
+        }
+        
+        return coordinates.count >= 6 && coordinates.count % 3 == 0 ? coordinates : nil
+    }
+
+    // MARK: - Parse Individual Contour
+    private static func parseIndividualContour(_ contourItem: DICOMSequenceItem, index: Int) -> SimpleContour? {
+        // Look for Contour Data (3006,0050) in this contour item
+        let contourDataTag = DICOMTag(group: 0x3006, element: 0x0050)
+        
+        guard let contourDataElement = contourItem.elements[contourDataTag] else {
+            print("         ⚠️ No Contour Data (3006,0050) in contour item \(index)")
+            return nil
+        }
+        
+        guard let coordinates = parseContourCoordinatesWithAllMethods(contourDataElement) else {
+            print("         ❌ Could not parse contour coordinates in item \(index)")
+            return nil
+        }
+        
+        guard coordinates.count >= 6 && coordinates.count % 3 == 0 else {
+            print("         ❌ Invalid coordinate count in item \(index): \(coordinates.count)")
+            return nil
+        }
+        
+        // Convert to 3D points
+        var points: [SIMD3<Float>] = []
+        var zPosition: Float = 0.0
+        
+        for i in stride(from: 0, to: coordinates.count - 2, by: 3) {
+            let x = coordinates[i]
+            let y = coordinates[i + 1]
+            let z = coordinates[i + 2]
+            points.append(SIMD3<Float>(x, y, z))
+            zPosition = z
+        }
+        
+        print("         ✅ Parsed contour \(index): \(points.count) points at Z=\(String(format: "%.1f", zPosition))")
+        return SimpleContour(points: points, slicePosition: zPosition)
+    }
+    
+    // MARK: - Utility Functions
+    private static func extractIntegerFromSequenceItem(_ item: DICOMSequenceItem, group: UInt16, element: UInt16) -> Int? {
+        let tag = DICOMTag(group: group, element: element)
+        guard let data = item.elements[tag] else { return nil }
+        
+        if data.count == 2 {
+            return Int(data.safeReadUInt16(at: 0))
+        } else if data.count == 4 {
+            return Int(data.safeReadUInt32(at: 0))
+        } else if let stringValue = String(data: data, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  let intValue = Int(stringValue) {
+            return intValue
+        }
+        
+        return nil
+    }
+    
+    private static func extractStringFromSequenceItem(_ item: DICOMSequenceItem, group: UInt16, element: UInt16) -> String? {
+        let tag = DICOMTag(group: group, element: element)
+        guard let data = item.elements[tag] else { return nil }
+        
+        return String(data: data, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    private static func combineROIMetadataWithContours(
+        metadata: [(roiNumber: Int, roiName: String, displayColor: SIMD3<Float>)],
+        contours: [Int: [SimpleContour]]
+    ) -> [SimpleROIStructure] {
+        
+        var roiStructures: [SimpleROIStructure] = []
+        
+        for meta in metadata {
+            let roiContours = contours[meta.roiNumber] ?? []
+            
+            // Only create ROI structure if we have actual contours
+            if !roiContours.isEmpty {
+                let roi = SimpleROIStructure(
+                    roiNumber: meta.roiNumber,
+                    roiName: meta.roiName,
+                    displayColor: meta.displayColor,
+                    contours: roiContours
+                )
+                roiStructures.append(roi)
+                print("   ✅ Created ROI \(meta.roiNumber) '\(meta.roiName)' with \(roiContours.count) contours")
+            } else {
+                print("   ⚠️ Skipping ROI \(meta.roiNumber) '\(meta.roiName)' - no contour data found")
+            }
+        }
+        
+        return roiStructures
+    }
+    
     private static func generateROIColor(for index: Int) -> SIMD3<Float> {
         let colors: [SIMD3<Float>] = [
             SIMD3<Float>(1.0, 0.0, 0.0), // Red
-            SIMD3<Float>(0.0, 1.0, 0.0), // Green  
+            SIMD3<Float>(0.0, 1.0, 0.0), // Green
             SIMD3<Float>(0.0, 0.0, 1.0), // Blue
             SIMD3<Float>(1.0, 1.0, 0.0), // Yellow
             SIMD3<Float>(1.0, 0.0, 1.0), // Magenta
             SIMD3<Float>(0.0, 1.0, 1.0), // Cyan
             SIMD3<Float>(1.0, 0.5, 0.0), // Orange
             SIMD3<Float>(0.5, 0.0, 1.0), // Purple
-            SIMD3<Float>(0.0, 0.5, 0.0), // Dark Green
-            SIMD3<Float>(0.8, 0.4, 0.2)  // Brown
         ]
         
         return colors[index % colors.count]
     }
     
-    /// Create simplified contours for ROI
-    private static func createSimplifiedContours(roiIndex: Int, totalROIs: Int) -> [SimpleContour] {
-        var contours: [SimpleContour] = []
-        
-        // Create contours at different Z positions
-        let startSlice = 10 + (roiIndex * 5)
-        let endSlice = startSlice + 15
-        
-        for slice in startSlice..<endSlice {
-            let z = Float(slice) * 3.0
-            
-            // Create simple circular/oval contour
-            let centerX: Float = 200 + Float(roiIndex * 50)
-            let centerY: Float = 200 + Float((roiIndex % 3) * 100)
-            let radiusX: Float = 30 + Float(roiIndex * 10)
-            let radiusY: Float = 25 + Float(roiIndex * 8)
-            
-            var points: [SIMD3<Float>] = []
-            
-            // Create circular contour with 12 points
-            for i in 0..<12 {
-                let angle = Float(i) * 2.0 * Float.pi / 12.0
-                let x = centerX + radiusX * cos(angle)
-                let y = centerY + radiusY * sin(angle)
-                points.append(SIMD3<Float>(x, y, z))
-            }
-            
-            let contour = SimpleContour(points: points, slicePosition: z)
-            contours.append(contour)
-        }
-        
-        return contours
-    }
-    
-    // MARK: - Sample ROI Data for Testing
-    
-    private static func createSampleROIStructures() -> [SimpleROIStructure] {
-        print("   🧪 Creating realistic 3D RTStruct ROI structures...")
-        
-        // Create anatomically realistic 3D ROI structures
-        let sampleROIs: [SimpleROIStructure] = [
-            
-            // Heart ROI - 3D cardiac structure
-            SimpleROIStructure(
-                roiNumber: 1,
-                roiName: "Heart",
-                displayColor: SIMD3<Float>(1.0, 0.0, 0.0), // Red
-                contours: createHeartROI()
-            ),
-            
-            // Liver ROI - Large abdominal organ
-            SimpleROIStructure(
-                roiNumber: 2,
-                roiName: "Liver",
-                displayColor: SIMD3<Float>(0.6, 0.4, 0.2), // Brown
-                contours: createLiverROI()
-            ),
-            
-            // Lung ROI - 3D pulmonary structure
-            SimpleROIStructure(
-                roiNumber: 3,
-                roiName: "Left Lung",
-                displayColor: SIMD3<Float>(0.0, 0.8, 0.8), // Cyan
-                contours: createLungROI()
-            )
-        ]
-        
-        return sampleROIs
-    }
-    
-    // MARK: - Realistic 3D ROI Generators
-    
-    private static func createHeartROI() -> [SimpleContour] {
-        var contours: [SimpleContour] = []
-        
-        // Heart: roughly centered in chest, oval shaped
-        let heartCenter = SIMD3<Float>(256, 300, 75) // Center-left of chest
-        
-        // Create contours for multiple axial slices through heart
-        for slice in 20...35 {
-            let z = Float(slice) * 3.0
-            let distanceFromCenter = abs(z - heartCenter.z)
-            let maxDistance: Float = 24.0 // Heart spans ~8 slices
-            
-            // Heart gets smaller at edges
-            let sizeMultiplier = max(0.2, 1.0 - (distanceFromCenter / maxDistance))
-            
-            if sizeMultiplier > 0.1 {
-                var points: [SIMD3<Float>] = []
-                let numPoints = 16
-                let heartRadiusX: Float = 40.0 * sizeMultiplier
-                let heartRadiusY: Float = 30.0 * sizeMultiplier
-                
-                for i in 0..<numPoints {
-                    let angle = Float(i) * 2.0 * Float.pi / Float(numPoints)
-                    
-                    // Heart-like shape with slight indentation
-                    let radius = heartRadiusX * (1.0 + 0.1 * sin(angle * 2))
-                    let x = heartCenter.x + radius * cos(angle)
-                    let y = heartCenter.y + heartRadiusY * sin(angle)
-                    
-                    points.append(SIMD3<Float>(x, y, z))
-                }
-                
-                contours.append(SimpleContour(
-                    points: points,
-                    slicePosition: z
-                ))
-            }
-        }
-        
-        return contours
-    }
-    
-    private static func createLiverROI() -> [SimpleContour] {
-        var contours: [SimpleContour] = []
-        
-        // Liver: large, irregular organ in right abdomen
-        for slice in 25...40 {
-            let z = Float(slice) * 3.0
-            
-            var points: [SIMD3<Float>] = []
-            let numPoints = 20
-            let liverSize: Float = 60.0 - Float(abs(slice - 32)) * 2.0 // Largest in middle
-            
-            for i in 0..<numPoints {
-                let angle = Float(i) * 2.0 * Float.pi / Float(numPoints)
-                
-                // Irregular liver-like shape
-                let radius = liverSize * (1.0 + 0.3 * sin(angle * 3) + 0.1 * cos(angle * 5))
-                let x = 320 + radius * cos(angle) // Offset to right side
-                let y = 280 + radius * sin(angle) * 0.7
-                
-                points.append(SIMD3<Float>(x, y, z))
-            }
-            
-            contours.append(SimpleContour(
-                points: points,
-                slicePosition: z
-            ))
-        }
-        
-        return contours
-    }
-    
-    private static func createLungROI() -> [SimpleContour] {
-        var contours: [SimpleContour] = []
-        
-        // Left lung: large, curved organ
-        for slice in 15...45 {
-            let z = Float(slice) * 3.0
-            
-            var points: [SIMD3<Float>] = []
-            let numPoints = 18
-            let lungSize: Float = 50.0 - Float(abs(slice - 30)) * 1.5 // Largest in middle
-            
-            for i in 0..<numPoints {
-                let angle = Float(i) * 2.0 * Float.pi / Float(numPoints)
-                
-                // Lung-like curved shape
-                let radius = lungSize * (1.0 + 0.2 * sin(angle * 2))
-                let x = 180 + radius * cos(angle) // Left side
-                let y = 250 + radius * sin(angle) * 1.2 // Taller than wide
-                
-                points.append(SIMD3<Float>(x, y, z))
-            }
-            
-            contours.append(SimpleContour(
-                points: points,
-                slicePosition: z
-            ))
-        }
-        
-        return contours
-    }
-    
     // MARK: - Data Conversion
-    
-    /// Convert SimpleRTStructData to full RTStructData format
     public static func convertToFullROI(_ simpleData: SimpleRTStructData) -> RTStructData {
         print("🔄 Converting SimpleRTStructData to full RTStructData format...")
         
