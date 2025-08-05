@@ -98,11 +98,18 @@ struct ROIOverlayLayer: View {
                 print("      📍 ROI Z=\(contour.slicePosition), Current Z=\(currentWorldPos.z)")
                 print("      📍 Volume bounds: \(coordinateSystem.volumeBounds)")
                 print("      📍 Z difference: \(abs(contour.slicePosition - currentWorldPos.z))mm")
+                print("      📍 Volume origin: \(coordinateSystem.volumeOrigin)")
+                print("      📍 Volume spacing: \(coordinateSystem.volumeSpacing)")
+                print("      📍 Volume dimensions: \(coordinateSystem.volumeDimensions)")
                 
                 // Check if ROI Z is within volume bounds
                 let bounds = coordinateSystem.volumeBounds
                 let isWithinBounds = contour.slicePosition >= bounds.min.z && contour.slicePosition <= bounds.max.z
                 print("      ⚠️ ROI within volume bounds: \(isWithinBounds)")
+                
+                // Calculate what slice index the ROI SHOULD be at
+                let roiVoxelZ = (contour.slicePosition - coordinateSystem.volumeOrigin.z) / coordinateSystem.volumeSpacing.z
+                print("      🧮 ROI should be at voxel Z: \(roiVoxelZ) (slice \(Int(roiVoxelZ)))")
                 
                 // Sample coordinate conversion
                 if let firstPoint = contour.points.first {
