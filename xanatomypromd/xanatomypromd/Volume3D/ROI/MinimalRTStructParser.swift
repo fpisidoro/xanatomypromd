@@ -201,11 +201,18 @@ public class MinimalRTStructParser {
     private static func scanSingleItemForContours(_ data: Data) -> [SimpleContour] {
         var contours: [SimpleContour] = []
         
+        print("             🔍 Scanning item content (\(data.count) bytes) for contour data...")
+        
+        // DEBUG: Show hex dump of item content
+        let hexDump = data.prefix(64).map { String(format: "%02X", $0) }.joined(separator: " ")
+        print("               🔎 Hex dump: \(hexDump)")
+        
         // Look for (3006,0050) Contour Data tags within this item
         let contourDataBytes: [UInt8] = [0x06, 0x30, 0x50, 0x00]
         
         var searchOffset = 0
         while searchOffset < data.count - 8 {
+            var found = false
             for i in searchOffset..<(data.count - 8) {
                 let slice = data.subdata(in: i..<i+4)
                 if Array(slice) == contourDataBytes {
@@ -225,13 +232,33 @@ public class MinimalRTStructParser {
                             }
                             
                             searchOffset = i + 8 + Int(length)
+                            found = true
                             break
                         }
                     }
                 }
             }
             
-            if searchOffset == 0 {
+            if !found {
+                // DEBUG: Look for ANY DICOM tags in this item
+                print("               🔎 No (3006,0050) found. Scanning for any DICOM tags...")
+                
+                for i in 0..<(data.count - 4) {
+                    if i % 2 == 0 { // DICOM tags are on even boundaries
+                        let tag = data.withUnsafeBytes { bytes in
+                            bytes.load(fromByteOffset: i, as: UInt32.self)
+                        }
+                        
+                        // Check if this looks like a valid DICOM tag
+                        let group = UInt16(tag & 0xFFFF)
+                        let element = UInt16((tag >> 16) & 0xFFFF)
+                        
+                        if group > 0 && group < 0x7FFF && element < 0x7FFF {
+                            print("                 🏷️ Found tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) at offset \(i)")
+                        }
+                    }
+                }
+                
                 break // No contour data found in this item
             }
         }
