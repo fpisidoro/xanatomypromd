@@ -161,9 +161,19 @@ public class MinimalRTStructParser {
             if Array(slice) == contourSeqBytes {
                 print("       ✅ FOUND Contour Sequence at byte \(i)!")
                 
-                // Read length of contour sequence
-                let seqLength = data.withUnsafeBytes { bytes in
-                    bytes.load(fromByteOffset: i + 4, as: UInt32.self)
+                // Read length of contour sequence with alignment check
+                let seqLength: UInt32
+                if (i + 4) % 4 == 0 {
+                    // Aligned read
+                    seqLength = data.withUnsafeBytes { bytes in
+                        bytes.load(fromByteOffset: i + 4, as: UInt32.self)
+                    }
+                } else {
+                    // Unaligned read - copy bytes manually
+                    let lengthBytes = data.subdata(in: (i + 4)..<(i + 8))
+                    seqLength = lengthBytes.withUnsafeBytes { bytes in
+                        bytes.load(as: UInt32.self)
+                    }
                 }
                 
                 print("         Contour Sequence length: \(seqLength) bytes")
@@ -217,9 +227,19 @@ public class MinimalRTStructParser {
             if Array(slice) == contourDataBytes {
                 print("           ✅ FOUND Contour Data at sequence offset \(i)!")
                 
-                // Read length
-                let length = data.withUnsafeBytes { bytes in
-                    bytes.load(fromByteOffset: i + 4, as: UInt32.self)
+                // Read length with alignment check
+                let length: UInt32
+                if (i + 4) % 4 == 0 {
+                    // Aligned read
+                    length = data.withUnsafeBytes { bytes in
+                        bytes.load(fromByteOffset: i + 4, as: UInt32.self)
+                    }
+                } else {
+                    // Unaligned read - copy bytes manually
+                    let lengthBytes = data.subdata(in: (i + 4)..<(i + 8))
+                    length = lengthBytes.withUnsafeBytes { bytes in
+                        bytes.load(as: UInt32.self)
+                    }
                 }
                 
                 print("             Length: \(length) bytes")
