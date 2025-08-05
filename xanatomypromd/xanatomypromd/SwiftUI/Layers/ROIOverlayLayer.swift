@@ -33,15 +33,12 @@ struct ROIOverlayLayer: View {
                 return 
             }
             
-            print("🎨 ROI Drawing on \(plane): \(roiData.roiStructures.count) ROI structures available")
+            print("🎨 ROI Drawing on \(plane): \(roiData.roiStructures.count) ROI structures, world pos: \(coordinateSystem.currentWorldPosition)")
             
             // Render each ROI structure
             var totalContoursDrawn = 0
             for roiStructure in roiData.roiStructures {
-                guard roiStructure.isVisible else { 
-                    print("   📊 ROI \(roiStructure.roiNumber): '\(roiStructure.roiName)' - HIDDEN")
-                    continue 
-                }
+                guard roiStructure.isVisible else { continue }
                 
                 // Get contours for current slice - no longer need slice position parameter
                 let contours = getContoursForCurrentSlice(
@@ -50,11 +47,20 @@ struct ROIOverlayLayer: View {
                     plane: plane
                 )
                 
-                print("   📊 ROI \(roiStructure.roiNumber): '\(roiStructure.roiName)' - \(contours.count) contours visible")
+                // FALLBACK TEST: If no contours found, try showing the first contour regardless of position
+                let finalContours: [ROIContour]
+                if contours.isEmpty && plane == .axial {
+                    print("   ⚠️ No contours at current position, showing first contour for testing")
+                    finalContours = Array(roiStructure.contours.prefix(1))
+                } else {
+                    finalContours = contours
+                }
+                
+                print("   📊 ROI \(roiStructure.roiNumber): '\(roiStructure.roiName)' - \(finalContours.count) contours")
                 
                 // Draw each contour
-                for (index, contour) in contours.enumerated() {
-                    print("      📐 Drawing contour \(index): \(contour.contourData.count) points at Z=\(contour.slicePosition)")
+                for (index, contour) in finalContours.enumerated() {
+                    print("      📐 Drawing contour \(index): \(contour.contourData.count) points")
                     drawContour(
                         contour: contour,
                         roiStructure: roiStructure,
@@ -88,9 +94,14 @@ struct ROIOverlayLayer: View {
         switch plane {
         case .axial:
             // Axial: show contours at current Z slice (use world Z position)
-            return roiStructure.contours.filter { contour in
+            let axialContours = roiStructure.contours.filter { contour in
                 abs(contour.slicePosition - currentWorldPos.z) < roiSettings.sliceTolerance
             }
+            print("   📍 Axial: Found \(axialContours.count) contours near Z=\(currentWorldPos.z) (tolerance: \(roiSettings.sliceTolerance))")
+            if !axialContours.isEmpty {
+                print("      📍 Contour Z positions: \(axialContours.map { $0.slicePosition })")
+            }
+            return axialContours
             
         case .sagittal:
             // Sagittal: create cross-section at current X position
@@ -273,7 +284,7 @@ struct ROIOverlayLayer: View {
         }
         
         // Debug: Show first few points
-        print("         📍 First 3 points (world coords): \(Array(contour.contourData.prefix(3)))")
+        print("         📍 Sample world coord: \(contour.contourData.first ?? SIMD3<Float>(0,0,0))")
         
         // Convert 3D contour points to 2D screen coordinates using coordinate system
         let screenPoints = contour.contourData.map { point3D in
@@ -285,7 +296,7 @@ struct ROIOverlayLayer: View {
         }
         
         // Debug: Show converted screen points
-        print("         🖥️ First 3 screen points: \(Array(screenPoints.prefix(3)))")
+        print("         🖥️ Sample screen coord: \(screenPoints.first ?? CGPoint(x: 0, y: 0))")
         
         // Filter out invalid screen points (outside reasonable bounds)
         let validScreenPoints = screenPoints.filter { point in
