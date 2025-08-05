@@ -151,44 +151,47 @@ public class MinimalRTStructParser {
         
         var contours: [SimpleContour] = []
         
-        // Try multiple possible byte patterns for (3006,0050)
-        let patterns: [(String, [UInt8])] = [
-            ("Little Endian", [0x06, 0x30, 0x50, 0x00]),  // (3006,0050)
-            ("Big Endian", [0x30, 0x06, 0x00, 0x50]),     // (3006,0050)
-            ("Alt Pattern 1", [0x50, 0x00, 0x06, 0x30]),  // Reversed
-            ("Alt Pattern 2", [0x00, 0x50, 0x30, 0x06])   // Different order
-        ]
+        // First, look for Contour Sequence tag (3006,0040) which contains the contour data
+        let contourSeqBytes: [UInt8] = [0x06, 0x30, 0x40, 0x00] // (3006,0040)
         
-        for (patternName, targetBytes) in patterns {
-            print("       🔍 Trying \(patternName) pattern: [\(targetBytes.map { String(format: "%02X", $0) }.joined(separator: ", "))]")
-            
-            for i in 0..<(data.count - 8) {
-                let slice = data.subdata(in: i..<i+4)
-                if Array(slice) == targetBytes {
-                    print("       ✅ FOUND \(patternName) (3006,0050) at byte \(i)!")
+        print("       🔍 Looking for Contour Sequence (3006,0040)...")
+        
+        for i in 0..<(data.count - 8) {
+            let slice = data.subdata(in: i..<i+4)
+            if Array(slice) == contourSeqBytes {
+                print("       ✅ FOUND Contour Sequence at byte \(i)!")
+                
+                // Read length of contour sequence
+                let seqLength = data.withUnsafeBytes { bytes in
+                    bytes.load(fromByteOffset: i + 4, as: UInt32.self)
+                }
+                
+                print("         Contour Sequence length: \(seqLength) bytes")
+                
+                if seqLength == 0xFFFFFFFF {
+                    // Undefined length - scan to end of available data
+                    let seqStart = i + 8
+                    let seqEnd = min(seqStart + 1000, data.count) // Reasonable limit
+                    let sequenceData = data.subdata(in: seqStart..<seqEnd)
                     
-                    // Read length (next 4 bytes)
-                    let length = data.withUnsafeBytes { bytes in
-                        bytes.load(fromByteOffset: i + 4, as: UInt32.self)
-                    }
+                    print("         Scanning undefined length sequence (\(sequenceData.count) bytes)...")
+                    let foundInSequence = scanForContourDataInSequence(sequenceData)
+                    contours.append(contentsOf: foundInSequence)
                     
-                    print("         Length: \(length) bytes")
+                } else if seqLength > 0 && seqLength < 10000 && i + 8 + Int(seqLength) <= data.count {
+                    // Defined length
+                    let sequenceData = data.subdata(in: (i + 8)..<(i + 8 + Int(seqLength)))
                     
-                    if length > 0 && length < 100000 && i + 8 + Int(length) <= data.count {
-                        let contourDataRaw = data.subdata(in: (i + 8)..<(i + 8 + Int(length)))
-                        
-                        if let contour = parseContourDataDirectly(contourDataRaw) {
-                            contours.append(contour)
-                            print("         ✅ Parsed contour with \(contour.points.count) points at Z=\(contour.slicePosition)")
-                        }
-                    }
+                    print("         Scanning defined length sequence (\(sequenceData.count) bytes)...")
+                    let foundInSequence = scanForContourDataInSequence(sequenceData)
+                    contours.append(contentsOf: foundInSequence)
                 }
             }
         }
         
-        // If no contour data tags found, show a hex dump of the data
+        // If no contour sequence found, show hex dump
         if contours.isEmpty {
-            print("       📝 Hex dump of first 64 bytes:")
+            print("       📝 No Contour Sequence found. Hex dump of first 64 bytes:")
             let dumpSize = min(64, data.count)
             for i in stride(from: 0, to: dumpSize, by: 16) {
                 let lineEnd = min(i + 16, dumpSize)
@@ -197,6 +200,46 @@ public class MinimalRTStructParser {
                 let offsetString = String(format: "%04X", i)
                 print("         \(offsetString): \(hexString)")
             }
+        }
+        
+        return contours
+    }
+    
+    // MARK: - Scan for Contour Data within a Sequence
+    private static func scanForContourDataInSequence(_ data: Data) -> [SimpleContour] {
+        print("         🔍 Scanning sequence for Contour Data (3006,0050)...")
+        
+        var contours: [SimpleContour] = []
+        let contourDataBytes: [UInt8] = [0x06, 0x30, 0x50, 0x00] // (3006,0050)
+        
+        for i in 0..<(data.count - 8) {
+            let slice = data.subdata(in: i..<i+4)
+            if Array(slice) == contourDataBytes {
+                print("           ✅ FOUND Contour Data at sequence offset \(i)!")
+                
+                // Read length
+                let length = data.withUnsafeBytes { bytes in
+                    bytes.load(fromByteOffset: i + 4, as: UInt32.self)
+                }
+                
+                print("             Length: \(length) bytes")
+                
+                if length > 0 && length < 100000 && i + 8 + Int(length) <= data.count {
+                    let contourDataRaw = data.subdata(in: (i + 8)..<(i + 8 + Int(length)))
+                    
+                    if let contour = parseContourDataDirectly(contourDataRaw) {
+                        contours.append(contour)
+                        print("             ✅ Parsed contour with \(contour.points.count) points at Z=\(contour.slicePosition)")
+                    }
+                }
+            }
+        }
+        
+        if contours.isEmpty {
+            print("           📝 No Contour Data found in sequence. Hex dump:")
+            let dumpSize = min(32, data.count)
+            let hexString = data.prefix(dumpSize).map { String(format: "%02X", $0) }.joined(separator: " ")
+            print("             \(hexString)")
         }
         
         return contours
