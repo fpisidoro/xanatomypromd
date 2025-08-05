@@ -85,65 +85,58 @@ struct ROIOverlayLayer: View {
         slicePosition: Float,
         plane: MPRPlane
     ) -> [MinimalRTStructParser.SimpleContour] {
-        // Get current world position from coordinate system
+        
         let currentWorldPos = coordinateSystem.currentWorldPosition
         
         switch plane {
         case .axial:
-            // DEBUG: Check coordinate system alignment
-            let allContours = roiStructure.contours
-            print("   🔍 Coordinate Debug: \(allContours.count) contours")
-            if !allContours.isEmpty {
-                let contour = allContours[0]
-                print("      📍 ROI Z=\(contour.slicePosition), Current Z=\(currentWorldPos.z)")
-                print("      📍 Volume bounds: \(coordinateSystem.volumeBounds)")
-                print("      📍 Z difference: \(abs(contour.slicePosition - currentWorldPos.z))mm")
-                print("      📍 Volume origin: \(coordinateSystem.volumeOrigin)")
-                print("      📍 Volume spacing: \(coordinateSystem.volumeSpacing)")
-                print("      📍 Volume dimensions: \(coordinateSystem.volumeDimensions)")
+            // For axial view, match contours by Z position
+            let currentZ = currentWorldPos.z
+            
+            // Use slice thickness as tolerance (typically 2-3mm for CT)
+            // This ensures we show contours on the correct slice
+            let tolerance = coordinateSystem.volumeSpacing.z * 0.5  // Half slice thickness
+            
+            print("   🔍 Axial slice Z-matching:")
+            print("      📍 Current slice Z: \(currentZ)mm")
+            print("      📏 Tolerance: ±\(tolerance)mm")
+            print("      🎯 Looking for contours between \(currentZ - tolerance)mm and \(currentZ + tolerance)mm")
+            
+            // Debug: Show all contour Z-positions
+            let allZPositions = roiStructure.contours.map { $0.slicePosition }.sorted()
+            print("      📊 Available contour Z-positions: \(allZPositions)")
+            
+            // Filter contours that match current Z within tolerance
+            let matchingContours = roiStructure.contours.filter { contour in
+                let zDifference = abs(contour.slicePosition - currentZ)
+                let matches = zDifference <= tolerance
                 
-                // Check if ROI Z is within volume bounds
-                let bounds = coordinateSystem.volumeBounds
-                let isWithinBounds = contour.slicePosition >= bounds.min.z && contour.slicePosition <= bounds.max.z
-                print("      ⚠️ ROI within volume bounds: \(isWithinBounds)")
+                if matches {
+                    print("      ✅ Contour at Z=\(contour.slicePosition)mm matches (diff: \(zDifference)mm)")
+                }
                 
-                // Calculate what slice index the ROI SHOULD be at
-                let roiVoxelZ = (contour.slicePosition - coordinateSystem.volumeOrigin.z) / coordinateSystem.volumeSpacing.z
-                print("      🧮 ROI should be at voxel Z: \(roiVoxelZ) (slice \(Int(roiVoxelZ)))")
+                return matches
+            }
+            
+            print("      📦 Result: \(matchingContours.count) matching contours")
+            
+            // If no exact match, find nearest contour for debugging
+            if matchingContours.isEmpty && !roiStructure.contours.isEmpty {
+                let nearestContour = roiStructure.contours.min { abs($0.slicePosition - currentZ) < abs($1.slicePosition - currentZ) }!
+                let distance = abs(nearestContour.slicePosition - currentZ)
+                print("      ⚠️ No matching contours! Nearest is at Z=\(nearestContour.slicePosition)mm (distance: \(distance)mm)")
                 
-                // Sample coordinate conversion
-                if let firstPoint = contour.points.first {
-                    let screenPoint = coordinateSystem.worldToScreen(
-                        position: firstPoint,
-                        plane: plane,
-                        viewSize: viewSize
-                    )
-                    print("      📍 Sample: World(\(firstPoint.x), \(firstPoint.y), \(firstPoint.z)) → Screen(\(screenPoint.x), \(screenPoint.y))")
+                // Check if this is a coordinate system alignment issue
+                let volumeBounds = coordinateSystem.volumeBounds
+                print("      🔍 Volume Z-bounds: \(volumeBounds.min.z)mm to \(volumeBounds.max.z)mm")
+                
+                if nearestContour.slicePosition < volumeBounds.min.z || nearestContour.slicePosition > volumeBounds.max.z {
+                    print("      ❌ ERROR: ROI Z-position is outside volume bounds!")
+                    print("      💡 This suggests a coordinate system mismatch")
                 }
             }
             
-            // 3D ROI INTERSECTION: Show ROI when current slice intersects the 3D ROI bounds
-            // Calculate the Z bounds of the entire ROI structure
-            let allZPositions = roiStructure.contours.map { $0.slicePosition }
-            guard let minROIZ = allZPositions.min(), let maxROIZ = allZPositions.max() else {
-                return []
-            }
-            
-            let currentZ = coordinateSystem.currentWorldPosition.z
-            let roiZRange = maxROIZ - minROIZ
-            
-            print("      🔍 ROI Z range: \(minROIZ) to \(maxROIZ) (span: \(roiZRange)mm)")
-            print("      📍 Current Z: \(currentZ)")
-            print("      🎯 ROI contains current slice: \(currentZ >= minROIZ && currentZ <= maxROIZ)")
-            
-            // Show ALL ROI contours if current slice intersects the ROI's Z bounds
-            if currentZ >= minROIZ && currentZ <= maxROIZ {
-                print("      ✅ Showing all \(roiStructure.contours.count) ROI contours (3D intersection)")
-                return roiStructure.contours
-            } else {
-                print("      ❌ Current slice outside ROI bounds")
-                return []
-            }
+            return matchingContours
             
         case .sagittal:
             // Sagittal: create cross-section at current X position
