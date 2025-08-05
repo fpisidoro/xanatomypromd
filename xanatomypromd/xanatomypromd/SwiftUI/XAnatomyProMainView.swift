@@ -533,9 +533,9 @@ class XAnatomyDataManager: ObservableObject {
                 loadingProgress = "Volume loaded successfully"
                 print("✅ Volume data loaded: \(loadedVolumeData.dimensions)")
                 
-                // Log volume info
+                    // Log volume info
                 if let info = renderer.getVolumeInfo() {
-                    print(info)
+                    print("📊 Volume Info: \(info)")
                 }
             }
             
@@ -548,19 +548,60 @@ class XAnatomyDataManager: ObservableObject {
     private func loadROIData() async {
         loadingProgress = "Loading ROI structures..."
         
-        // Try to load RTStruct file
-        if getRTStructFile() != nil {
+        // Use the new DICOMFileManager to find RTStruct files
+        let rtStructFiles = DICOMFileManager.getRTStructFiles()
+        
+        if !rtStructFiles.isEmpty {
+            print("🎯 Found \(rtStructFiles.count) RTStruct files:")
+            for file in rtStructFiles {
+                let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                print("   - \(file.lastPathComponent) (\(size) bytes)")
+            }
+            
+            // Try to parse the first RTStruct file (prioritized by DICOMFileManager)
+            let rtStructFile = rtStructFiles[0]
+            
             do {
-                // This would use RTStruct parser when ready
-                // For now, just simulate
-                try await Task.sleep(nanoseconds: 500_000_000)
-                print("🎨 ROI data loaded (RTStruct parsing coming soon)")
-                loadingProgress = "ROI structures loaded"
+                print("\n📋 PARSING RTStruct file: \(rtStructFile.lastPathComponent)")
+                print("📂 File path: \(rtStructFile.path)")
+                
+                let data = try Data(contentsOf: rtStructFile)
+                print("📊 File size: \(data.count) bytes")
+                
+                let dataset = try DICOMParser.parse(data)
+                print("✅ DICOM parsing successful - \(dataset.elements.count) elements")
+                
+                // Check modality
+                if let modality = dataset.getString(tag: .modality) {
+                    print("🏷️ Modality confirmed: \(modality)")
+                }
+                
+                // Use the new direct parser to extract ROI data
+                print("\n🔍 Starting RTStruct parsing...")
+                if let simpleRTStruct = MinimalRTStructParser.parseSimpleRTStruct(from: dataset) {
+                    // Convert to full RTStruct format
+                    let fullRTStruct = MinimalRTStructParser.convertToFullROI(simpleRTStruct)
+                    
+                    // Update published property on main actor
+                    roiData = fullRTStruct
+                    
+                    print("\n✅ RTStruct SUCCESS: \(fullRTStruct.roiStructures.count) ROI structures loaded")
+                    for roi in fullRTStruct.roiStructures {
+                        print("   📊 ROI \(roi.roiNumber): '\(roi.roiName)' - \(roi.contours.count) contours, \(roi.totalPoints) points")
+                    }
+                    loadingProgress = "RTStruct loaded: \(fullRTStruct.roiStructures.count) ROIs"
+                } else {
+                    print("\n❌ RTStruct parsing returned no data")
+                    loadingProgress = "RTStruct parsing failed - no geometry found"
+                }
+                
             } catch {
-                print("❌ Failed to load ROI data: \(error)")
+                print("\n❌ Failed to load RTStruct file: \(error)")
+                loadingProgress = "Failed to load RTStruct: \(error.localizedDescription)"
             }
         } else {
-            print("📝 No RTStruct file found - continuing without ROI")
+            print("📝 No RTStruct files found - continuing without ROI")
+            loadingProgress = "No RTStruct files found"
         }
     }
     
@@ -631,13 +672,27 @@ class XAnatomyDataManager: ObservableObject {
         }
     }
     
-    private func getRTStructFile() -> URL? {
-        guard let bundlePath = Bundle.main.resourcePath else { return nil }
+    private func getRTStructFiles() -> [URL] {
+        guard let bundlePath = Bundle.main.resourcePath else { return [] }
         
-        let rtStructPath = (bundlePath as NSString).appendingPathComponent("TestData/test_rtstruct.dcm")
-        let rtStructURL = URL(fileURLWithPath: rtStructPath)
+        let testDataPath = (bundlePath as NSString).appendingPathComponent("TestData")
         
-        return FileManager.default.fileExists(atPath: rtStructPath) ? rtStructURL : nil
+        // Check for both RTStruct files, prioritize test_rtstruct2.dcm
+        var rtStructFiles: [URL] = []
+        
+        let rtStruct2Path = (testDataPath as NSString).appendingPathComponent("test_rtstruct2.dcm")
+        if FileManager.default.fileExists(atPath: rtStruct2Path) {
+            rtStructFiles.append(URL(fileURLWithPath: rtStruct2Path))
+            print("📄 Found test_rtstruct2.dcm (priority file with geometry)")
+        }
+        
+        let rtStructPath = (testDataPath as NSString).appendingPathComponent("test_rtstruct.dcm")
+        if FileManager.default.fileExists(atPath: rtStructPath) {
+            rtStructFiles.append(URL(fileURLWithPath: rtStructPath))
+            print("📄 Found test_rtstruct.dcm (backup file)")
+        }
+        
+        return rtStructFiles
     }
     
     // MARK: - Volume Renderer Access

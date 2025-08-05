@@ -52,59 +52,72 @@ class DICOMFileManager {
             return ([], [], [])
         }
         
-        do {
-            let allFileURLs = try FileManager.default.contentsOfDirectory(
-                at: URL(fileURLWithPath: bundlePath),
-                includingPropertiesForKeys: [.fileSizeKey],
-                options: .skipsHiddenFiles
-            )
+        // Check both bundle root and TestData subdirectory
+        let searchPaths = [
+            bundlePath,
+            bundlePath + "/TestData"
+        ]
+        
+        var ctFiles: [URL] = []
+        var rtStructFiles: [URL] = []
+        var allDICOMFiles: [URL] = []
+        
+        for searchPath in searchPaths {
+            let searchURL = URL(fileURLWithPath: searchPath)
             
-            var ctFiles: [URL] = []
-            var rtStructFiles: [URL] = []
-            var allDICOMFiles: [URL] = []
-            
-            for fileURL in allFileURLs {
-                let fileType = classifyDICOMFile(fileURL)
+            do {
+                let fileURLs = try FileManager.default.contentsOfDirectory(
+                    at: searchURL,
+                    includingPropertiesForKeys: [.fileSizeKey],
+                    options: .skipsHiddenFiles
+                )
                 
-                switch fileType {
-                case .ctImage:
-                    ctFiles.append(fileURL)
-                    allDICOMFiles.append(fileURL)
-                case .rtStruct:
-                    rtStructFiles.append(fileURL)
-                    allDICOMFiles.append(fileURL)
-                case .unknown:
-                    // Skip non-DICOM files
-                    continue
+                for fileURL in fileURLs {
+                    let fileType = classifyDICOMFile(fileURL)
+                    
+                    switch fileType {
+                    case .ctImage:
+                        ctFiles.append(fileURL)
+                        allDICOMFiles.append(fileURL)
+                    case .rtStruct:
+                        rtStructFiles.append(fileURL)
+                        allDICOMFiles.append(fileURL)
+                    case .unknown:
+                        continue
+                    }
                 }
+            } catch {
+                // Silent fail for missing directories
+                continue
             }
-            
-            // Sort CT files for proper anatomical ordering
-            ctFiles.sort { $0.lastPathComponent < $1.lastPathComponent }
-            rtStructFiles.sort { $0.lastPathComponent < $1.lastPathComponent }
-            
-            print("📁 DICOM File Discovery Results:")
-            print("   🩻 CT images: \(ctFiles.count)")
-            print("   📊 RTStruct files: \(rtStructFiles.count)")
-            print("   📋 Total DICOM files: \(allDICOMFiles.count)")
-            
-            // Log RTStruct files found
-            if !rtStructFiles.isEmpty {
-                print("   🎯 RTStruct files found:")
-                for rtFile in rtStructFiles {
-                    print("      - \(rtFile.lastPathComponent)")
-                }
-            }
-            
-            return (ctFiles, rtStructFiles, allDICOMFiles)
-            
-        } catch {
-            print("❌ Error reading DICOM files: \(error)")
-            return ([], [], [])
         }
+        
+        // Sort CT files for proper anatomical ordering
+        ctFiles.sort { $0.lastPathComponent < $1.lastPathComponent }
+        rtStructFiles.sort { $0.lastPathComponent < $1.lastPathComponent }
+        
+        print("📁 DICOM File Discovery Results:")
+        print("   🩻 CT images: \(ctFiles.count)")
+        print("   📊 RTStruct files: \(rtStructFiles.count)")
+        print("   📋 Total DICOM files: \(allDICOMFiles.count)")
+        
+        // Log RTStruct files found with details
+        if !rtStructFiles.isEmpty {
+            print("   🎯 RTStruct files discovered:")
+            for rtFile in rtStructFiles {
+                let size = (try? rtFile.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                print("      - \(rtFile.lastPathComponent) (\(size) bytes)")
+            }
+        } else {
+            print("   ⚠️ No RTStruct files found in search paths")
+        }
+        
+        return (ctFiles, rtStructFiles, allDICOMFiles)
     }
     
-    /// Get only CT image files (for volume reconstruction)
+    // MARK: - Convenience Methods
+    
+    /// Get only CT image files
     static func getCTImageFiles() -> [URL] {
         let (ctFiles, _, _) = discoverDICOMFiles()
         return ctFiles
@@ -114,183 +127,181 @@ class DICOMFileManager {
     static func getRTStructFiles() -> [URL] {
         let (_, rtStructFiles, _) = discoverDICOMFiles()
         
-        // Also check Resources/TestData directory for test files
-        var allRTStructFiles = rtStructFiles
+        // PRIORITIZE test_rtstruct2.dcm over test_rtstruct.dcm
+        // Since test_rtstruct.dcm is reference-only (no geometry)
+        var prioritizedFiles = rtStructFiles
         
-        // Check TestData subdirectory in Resources
-        if let testDataPath = Bundle.main.path(forResource: "TestData", ofType: nil) {
-            let testURL = URL(fileURLWithPath: testDataPath)
-            do {
-                let testFiles = try FileManager.default.contentsOfDirectory(at: testURL, includingPropertiesForKeys: nil)
-                let testRTStructFiles = testFiles.filter { $0.lastPathComponent.lowercased().contains("rtstruct") }
-                allRTStructFiles.append(contentsOf: testRTStructFiles)
-                
-                if !testRTStructFiles.isEmpty {
-                    print("   🧪 Found test RTStruct files:")
-                    for file in testRTStructFiles {
-                        print("      - \(file.lastPathComponent)")
-                    }
-                }
-            } catch {
-                print("   ⚠️ Could not access TestData directory: \(error)")
-            }
+        // Move test_rtstruct2.dcm to front if it exists
+        if let test2Index = rtStructFiles.firstIndex(where: { $0.lastPathComponent == "test_rtstruct2.dcm" }) {
+            let test2File = rtStructFiles[test2Index]
+            prioritizedFiles.remove(at: test2Index)
+            prioritizedFiles.insert(test2File, at: 0)
+            print("🎯 PRIORITIZED test_rtstruct2.dcm (contains actual contour geometry)")
+            print("   📂 Path: \(test2File.path)")
+        } else {
+            print("⚠️ test_rtstruct2.dcm not found - using available RTStruct files")
         }
         
-        return allRTStructFiles
+        return prioritizedFiles
     }
     
-    /// Get all DICOM files (backwards compatibility)
+    /// Get all DICOM files (CT + RTStruct)
     static func getAllDICOMFiles() -> [URL] {
         let (_, _, allFiles) = discoverDICOMFiles()
         return allFiles
     }
     
-    // MARK: - Dataset Organization
+    // MARK: - File Validation
     
-    /// Organize files into male/female datasets
-    static func organizeDatasets() -> [String: DICOMFileSet] {
-        let (ctFiles, rtStructFiles, _) = discoverDICOMFiles()
-        
-        var datasets: [String: DICOMFileSet] = [:]
-        
-        // Group by dataset name (male/female/test)
-        let maleCtFiles = ctFiles.filter { $0.lastPathComponent.lowercased().contains("male_ct") }
-        let femaleCtFiles = ctFiles.filter { $0.lastPathComponent.lowercased().contains("female_ct") }
-        let testCtFiles = ctFiles.filter { !$0.lastPathComponent.lowercased().contains("male_ct") &&
-                                          !$0.lastPathComponent.lowercased().contains("female_ct") }
-        
-        let maleRtFiles = rtStructFiles.filter { $0.lastPathComponent.lowercased().contains("male_rtstruct") }
-        let femaleRtFiles = rtStructFiles.filter { $0.lastPathComponent.lowercased().contains("female_rtstruct") }
-        let testRtFiles = rtStructFiles.filter { !$0.lastPathComponent.lowercased().contains("male_rtstruct") &&
-                                                !$0.lastPathComponent.lowercased().contains("female_rtstruct") }
-        
-        // Create datasets
-        if !maleCtFiles.isEmpty {
-            datasets["male"] = DICOMFileSet(
-                ctFiles: maleCtFiles,
-                rtStructFiles: maleRtFiles,
-                datasetName: "Male Anatomy"
-            )
+    /// Check if a file is a valid DICOM file by reading header
+    static func isValidDICOMFile(_ fileURL: URL) -> Bool {
+        do {
+            let data = try Data(contentsOf: fileURL)
+            
+            // Check for DICOM preamble and prefix
+            if data.count >= 132 {
+                let prefixStart = 128
+                let prefix = data.subdata(in: prefixStart..<prefixStart+4)
+                let prefixString = String(data: prefix, encoding: .ascii)
+                
+                if prefixString == "DICM" {
+                    return true
+                }
+            }
+            
+            // Fallback: check for common DICOM group tags at start
+            if data.count >= 8 {
+                let firstTag = data.subdata(in: 0..<4)
+                let group = firstTag.withUnsafeBytes { $0.load(as: UInt16.self) }
+                
+                // Common DICOM groups: 0008, 0010, 0020, etc.
+                if group == 0x0008 || group == 0x0010 || group == 0x0020 {
+                    return true
+                }
+            }
+            
+            return false
+            
+        } catch {
+            return false
         }
-        
-        if !femaleCtFiles.isEmpty {
-            datasets["female"] = DICOMFileSet(
-                ctFiles: femaleCtFiles,
-                rtStructFiles: femaleRtFiles,
-                datasetName: "Female Anatomy"
-            )
-        }
-        
-        // Test/current dataset
-        if !testCtFiles.isEmpty {
-            datasets["test"] = DICOMFileSet(
-                ctFiles: testCtFiles,
-                rtStructFiles: testRtFiles,
-                datasetName: "Test Dataset"
-            )
-        }
-        
-        return datasets
     }
     
-    // MARK: - Validation
+    // MARK: - Dataset Creation
     
-    /// Validate dataset completeness
-    static func validateDataset(_ dataset: DICOMFileSet) -> (isValid: Bool, issues: [String]) {
+    /// Create a structured dataset from discovered files
+    static func createDICOMFileSet() -> DICOMFileSet {
+        let (ctFiles, rtStructFiles, _) = discoverDICOMFiles()
+        
+        // Generate dataset name from CT files
+        let datasetName = generateDatasetName(from: ctFiles)
+        
+        return DICOMFileSet(
+            ctFiles: ctFiles,
+            rtStructFiles: rtStructFiles,
+            datasetName: datasetName
+        )
+    }
+    
+    /// Generate a meaningful dataset name from CT files
+    private static func generateDatasetName(from ctFiles: [URL]) -> String {
+        if ctFiles.isEmpty {
+            return "Unknown Dataset"
+        }
+        
+        // Extract common patterns from CT filenames
+        let firstFilename = ctFiles.first!.lastPathComponent
+        
+        // Look for patient/study identifiers
+        if firstFilename.contains("2.16.840.1.114362") {
+            return "Test CT Dataset"
+        } else if firstFilename.contains("XAPMD") {
+            return "XAPMD Patient Dataset"
+        } else {
+            return "CT Dataset (\(ctFiles.count) files)"
+        }
+    }
+    
+    // MARK: - Organization and Validation
+    
+    /// Print file organization for debugging
+    static func printFileOrganization() {
+        let (ctFiles, rtStructFiles, allFiles) = discoverDICOMFiles()
+        
+        print("📁 DICOM File Organization:")
+        print("   📊 Total files: \(allFiles.count)")
+        print("   🩻 CT images: \(ctFiles.count)")
+        print("   📋 RTStruct files: \(rtStructFiles.count)")
+        
+        if !ctFiles.isEmpty {
+            print("   📄 CT files:")
+            for file in ctFiles.prefix(5) {
+                print("      - \(file.lastPathComponent)")
+            }
+            if ctFiles.count > 5 {
+                print("      ... and \(ctFiles.count - 5) more")
+            }
+        }
+        
+        if !rtStructFiles.isEmpty {
+            print("   📋 RTStruct files:")
+            for file in rtStructFiles {
+                print("      - \(file.lastPathComponent)")
+            }
+        }
+    }
+    
+    /// Organize files into datasets
+    static func organizeDatasets() -> [String: DICOMFileSet] {
+        let fileSet = createDICOMFileSet()
+        return [fileSet.datasetName: fileSet]
+    }
+    
+    /// Validation result structure
+    struct ValidationResult {
+        let isValid: Bool
+        let issues: [String]
+    }
+    
+    /// Validate a dataset
+    static func validateDataset(_ dataset: DICOMFileSet) -> ValidationResult {
         var issues: [String] = []
         
-        // Check for CT files
-        if dataset.ctFiles.isEmpty {
-            issues.append("No CT image files found")
-        } else if dataset.ctFiles.count < 20 {
-            issues.append("Suspiciously few CT slices (\(dataset.ctFiles.count))")
+        // Check if we have CT files
+        guard !dataset.ctFiles.isEmpty else {
+            let issue = "No CT files found"
+            print("❌ Dataset validation failed: \(issue)")
+            return ValidationResult(isValid: false, issues: [issue])
         }
         
-        // Check for RTStruct files
-        if dataset.rtStructFiles.isEmpty {
-            issues.append("No RTStruct files found")
-        } else if dataset.rtStructFiles.count > 5 {
-            issues.append("Many RTStruct files found (\(dataset.rtStructFiles.count))")
+        // Validate CT files are readable
+        for ctFile in dataset.ctFiles.prefix(3) {
+            if !isValidDICOMFile(ctFile) {
+                let issue = "Invalid CT file \(ctFile.lastPathComponent)"
+                issues.append(issue)
+            }
         }
         
-        // Check file accessibility
-        for file in dataset.ctFiles + dataset.rtStructFiles {
-            if !FileManager.default.fileExists(atPath: file.path) {
-                issues.append("File not accessible: \(file.lastPathComponent)")
+        // Validate RTStruct files if present
+        for rtFile in dataset.rtStructFiles {
+            if !isValidDICOMFile(rtFile) {
+                let issue = "Invalid RTStruct file \(rtFile.lastPathComponent)"
+                issues.append(issue)
             }
         }
         
         let isValid = issues.isEmpty
-        return (isValid, issues)
-    }
-    
-    // MARK: - Debugging and Information
-    
-    /// Print detailed file organization information
-    static func printFileOrganization() {
-        print("\n📋 ===========================================")
-        print("📋 DICOM File Organization Report")
-        print("📋 ===========================================\n")
-        
-        let datasets = organizeDatasets()
-        
-        for (key, dataset) in datasets {
-            print("📁 Dataset: \(dataset.datasetName) (\(key))")
-            print("   🩻 CT Files: \(dataset.ctFiles.count)")
-            
-            for (index, file) in dataset.ctFiles.prefix(3).enumerated() {
-                print("      \(index + 1). \(file.lastPathComponent)")
-            }
-            if dataset.ctFiles.count > 3 {
-                print("      ... and \(dataset.ctFiles.count - 3) more CT files")
-            }
-            
-            print("   📊 RTStruct Files: \(dataset.rtStructFiles.count)")
-            for file in dataset.rtStructFiles {
-                print("      - \(file.lastPathComponent)")
-            }
-            
-            let validation = validateDataset(dataset)
-            if validation.isValid {
-                print("   ✅ Dataset validation: PASSED")
-            } else {
-                print("   ⚠️  Dataset validation issues:")
-                for issue in validation.issues {
-                    print("      - \(issue)")
-                }
-            }
-            
-            print("")
+        if isValid {
+            print("✅ Dataset validation passed: \(dataset.datasetName)")
+        } else {
+            print("❌ Dataset validation failed with \(issues.count) issues")
         }
         
-        print("📋 ===========================================\n")
-    }
-    
-    // MARK: - Migration Helper
-    
-    /// Helper for migrating from old file discovery method
-    static func migrateFromLegacyFileDiscovery() -> [URL] {
-        print("🔄 Migrating from legacy file discovery to filtered approach...")
-        
-        let ctFiles = getCTImageFiles()
-        
-        print("   📊 Legacy method would have found: \(getAllDICOMFiles().count) files")
-        print("   🎯 Filtered method found: \(ctFiles.count) CT files")
-        print("   ✅ Migration complete - using CT files only for volume reconstruction")
-        
-        return ctFiles
+        return ValidationResult(isValid: isValid, issues: issues)
     }
 }
 
-// MARK: - Backwards Compatibility Extensions
-
-extension DICOMTestManager {
-    
-    /// Updated getDICOMFiles method with filtering
-    static func getDICOMFilesFiltered() -> [URL] {
-        return DICOMFileManager.getCTImageFiles()
-    }
-}
+// MARK: - Extensions for Integration
 
 extension DICOMViewerViewModel {
     
