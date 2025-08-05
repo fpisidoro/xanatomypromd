@@ -914,6 +914,181 @@ public class MinimalRTStructParser {
         
         return coordinates.count >= 6 && coordinates.count % 3 == 0 ? coordinates : nil
     }
+    
+    // MARK: - CRITICAL FIX: Missing parseContourCoordinatesWithAllMethods function
+    private static func parseContourCoordinatesWithAllMethods(_ data: Data) -> [Float]? {
+        print("             🔍 Parsing contour coordinates from \(data.count) bytes...")
+        
+        // Method 1: Try as DICOM Decimal String (DS) format with backslash separators
+        if let coordinates = parseAsDecimalString(data) {
+            print("             ✅ SUCCESS: Parsed as decimal string format (\(coordinates.count/3) points)")
+            return coordinates
+        }
+        
+        // Method 2: Try as binary floats
+        if let coordinates = parseAsBinaryFloats(data) {
+            print("             ✅ SUCCESS: Parsed as binary floats (\(coordinates.count/3) points)")
+            return coordinates
+        }
+        
+        // Method 3: Try as space-separated decimals
+        if let coordinates = parseAsSpaceSeparatedDecimals(data) {
+            print("             ✅ SUCCESS: Parsed as space-separated decimals (\(coordinates.count/3) points)")
+            return coordinates
+        }
+        
+        // Debug: Show what we couldn't parse
+        print("             ❌ FAILED to parse coordinates from \(data.count) bytes")
+        if data.count < 200 {
+            let hex = data.prefix(min(50, data.count)).map { String(format: "%02X", $0) }.joined(separator: " ")
+            print("             🔍 Hex data: \(hex)")
+            
+            if let string = String(data: data, encoding: .ascii) {
+                print("             🔍 ASCII: \"\(string.prefix(100))\"")
+            }
+        }
+        
+        return nil
+    }
+    
+    // MARK: - Missing Helper Functions for Undefined Length Parsing
+    private static func findUndefinedLengthSequenceData(_ data: Data, startOffset: Int) -> Data {
+        var offset = startOffset
+        
+        while offset + 4 <= data.count {
+            let group = data.safeReadUInt16(at: offset)
+            let element = data.safeReadUInt16(at: offset + 2)
+            
+            // Found sequence delimiter (FFFE,E0DD)
+            if group == 0xFFFE && element == 0xE0DD {
+                return data.subdata(in: startOffset..<offset)
+            }
+            
+            offset += 2
+        }
+        
+        // If no delimiter found, return rest of data
+        return data.subdata(in: startOffset..<data.count)
+    }
+    
+    private static func findUndefinedLengthItemData(_ data: Data, startOffset: Int) -> Data {
+        var offset = startOffset
+        
+        while offset + 4 <= data.count {
+            let group = data.safeReadUInt16(at: offset)
+            let element = data.safeReadUInt16(at: offset + 2)
+            
+            // Found item delimiter (FFFE,E00D) or sequence delimiter (FFFE,E0DD)
+            if group == 0xFFFE && (element == 0xE00D || element == 0xE0DD) {
+                return data.subdata(in: startOffset..<offset)
+            }
+            
+            offset += 2
+        }
+        
+        // If no delimiter found, return rest of data
+        return data.subdata(in: startOffset..<data.count)
+    }
+    
+    private static func parseSequenceWithProperFFEHandling(_ data: Data) -> DICOMSequence {
+        print("       🔧 FIXED FFFE sequence parsing (\(data.count) bytes)...")
+        
+        var items: [DICOMSequenceItem] = []
+        var offset = 0
+        
+        while offset + 8 <= data.count {
+            let group = data.safeReadUInt16(at: offset)
+            let element = data.safeReadUInt16(at: offset + 2)
+            
+            // Found sequence item (FFFE,E000)
+            if group == 0xFFFE && element == 0xE000 {
+                let length = data.safeReadUInt32(at: offset + 4)
+                let itemStart = offset + 8
+                
+                let itemData: Data
+                if length == 0xFFFFFFFF {
+                    // Undefined length - find delimiter
+                    itemData = findUndefinedLengthItemData(data, startOffset: itemStart)
+                    offset = itemStart + itemData.count + 8 // Skip delimiter
+                } else if length > 0 && itemStart + Int(length) <= data.count {
+                    itemData = data.subdata(in: itemStart..<itemStart + Int(length))
+                    offset = itemStart + Int(length)
+                } else {
+                    offset += 2
+                    continue
+                }
+                
+                // Parse elements within this item
+                let (elements, nestedSequences) = parseElementsInItem(itemData)
+                
+                let item = DICOMSequenceItem(
+                    data: itemData,
+                    elements: elements,
+                    nestedSequences: nestedSequences
+                )
+                
+                items.append(item)
+                print("       📦 Parsed item: \(elements.count) elements, \(nestedSequences.count) nested sequences")
+                
+            } else if group == 0xFFFE && element == 0xE0DD {
+                // Sequence delimiter - end
+                print("       ✅ FIXED sequence parsing: \(items.count) items")
+                break
+            } else {
+                offset += 2
+            }
+        }
+        
+        if items.isEmpty {
+            print("       ⚠️ No sequence items found in \(data.count) bytes")
+        }
+        
+        return DICOMSequence(items: items)
+    }
+    
+    private static func parseElementsInItem(_ data: Data) -> ([DICOMTag: Data], [DICOMTag: DICOMSequence]) {
+        var elements: [DICOMTag: Data] = [:]
+        var nestedSequences: [DICOMTag: DICOMSequence] = [:]
+        var offset = 0
+        
+        while offset + 8 <= data.count {
+            let group = data.safeReadUInt16(at: offset)
+            let element = data.safeReadUInt16(at: offset + 2)
+            let tag = DICOMTag(group: group, element: element)
+            
+            // Skip FFFE tags (they are delimiters, not data)
+            if group == 0xFFFE {
+                offset += 8
+                continue
+            }
+            
+            let length = data.safeReadUInt32(at: offset + 4)
+            let valueOffset = offset + 8
+            
+            if length == 0xFFFFFFFF {
+                // Undefined length sequence
+                let sequenceData = findUndefinedLengthSequenceData(data, startOffset: valueOffset)
+                let sequence = parseSequenceWithProperFFEHandling(sequenceData)
+                nestedSequences[tag] = sequence
+                
+                // Move past the sequence and its delimiter
+                offset = valueOffset + sequenceData.count + 8
+                print("         📦 Found nested sequence (\(String(format: \"%04X,%04X\", group, element))) with \(sequence.items.count) items")
+                
+            } else if length > 0 && valueOffset + Int(length) <= data.count {
+                // Regular element with defined length
+                let elementData = data.subdata(in: valueOffset..<valueOffset + Int(length))
+                elements[tag] = elementData
+                offset = valueOffset + Int(length)
+                
+            } else {
+                // Invalid or zero-length element
+                offset += 8
+            }
+        }
+        
+        return (elements, nestedSequences)
+    }
 
     // MARK: - Parse Individual Contour
     private static func parseIndividualContour(_ contourItem: DICOMSequenceItem, index: Int) -> SimpleContour? {
