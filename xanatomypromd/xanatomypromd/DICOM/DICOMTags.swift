@@ -78,6 +78,11 @@ extension DICOMTag {
     
     // Frame of Reference
     public static let frameOfReferenceUID = DICOMTag(group: 0x0020, element: 0x0052)
+    
+    // RTStruct-Specific Tags
+    public static let structureSetName = DICOMTag(group: 0x3006, element: 0x0002)
+    public static let structureSetROISequence = DICOMTag(group: 0x3006, element: 0x0020)
+    public static let roiContourSequence = DICOMTag(group: 0x3006, element: 0x0039)
 }
 
 // MARK: - Tag Groups for Filtering

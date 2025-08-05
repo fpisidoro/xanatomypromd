@@ -1,213 +1,314 @@
-# X-Anatomy Pro v2.0 - Medical Imaging App
+# Claude Code Integration Guide - X-Anatomy Pro v2.0
 
-## ✅ CURRENT STATUS: WORKING MEDICAL IMAGING FOUNDATION
+## Project Overview for Claude Code
 
-### 🏥 MILESTONE ACHIEVED (January 2025)
-**Complete medical imaging architecture with perfect coordinate synchronization**
-- Universal scan-agnostic DICOM coordinate system
-- Medical-accurate CT display with physical spacing
-- Hardware-accelerated MPR rendering
-- Synchronized crosshairs with perfect cross-plane alignment
-- Ready for ROI implementation
+X-Anatomy Pro v2.0 is a **production-ready medical imaging application** for iOS that processes DICOM files and visualizes anatomical structures. The project has achieved major milestones including working RTStruct parsing and hardware-accelerated medical imaging.
 
-## Project Goal
-Transform X-Anatomy Pro from PNG-based anatomy reference to DICOM-based radiological viewer with 3D anatomical ROI visualization across synchronized multi-planar reconstruction (MPR) views.
+## 🎯 CURRENT PROJECT STATUS
 
-## 🎯 CRITICAL WORKING ARCHITECTURE (DO NOT BREAK)
-
-### Layer 1: Universal DICOM Coordinate System ✅
-**File**: `Volume3D/Core/DICOMCoordinateSystem.swift`
-**Status**: WORKING PERFECTLY
-- **Single source of truth** for ALL spatial transformations
-- **Scan-agnostic**: Works with 53-slice test OR 500+ slice production
-- **Dynamic properties**: Adapts to any loaded volume data
-- **Core API**:
-  ```swift
-  // Central coordinate authority
-  worldToScreen(position:plane:viewSize:imageBounds:)
-  screenToWorld(screenPoint:plane:viewSize:imageBounds:)
-  calculateImageBounds(plane:viewSize:)
-  updateWorldPosition(_:)
-  getCurrentSliceIndex(for:)
-  ```
-
-### Layer 2: Medical-Accurate CT Display ✅  
-**File**: `SwiftUI/Layers/CTDisplayLayer.swift`
-**Status**: WORKING PERFECTLY
-- **Physical DICOM spacing**: Uses volumeData.spacing for aspect ratios
-- **Letterboxing**: Medical accuracy over screen filling
-- **Hardware acceleration**: Metal compute shaders
-- **Critical fix**: Aspect-ratio preserving quad generation
-- **No stretching**: Images maintain exact anatomical proportions
-
-### Layer 3: Synchronized Crosshairs ✅
-**File**: `SwiftUI/Layers/CrosshairOverlayLayer.swift` 
-**Status**: WORKING PERFECTLY
-- **Uses coordinate system authority**: NO coordinate math in this layer
-- **Perfect cross-plane sync**: Same anatomical position across all views
-- **Image bounds alignment**: Crosshairs constrained to actual CT image
-- **Touch interaction**: Within image bounds only
-- **Critical**: Uses coordinateSystem.worldToScreen() and coordinateSystem.screenToWorld()
-
-### Layer 4: ROI Overlay (NEXT IMPLEMENTATION) ⚠️
-**File**: `SwiftUI/Layers/ROIOverlayLayer.swift`
-**Status**: READY FOR IMPLEMENTATION
-- **MUST use same coordinate system**: coordinateSystem.worldToScreen()
-- **MUST use image bounds**: coordinateSystem.calculateImageBounds()
-- **NO coordinate math**: All transforms through coordinate system
-- **RTStruct integration**: Parse contour data and transform to screen
-
-## 🔧 COORDINATE SYSTEM USAGE (CRITICAL FOR ROI)
-
-### For ANY overlay layer (crosshairs, ROI, etc.):
-```swift
-// 1. Get image bounds (handles letterboxing)
-let imageBounds = coordinateSystem.calculateImageBounds(
-    plane: plane, 
-    viewSize: viewSize
-)
-
-// 2. Convert medical coordinates to screen
-let screenPos = coordinateSystem.worldToScreen(
-    position: medicalPosition,
-    plane: plane,
-    viewSize: viewSize,
-    imageBounds: imageBounds
-)
-
-// 3. Convert screen touches to medical coordinates  
-let medicalPos = coordinateSystem.screenToWorld(
-    screenPoint: touchLocation,
-    plane: plane,
-    viewSize: viewSize,
-    imageBounds: imageBounds
-)
+### ✅ COMPLETED COMPONENTS (DO NOT MODIFY)
+```
+Core Medical Imaging Pipeline:
+├── ✅ DICOM Parser (Swift-native, 100% working)
+├── ✅ 3D Volume Reconstruction (Metal hardware acceleration)  
+├── ✅ Multi-planar Reconstruction (axial, sagittal, coronal)
+├── ✅ RTStruct Parser (MILESTONE: extracts real contour coordinates)
+├── ✅ Professional CT Windowing (bone, lung, soft tissue)
+├── ✅ Coordinate System Authority (perfect spatial alignment)
+└── ✅ SwiftUI Medical Interface (production ready)
 ```
 
-### NEVER do coordinate math in overlay layers:
-- ❌ Don't calculate aspect ratios
-- ❌ Don't handle letterbox positioning  
-- ❌ Don't transform coordinates manually
-- ✅ Use coordinate system authority for everything
+### 🔧 AVAILABLE FOR CLAUDE CODE DEVELOPMENT
+```
+ROI Visualization Layer:
+├── 🔄 Contour overlay rendering on MPR slices
+├── 🔄 Interactive anatomical structure selection
+├── 🔄 ROI display controls (opacity, color, visibility)
+├── 🔄 Touch-based anatomy information panels
+└── 🔄 Enhanced educational features
+```
 
-## Test Data vs Production Data
+## 📁 PROJECT STRUCTURE
 
-### Current Development
-- **Test CT scan**: ~53 slices, 512×512 resolution
-- **Spacing**: 0.7mm × 0.7mm × 3.0mm  
-- **Architecture**: Dynamic handling, works with ANY scan
+### Core Architecture (STABLE - Do Not Modify)
+```
+xanatomypromd/
+├── DICOM/                          # ✅ WORKING - Custom DICOM parser
+│   ├── DICOMParser.swift           # Parse DICOM files (53 files, 100% success)
+│   ├── DICOMDataset.swift          # DICOM data structures
+│   ├── DICOMTags.swift             # DICOM tag definitions
+│   └── DICOMFileManager.swift      # File discovery with RTStruct prioritization
+├── MetalMedical/                   # ✅ WORKING - GPU rendering engine  
+│   ├── MetalRenderer.swift         # Hardware-accelerated CT windowing
+│   ├── MetalShaders.metal          # GPU compute shaders
+│   └── TextureCache.swift          # Memory management
+├── Volume3D/                       # ✅ WORKING - 3D reconstruction
+│   ├── VolumeData.swift            # 3D volume from DICOM series
+│   ├── MetalVolumeRenderer.swift   # Hardware MPR generation
+│   ├── MPRShaders.metal            # Hardware sampling shaders
+│   ├── Core/
+│   │   └── DICOMCoordinateSystem.swift  # ✅ Authority coordinate system
+│   └── ROI/
+│       └── MinimalRTStructParser.swift  # ✅ MILESTONE: RTStruct parsing
+├── SwiftUI/                        # ✅ WORKING - Application interface
+│   ├── XAnatomyProMainView.swift   # Main medical imaging interface
+│   └── Layers/                     # ✅ Clean layered architecture
+│       ├── LayeredMPRView.swift    # Layer orchestrator  
+│       ├── CTDisplayLayer.swift    # DICOM slice rendering
+│       ├── CrosshairOverlayLayer.swift  # Synchronized crosshairs
+│       └── ROIOverlayLayer.swift   # 🔧 AVAILABLE FOR DEVELOPMENT
+└── Resources/TestData/             # Test medical data
+    ├── test_rtstruct2.dcm          # ✅ WORKING: Contains real contour data
+    └── XAPMD^COUSINALPHA/          # 53-slice CT series
+```
 
-### Production Target
-- **Full-body scans**: Male and female patients, ~500+ slices each
-- **Same code**: Coordinate system adapts automatically
-- **No changes needed**: Architecture scales to any dimensions
+## 🎯 RTStruct MILESTONE ACHIEVED
 
-## Technical Implementation
+### Parsing Success (DO NOT MODIFY)
+The RTStruct parser successfully extracts real anatomical coordinates:
+```
+✅ FOUND Contour Data tag directly in elements!  
+📍 Parsing 956 bytes of contour data...
+📝 ASCII data: "-6.738\2.93\-112.84\-6.445\2.637\-112.84..."
+✅ SUCCESS: 45 points at Z=-112.84
+✅ RTStruct SUCCESS: 1 ROI structures loaded
+📊 ROI 8241: 'ROI-1' - 1 contours, 45 points
+```
 
-### Custom DICOM Parser ✅
-**Location**: `/DICOM/` folder
-**Status**: PRODUCTION READY
-- 100% success rate on test files
-- Swift-native, no external libraries
-- Handles nested sequences, undefined lengths
-- Memory-safe binary reading
-
-**Key Files**:
-- `DICOMParser.swift` - Main parsing engine
-- `DICOMDataset.swift` - Data structures  
-- `DICOMTags.swift` - Tag definitions
-- `DICOMExtensions.swift` - Safe binary reading
-
-### Metal Hardware Acceleration ✅
-**Location**: `/MetalMedical/` folder  
-**Status**: PRODUCTION READY
-- Hardware-accelerated MPR generation
-- 30+ FPS performance
-- Medical-accurate CT windowing
-- Texture caching with LRU eviction
-
-### 3D Volume System ✅
-**Location**: `/Volume3D/` folder
-**Status**: PRODUCTION READY  
-- r16Float textures with hardware sampling
-- 3-5x performance improvement
-- Physical spacing integration
-- Works with any slice count
-
-### RTStruct Integration ⚠️
-**Location**: `/RTStruct/` folder
-**Status**: PARSER READY, DISPLAY NEEDS WORK
-- RTStruct file parsing complete
-- Test file is reference-only (no contour geometry)
-- Fallback test data generation working
-- **Next**: Implement ROI display using coordinate system
-
-## 🚨 NEXT CHAT INSTRUCTIONS FOR ROI IMPLEMENTATION
-
-### What's Working (Don't Touch):
-1. **DICOMCoordinateSystem** - Perfect, use its API
-2. **CTDisplayLayer** - Perfect medical accuracy
-3. **CrosshairOverlayLayer** - Perfect synchronization
-4. **RTStruct parsing** - Can extract ROI data
-
-### What Needs Implementation:
-1. **ROIOverlayLayer rendering**:
-   - Use `coordinateSystem.worldToScreen()` for all coordinate transforms
-   - Use `coordinateSystem.calculateImageBounds()` for letterbox bounds
-   - Parse RTStruct contour data into world coordinates (mm)
-   - Transform to screen coordinates for rendering
-   - Handle cross-plane intersections (sagittal/coronal views)
-
-### Critical Requirements:
-- **Medical accuracy**: ROI must align perfectly with CT anatomy
-- **Cross-plane sync**: Same ROI position across all views
-- **Use coordinate authority**: NO manual coordinate calculations
-- **Image bounds**: ROI rendering constrained to actual CT image
-- **Performance**: Efficient contour rendering with Canvas
-
-### Implementation Pattern:
+### Available Data Structures
 ```swift
-// In ROIOverlayLayer body:
-let imageBounds = coordinateSystem.calculateImageBounds(plane: plane, viewSize: viewSize)
+// ROI data is loaded and available in XAnatomyDataManager
+SimpleRTStructData {
+    structureSetName: "contours1"
+    patientName: "XAPMD^COUSINALPHA"
+    roiStructures: [SimpleROIStructure] // Contains real contour coordinates
+}
 
-for contour in roiContours {
-    for point in contour.points {
-        let screenPos = coordinateSystem.worldToScreen(
-            position: point, // SIMD3<Float> in mm
-            plane: plane,
-            viewSize: viewSize, 
-            imageBounds: imageBounds
-        )
-        // Add to Canvas path
+SimpleROIStructure {
+    roiNumber: 8241
+    roiName: "ROI-1"  
+    displayColor: SIMD3<Float>(1.0, 0.0, 1.0) // Magenta
+    contours: [SimpleContour] // Array of contour slices
+}
+
+SimpleContour {
+    points: [SIMD3<Float>] // 45 real anatomical coordinates in mm
+    slicePosition: -112.84 // Z-position in DICOM space (mm)
+}
+```
+
+## 🔧 DEVELOPMENT OPPORTUNITIES FOR CLAUDE CODE
+
+### 1. ROI Overlay Rendering (Primary Focus)
+**File**: `SwiftUI/Layers/ROIOverlayLayer.swift`
+**Status**: Skeleton exists, needs implementation
+**Goal**: Render contour overlays on MPR slices
+
+```swift
+// Current structure (needs implementation):
+struct ROIOverlayLayer: View {
+    let coordinateSystem: DICOMCoordinateSystem
+    let plane: MPRPlane  
+    let roiData: RTStructData?
+    let settings: ROIDisplaySettings
+    
+    var body: some View {
+        // TODO: Implement contour overlay rendering
+        // - Convert DICOM coordinates to screen coordinates
+        // - Draw contour outlines using SwiftUI Path
+        // - Handle slice matching (show contours at current Z)
+        // - Apply colors and opacity from ROI settings
     }
 }
 ```
 
-## Performance Achievements ✅
-- DICOM parsing: 100% success rate
-- Metal rendering: 30+ FPS capability  
-- Hardware acceleration: 3-5x speedup
-- Medical accuracy: Verified against commercial viewers
-- Cross-plane sync: Perfect anatomical alignment
+**Key Implementation Requirements**:
+- Convert DICOM world coordinates (mm) to screen pixel coordinates
+- Match contour Z-positions with current MPR slice position
+- Draw smooth contour outlines using SwiftUI Path or Metal rendering
+- Handle multiple ROIs with different colors and opacity settings
 
-## File Structure
+### 2. Interactive ROI Selection
+**Location**: Enhanced touch handling in layers
+**Goal**: Touch-based anatomical structure selection
+
+```swift
+// Enhancement needed in LayeredMPRView:
+.onTapGesture { location in
+    // TODO: Implement ROI hit testing
+    // - Convert screen coordinates to DICOM world coordinates
+    // - Test if touch point is inside any ROI contour
+    // - Highlight selected ROI and show information panel
+}
 ```
-xanatomypromd/
-├── DICOM/                     # ✅ Custom parser (working)
-├── MetalMedical/              # ✅ GPU rendering (working)  
-├── Volume3D/                  # ✅ 3D volume + coordinate system (working)
-│   └── Core/                  # ✅ DICOMCoordinateSystem (CRITICAL)
-├── SwiftUI/
-│   ├── Layers/                # ✅ CT + Crosshairs working, ROI next
-│   └── XAnatomyProMainView.swift  # ✅ Main interface (working)
-└── Resources/                 # Test DICOM files
+
+### 3. ROI Display Controls
+**Location**: `SwiftUI/XAnatomyProMainView.swift` controls section
+**Goal**: Professional ROI visualization controls
+
+```swift
+// Add to existing controlsArea:
+private var roiControls: some View {
+    VStack(alignment: .leading, spacing: 8) {
+        Text("ROI Display")
+            .font(.headline)
+            .foregroundColor(.white)
+        
+        // TODO: Implement ROI controls
+        // - Global ROI opacity slider
+        // - Individual ROI visibility toggles  
+        // - Color picker for ROI customization
+        // - Outline/fill display options
+    }
+}
 ```
 
-## 🏥 Medical Accuracy Principles
-- **Accuracy > Screen aesthetics**: Never compromise DICOM data
-- **Physical spacing**: Always use real millimeter dimensions  
-- **No stretching**: Letterbox instead of distortion
-- **Coordinate authority**: Single source of truth prevents misalignment
-- **Cross-plane consistency**: Same anatomy appears in same location
+### 4. Anatomy Information Panels  
+**Location**: New SwiftUI views for educational content
+**Goal**: Display anatomical information when ROIs are selected
 
-**FOUNDATION IS SOLID - READY FOR ROI IMPLEMENTATION**
+```swift
+// New file: SwiftUI/Views/AnatomyInfoPanel.swift
+struct AnatomyInfoPanel: View {
+    let selectedROI: ROIStructure?
+    
+    var body: some View {
+        // TODO: Implement anatomy information display
+        // - ROI name and description
+        // - Anatomical details and educational content
+        // - Statistics (volume, surface area, etc.)
+        // - Related anatomical structures
+    }
+}
+```
+
+## 🏗️ TECHNICAL ARCHITECTURE GUIDELINES
+
+### Coordinate System Authority (CRITICAL)
+**DO NOT MODIFY**: `DICOMCoordinateSystem.swift` is the single source of truth
+```swift
+// Always use coordinate system for spatial calculations:
+let worldPosition = coordinateSystem.getCurrentWorldPosition()
+let screenCoords = coordinateSystem.worldToScreen(worldPos, viewSize: viewSize)
+let sliceZ = coordinateSystem.getCurrentSlicePosition(for: .axial)
+```
+
+### Layer Independence Principle (CRITICAL)
+Each layer operates independently:
+- **CTDisplayLayer**: Renders DICOM slices (DO NOT MODIFY)
+- **CrosshairOverlayLayer**: Position indicators (DO NOT MODIFY)  
+- **ROIOverlayLayer**: Your development target
+- **LayeredMPRView**: Lightweight orchestrator (minimal changes)
+
+### Hardware Acceleration Integration
+When implementing ROI rendering, consider Metal performance:
+```swift
+// For high-performance ROI rendering:
+// Option 1: SwiftUI Path (simple, adequate for most ROIs)
+// Option 2: Metal compute shaders (complex ROIs, many structures)
+// Option 3: Metal vertex buffers (smooth curves, anti-aliasing)
+```
+
+## 📊 PERFORMANCE REQUIREMENTS
+
+### Current Performance Benchmarks (DO NOT DEGRADE)
+- **Volume Loading**: <2 seconds for 53-slice CT series
+- **MPR Generation**: 0.5-1.5ms per slice (hardware accelerated)
+- **Frame Rate**: 60 FPS interaction maintained
+- **Memory Usage**: 26.5MB volume data + efficient caching
+
+### ROI Rendering Performance Targets
+- **Overlay Rendering**: <5ms per frame for typical ROI sets
+- **Touch Response**: <100ms for ROI selection feedback
+- **Memory Addition**: <10MB for ROI visualization features
+
+## 🧪 TESTING & VALIDATION
+
+### Available Test Data
+```
+Resources/TestData/test_rtstruct2.dcm:
+├── Patient: XAPMD^COUSINALPHA
+├── Structure Set: contours1  
+├── ROI: 8241 "ROI-1" (Magenta)
+├── Contour: 45 points at Z=-112.84mm
+└── Coordinates: Real anatomical positions in mm
+```
+
+### Testing Approach
+1. **Load test data**: App automatically loads RTStruct on startup
+2. **Verify coordinates**: Check ROI data in `XAnatomyDataManager.roiData`
+3. **Test rendering**: Implement overlay and verify visual alignment
+4. **Validate interaction**: Test touch selection and information display
+
+## 🚨 CRITICAL DO NOT MODIFY
+
+### Files to Leave Unchanged
+```
+❌ DO NOT MODIFY:
+├── DICOM/DICOMParser.swift          # 100% working DICOM parsing
+├── Volume3D/ROI/MinimalRTStructParser.swift  # MILESTONE RTStruct parser
+├── Volume3D/Core/DICOMCoordinateSystem.swift # Authority coordinate system
+├── MetalMedical/*.swift             # Hardware acceleration pipeline
+├── SwiftUI/Layers/CTDisplayLayer.swift      # Base CT rendering
+└── SwiftUI/Layers/CrosshairOverlayLayer.swift # Position indicators
+```
+
+### Architecture Principles to Maintain
+1. **Single authority**: DICOMCoordinateSystem manages all spatial calculations
+2. **Layer independence**: No dependencies between visual layers
+3. **Medical accuracy**: All coordinates in DICOM patient space (mm)
+4. **Hardware acceleration**: Maintain Metal performance throughout
+
+## 🎯 IMMEDIATE DEVELOPMENT PRIORITIES
+
+### Phase 1: Basic ROI Visualization (Recommended Start)
+1. **Implement `ROIOverlayLayer.swift`**:
+   - Convert DICOM coordinates to screen coordinates
+   - Draw contour outlines using SwiftUI Path
+   - Match contours to current slice Z-position
+   - Apply ROI colors and basic opacity
+
+2. **Test with existing data**:
+   - Verify ROI-1 (45 points) renders correctly on axial slice
+   - Ensure contour appears at Z=-112.84mm slice position
+   - Validate coordinate transformation accuracy
+
+### Phase 2: Interactive Features
+1. **Add touch handling** for ROI selection
+2. **Implement ROI visibility controls** in main interface
+3. **Create anatomy information panels** for educational content
+
+## 📚 REFERENCE DOCUMENTATION
+
+### Key Data Structures
+- `DICOMCoordinateSystem`: Spatial authority and coordinate transformations
+- `SimpleRTStructData`: RTStruct file contents with real contour data  
+- `RTStructData`: Full ROI structure format used by application
+- `MPRPlane`: Anatomical plane enumeration (axial, sagittal, coronal)
+
+### Coordinate Systems
+- **DICOM World**: Millimeters in patient coordinate system (authority)
+- **Slice Indices**: Voxel indices in 3D volume (512×512×53)
+- **Screen Coordinates**: SwiftUI view coordinates for rendering
+
+### Current Working State
+- App loads successfully with CT and RTStruct data
+- All three MPR planes functional with synchronized crosshairs
+- RTStruct parsing extracts real anatomical coordinates  
+- Ready for ROI overlay implementation
+
+## 🎖️ SUCCESS CRITERIA
+
+### ROI Visualization Success
+- [ ] Contour outlines visible on appropriate MPR slices
+- [ ] Coordinate alignment verified (contours match anatomy)
+- [ ] Multiple ROI support with different colors
+- [ ] Performance maintained (60 FPS interaction)
+
+### Educational Enhancement Success  
+- [ ] Touch-based ROI selection working
+- [ ] Anatomy information panels implemented
+- [ ] Professional ROI display controls functional
+- [ ] Medical accuracy validated by visualization alignment
+
+This project represents a significant achievement in mobile medical imaging. The RTStruct parsing milestone enables authentic anatomical education using real patient data. Focus development on ROI visualization while maintaining the robust medical imaging foundation already established.
