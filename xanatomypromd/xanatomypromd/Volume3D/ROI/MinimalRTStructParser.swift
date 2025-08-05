@@ -243,63 +243,83 @@ public class MinimalRTStructParser {
                 // DEBUG: Look for ANY DICOM tags in this item
                 print("               🔎 No (3006,0050) found. Scanning for any DICOM tags...")
                 
-                for i in stride(from: 0, to: data.count - 4, by: 2) { // DICOM tags are on even boundaries
-                    // Safe aligned reading
-                    if i % 4 == 0 && i + 4 <= data.count {
-                        let tag = data.withUnsafeBytes { bytes in
-                            bytes.load(fromByteOffset: i, as: UInt32.self)
+                // Scan every 2 bytes for DICOM tags (they can start at any even offset)
+                for i in stride(from: 0, to: data.count - 4, by: 2) {
+                    if i + 4 <= data.count {
+                        // Read potential tag
+                        let tagBytes = data.subdata(in: i..<i+4)
+                        let tag = tagBytes.withUnsafeBytes { bytes in
+                            bytes.load(as: UInt32.self)
                         }
                         
                         // Check if this looks like a valid DICOM tag
                         let group = UInt16(tag & 0xFFFF)
                         let element = UInt16((tag >> 16) & 0xFFFF)
                         
-                        if group > 0 && group < 0x7FFF && element < 0x7FFF {
-                            print("                 🏷️ Found tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) at offset \(i)")
+                        // Focus on group 3006 tags (RTStruct related)
+                        if group == 0x3006 {
+                            print("                 🏷️ Found RTStruct tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) at offset \(i)")
                             
-                            // Check if this is a contour sequence or contour data tag
-                            if group == 0x3006 {
-                                if element == 0x0040 {
-                                    print("                   📦 This is Contour Sequence (3006,0040)! Parsing nested contours...")
+                            if element == 0x0040 {
+                                print("                   📦 FOUND Contour Sequence (3006,0040)! Parsing nested contours...")
+                                
+                                // Parse the nested contour sequence
+                                if i + 8 <= data.count {
+                                    let lengthBytes = data.subdata(in: (i+4)..<(i+8))
+                                    let length = lengthBytes.withUnsafeBytes { bytes in
+                                        bytes.load(as: UInt32.self)
+                                    }
                                     
-                                    // Parse the nested contour sequence
-                                    if i + 8 <= data.count {
-                                        let length = data.withUnsafeBytes { bytes in
-                                            bytes.load(fromByteOffset: i + 4, as: UInt32.self)
-                                        }
+                                    let nestedStart = i + 8
+                                    var nestedEnd: Int
+                                    
+                                    if length == 0xFFFFFFFF {
+                                        // Find delimiter for undefined length
+                                        nestedEnd = findSequenceDelimiter(in: data, startingAt: nestedStart) ?? data.count
+                                        print("                     🔄 Undefined length nested sequence, delimiter at \(nestedEnd)")
+                                    } else {
+                                        nestedEnd = nestedStart + Int(length)
+                                        print("                     📏 Defined length nested sequence: \(length) bytes")
+                                    }
+                                    
+                                    if nestedEnd <= data.count && nestedStart < nestedEnd {
+                                        let nestedSequenceData = data.subdata(in: nestedStart..<nestedEnd)
+                                        print("                     🔄 Parsing nested sequence (\(nestedSequenceData.count) bytes)...")
                                         
-                                        let nestedStart = i + 8
-                                        var nestedEnd: Int
+                                        // Recursively parse this nested sequence for contour data
+                                        let nestedContours = parseROIContourSequenceForAllContours(nestedSequenceData)
+                                        contours.append(contentsOf: nestedContours)
                                         
-                                        if length == 0xFFFFFFFF {
-                                            // Find delimiter for undefined length
-                                            nestedEnd = findSequenceDelimiter(in: data, startingAt: nestedStart) ?? data.count
-                                        } else {
-                                            nestedEnd = nestedStart + Int(length)
-                                        }
-                                        
-                                        if nestedEnd <= data.count {
-                                            let nestedSequenceData = data.subdata(in: nestedStart..<nestedEnd)
-                                            print("                     🔄 Parsing nested sequence (\(nestedSequenceData.count) bytes)...")
-                                            
-                                            // Recursively parse this nested sequence for contour data
-                                            let nestedContours = parseROIContourSequenceForAllContours(nestedSequenceData)
-                                            contours.append(contentsOf: nestedContours)
-                                            
-                                            if !nestedContours.isEmpty {
-                                                print("                     ✅ Found \(nestedContours.count) nested contours!")
-                                            }
+                                        if !nestedContours.isEmpty {
+                                            print("                     ✅ Found \(nestedContours.count) nested contours!")
                                         }
                                     }
-                                } else if element == 0x0050 {
-                                    print("                   ✅ This is Contour Data (3006,0050)! But we missed it earlier")
+                                }
+                                
+                            } else if element == 0x0050 {
+                                print("                   ✅ FOUND Contour Data (3006,0050)! Processing...")
+                                
+                                if i + 8 <= data.count {
+                                    let lengthBytes = data.subdata(in: (i+4)..<(i+8))
+                                    let length = lengthBytes.withUnsafeBytes { bytes in
+                                        bytes.load(as: UInt32.self)
+                                    }
+                                    
+                                    if length > 0 && length < 100000 && i + 8 + Int(length) <= data.count {
+                                        let contourDataRaw = data.subdata(in: (i + 8)..<(i + 8 + Int(length)))
+                                        
+                                        if let contour = parseContourDataDirectly(contourDataRaw) {
+                                            contours.append(contour)
+                                            print("                     ✅ Direct contour parsed: \(contour.points.count) points at Z=\(contour.slicePosition)")
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
                 
-                break // No contour data found in this item
+                break // No more contour data found in this item
             }
         }
         
