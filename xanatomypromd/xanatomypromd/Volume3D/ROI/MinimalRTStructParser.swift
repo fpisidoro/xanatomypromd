@@ -243,8 +243,9 @@ public class MinimalRTStructParser {
                 // DEBUG: Look for ANY DICOM tags in this item
                 print("               🔎 No (3006,0050) found. Scanning for any DICOM tags...")
                 
-                for i in 0..<(data.count - 4) {
-                    if i % 2 == 0 { // DICOM tags are on even boundaries
+                for i in stride(from: 0, to: data.count - 4, by: 2) { // DICOM tags are on even boundaries
+                    // Safe aligned reading
+                    if i % 4 == 0 && i + 4 <= data.count {
                         let tag = data.withUnsafeBytes { bytes in
                             bytes.load(fromByteOffset: i, as: UInt32.self)
                         }
@@ -255,6 +256,45 @@ public class MinimalRTStructParser {
                         
                         if group > 0 && group < 0x7FFF && element < 0x7FFF {
                             print("                 🏷️ Found tag (\(String(format: "%04X", group)),\(String(format: "%04X", element))) at offset \(i)")
+                            
+                            // Check if this is a contour sequence or contour data tag
+                            if group == 0x3006 {
+                                if element == 0x0040 {
+                                    print("                   📦 This is Contour Sequence (3006,0040)! Parsing nested contours...")
+                                    
+                                    // Parse the nested contour sequence
+                                    if i + 8 <= data.count {
+                                        let length = data.withUnsafeBytes { bytes in
+                                            bytes.load(fromByteOffset: i + 4, as: UInt32.self)
+                                        }
+                                        
+                                        let nestedStart = i + 8
+                                        var nestedEnd: Int
+                                        
+                                        if length == 0xFFFFFFFF {
+                                            // Find delimiter for undefined length
+                                            nestedEnd = findSequenceDelimiter(in: data, startingAt: nestedStart) ?? data.count
+                                        } else {
+                                            nestedEnd = nestedStart + Int(length)
+                                        }
+                                        
+                                        if nestedEnd <= data.count {
+                                            let nestedSequenceData = data.subdata(in: nestedStart..<nestedEnd)
+                                            print("                     🔄 Parsing nested sequence (\(nestedSequenceData.count) bytes)...")
+                                            
+                                            // Recursively parse this nested sequence for contour data
+                                            let nestedContours = parseROIContourSequenceForAllContours(nestedSequenceData)
+                                            contours.append(contentsOf: nestedContours)
+                                            
+                                            if !nestedContours.isEmpty {
+                                                print("                     ✅ Found \(nestedContours.count) nested contours!")
+                                            }
+                                        }
+                                    }
+                                } else if element == 0x0050 {
+                                    print("                   ✅ This is Contour Data (3006,0050)! But we missed it earlier")
+                                }
+                            }
                         }
                     }
                 }
