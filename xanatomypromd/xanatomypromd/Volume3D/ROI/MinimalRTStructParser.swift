@@ -197,6 +197,15 @@ public class MinimalRTStructParser {
         var offset = 0
         
         while offset < data.count - 8 {
+            // Ensure 4-byte alignment for UInt32 reads
+            if offset % 4 != 0 {
+                offset = (offset + 3) & ~3  // Round up to next 4-byte boundary
+            }
+            
+            if offset + 8 > data.count {
+                break
+            }
+            
             // Look for Item tag (FFFE,E000)
             let itemTag = data.withUnsafeBytes { bytes in
                 bytes.load(fromByteOffset: offset, as: UInt32.self)
@@ -214,12 +223,19 @@ public class MinimalRTStructParser {
                     var itemEnd = itemStart
                     
                     while itemEnd < data.count - 4 {
-                        let tag = data.withUnsafeBytes { bytes in
-                            bytes.load(fromByteOffset: itemEnd, as: UInt32.self)
+                        // Ensure 4-byte alignment for UInt32 read
+                        if itemEnd % 4 != 0 {
+                            itemEnd = (itemEnd + 3) & ~3  // Round up to next 4-byte boundary
                         }
                         
-                        if tag == 0xE00DFFFE { // Item Delimitation tag
-                            break
+                        if itemEnd + 4 <= data.count {
+                            let tag = data.withUnsafeBytes { bytes in
+                                bytes.load(fromByteOffset: itemEnd, as: UInt32.self)
+                            }
+                            
+                            if tag == 0xE00DFFFE { // Item Delimitation tag
+                                break
+                            }
                         }
                         itemEnd += 1
                     }
@@ -266,6 +282,15 @@ public class MinimalRTStructParser {
         // Scan for ROI Number (3006,0022) and ROI Name (3006,0026)
         var offset = 0
         while offset < data.count - 8 {
+            // Ensure 4-byte alignment
+            if offset % 4 != 0 {
+                offset = (offset + 3) & ~3
+            }
+            
+            if offset + 8 > data.count {
+                break
+            }
+            
             let tag = data.withUnsafeBytes { bytes in
                 bytes.load(fromByteOffset: offset, as: UInt32.self)
             }
@@ -309,6 +334,15 @@ public class MinimalRTStructParser {
         // First pass: find ROI Number and Display Color
         var offset = 0
         while offset < data.count - 8 {
+            // Ensure 4-byte alignment
+            if offset % 4 != 0 {
+                offset = (offset + 3) & ~3
+            }
+            
+            if offset + 8 > data.count {
+                break
+            }
+            
             let tag = data.withUnsafeBytes { bytes in
                 bytes.load(fromByteOffset: offset, as: UInt32.self)
             }
@@ -370,6 +404,15 @@ public class MinimalRTStructParser {
         // Scan for Contour Data (3006,0050)
         var offset = 0
         while offset < data.count - 8 {
+            // Ensure 4-byte alignment
+            if offset % 4 != 0 {
+                offset = (offset + 3) & ~3
+            }
+            
+            if offset + 8 > data.count {
+                break
+            }
+            
             let tag = data.withUnsafeBytes { bytes in
                 bytes.load(fromByteOffset: offset, as: UInt32.self)
             }
