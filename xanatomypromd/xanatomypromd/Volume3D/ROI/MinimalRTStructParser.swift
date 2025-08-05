@@ -282,9 +282,9 @@ public class MinimalRTStructParser {
         // Scan for ROI Number (3006,0022) and ROI Name (3006,0026)
         var offset = 0
         while offset < data.count - 8 {
-            // Ensure 4-byte alignment
-            if offset % 4 != 0 {
-                offset = (offset + 3) & ~3
+            // Skip to next 4-byte boundary if needed
+            while offset < data.count - 8 && offset % 4 != 0 {
+                offset += 1
             }
             
             if offset + 8 > data.count {
@@ -298,21 +298,34 @@ public class MinimalRTStructParser {
                 bytes.load(fromByteOffset: offset + 4, as: UInt32.self)
             }
             
+            print("           🏷️ Found tag: \(String(format: "%08X", tag)), length: \(length)")
+            
             if tag == 0x30060022 { // ROI Number
-                if length > 0 && offset + 8 + Int(length) <= data.count {
+                if length > 0 && length < 100 && offset + 8 + Int(length) <= data.count {
                     let valueData = data.subdata(in: (offset + 8)..<(offset + 8 + Int(length)))
                     if let numberString = String(data: valueData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines) {
                         roiNumber = Int(numberString)
+                        print("           📊 ROI Number: \(roiNumber!)")
                     }
                 }
             } else if tag == 0x30060026 { // ROI Name
-                if length > 0 && offset + 8 + Int(length) <= data.count {
+                if length > 0 && length < 1000 && offset + 8 + Int(length) <= data.count {
                     let valueData = data.subdata(in: (offset + 8)..<(offset + 8 + Int(length)))
                     roiName = String(data: valueData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    print("           📝 ROI Name: '\(roiName ?? "nil")'")
                 }
             }
             
-            offset += 8 + Int(length)
+            // Move to next tag (skip current tag + length)
+            if length > 0 && length < data.count {
+                offset += 8 + Int(length)
+                // Ensure even byte boundary (DICOM requirement)
+                if offset % 2 != 0 {
+                    offset += 1
+                }
+            } else {
+                offset += 8
+            }
         }
         
         if let number = roiNumber, let name = roiName {
@@ -334,9 +347,9 @@ public class MinimalRTStructParser {
         // First pass: find ROI Number and Display Color
         var offset = 0
         while offset < data.count - 8 {
-            // Ensure 4-byte alignment
-            if offset % 4 != 0 {
-                offset = (offset + 3) & ~3
+            // Skip to next 4-byte boundary if needed
+            while offset < data.count - 8 && offset % 4 != 0 {
+                offset += 1
             }
             
             if offset + 8 > data.count {
@@ -350,15 +363,18 @@ public class MinimalRTStructParser {
                 bytes.load(fromByteOffset: offset + 4, as: UInt32.self)
             }
             
+            print("           🏷️ Found tag: \(String(format: "%08X", tag)), length: \(length)")
+            
             if tag == 0x30060084 { // Referenced ROI Number
-                if length > 0 && offset + 8 + Int(length) <= data.count {
+                if length > 0 && length < 100 && offset + 8 + Int(length) <= data.count {
                     let valueData = data.subdata(in: (offset + 8)..<(offset + 8 + Int(length)))
                     if let numberString = String(data: valueData, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines) {
                         roiNumber = Int(numberString)
+                        print("           📊 Referenced ROI Number: \(roiNumber!)")
                     }
                 }
             } else if tag == 0x3006002A { // ROI Display Color
-                if length >= 12 && offset + 8 + Int(length) <= data.count {
+                if length >= 12 && length < 100 && offset + 8 + Int(length) <= data.count {
                     let colorData = data.subdata(in: (offset + 8)..<(offset + 8 + Int(length)))
                     if let colorString = String(data: colorData, encoding: .ascii) {
                         let components = colorString.components(separatedBy: "\\")
@@ -367,12 +383,14 @@ public class MinimalRTStructParser {
                            let g = Int(components[1].trimmingCharacters(in: .whitespacesAndNewlines)),
                            let b = Int(components[2].trimmingCharacters(in: .whitespacesAndNewlines)) {
                             displayColor = SIMD3<Float>(Float(r)/255.0, Float(g)/255.0, Float(b)/255.0)
+                            print("           🎨 Display Color: (\(r), \(g), \(b))")
                         }
                     }
                 }
             } else if tag == 0x30060040 { // Contour Sequence
+                print("           📦 Found Contour Sequence, length: \(length)")
                 // Parse all contours within this sequence
-                if length > 0 && offset + 8 + Int(length) <= data.count {
+                if length > 0 && length < data.count && offset + 8 + Int(length) <= data.count {
                     let contourSequenceData = data.subdata(in: (offset + 8)..<(offset + 8 + Int(length)))
                     let contourItems = parseSequenceItems(data: contourSequenceData)
                     
@@ -386,7 +404,16 @@ public class MinimalRTStructParser {
                 }
             }
             
-            offset += 8 + Int(length)
+            // Move to next tag (skip current tag + length)
+            if length > 0 && length < data.count {
+                offset += 8 + Int(length)
+                // Ensure even byte boundary (DICOM requirement)
+                if offset % 2 != 0 {
+                    offset += 1
+                }
+            } else {
+                offset += 8
+            }
         }
         
         if let number = roiNumber {
