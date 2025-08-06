@@ -48,7 +48,7 @@ extension XAnatomyProMainView {
         // 3. Check coordinate system
         print("\n3️⃣ COORDINATE SYSTEM:")
         print("   Current world position: \(coordinateSystem.currentWorldPosition)")
-        print("   Current slice index (axial): \(coordinateSystem.getCurrentSliceIndex(for: .axial))")
+        print("   Current slice index (axial): \(coordinateSystem.getCurrentSliceIndex(for: MPRPlane.axial))")
         print("   Volume origin: \(coordinateSystem.volumeOrigin)")
         print("   Volume spacing: \(coordinateSystem.volumeSpacing)")
         print("   Volume dimensions: \(coordinateSystem.volumeDimensions)")

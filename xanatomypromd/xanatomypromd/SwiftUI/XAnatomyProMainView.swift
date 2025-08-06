@@ -8,13 +8,13 @@ struct XAnatomyProMainView: View {
     
     // MARK: - State Management
     
-    @StateObject private var coordinateSystem = DICOMCoordinateSystem()
-    @StateObject private var dataManager = XAnatomyDataManager()
+    @StateObject var coordinateSystem = DICOMCoordinateSystem()
+    @StateObject var dataManager = XAnatomyDataManager()
     
     @State private var currentPlane: MPRPlane = .axial
     @State private var windowLevel: CTWindowLevel = CTWindowLevel.softTissue
     @State private var crosshairSettings = CrosshairAppearance.default
-    @State private var roiSettings = ROIDisplaySettings.default
+    @State var roiSettings = ROIDisplaySettings.default
     @State private var isLoading = true
     @State private var showingControls = true
     
