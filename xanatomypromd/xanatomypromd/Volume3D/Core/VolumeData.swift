@@ -94,7 +94,15 @@ public class VolumeData {
         
         // Calculate volume spacing and orientation
         self.spacing = Self.calculateVolumeSpacing(from: sliceInfos)
-        self.origin = sliceInfos.first?.position ?? SIMD3<Float>(0, 0, 0)
+        // Origin should be the MINIMUM position in each axis (the corner of the volume box)
+        // Since slices are sorted high-to-low Z, the LAST slice has the minimum Z
+        let lastSlicePosition = sliceInfos.last?.position ?? SIMD3<Float>(0, 0, 0)
+        let firstSlicePosition = sliceInfos.first?.position ?? SIMD3<Float>(0, 0, 0)
+        self.origin = SIMD3<Float>(
+            firstSlicePosition.x,  // X and Y are the same for all slices
+            firstSlicePosition.y,
+            lastSlicePosition.z    // Use the MINIMUM Z (last slice after high-to-low sort)
+        )
         self.orientation = sliceInfos.first?.orientation ?? matrix_identity_float3x3
         
         print("✅ Volume created: \(width)×\(height)×\(depth)")
