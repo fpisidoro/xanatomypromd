@@ -273,27 +273,37 @@ class SharedViewingState: ObservableObject {
     
     /// Toggle crosshair visibility
     func toggleCrosshairs() {
-        crosshairSettings = CrosshairAppearance(
-            isVisible: !crosshairSettings.isVisible,
-            color: crosshairSettings.color,
-            opacity: crosshairSettings.opacity,
-            lineWidth: crosshairSettings.lineWidth,
-            fadeDistance: crosshairSettings.fadeDistance
-        )
+        // Create new appearance with toggled visibility
+        if crosshairSettings.isVisible {
+            crosshairSettings = CrosshairAppearance(
+                isVisible: false,
+                color: .green,
+                opacity: 0.6,
+                lineWidth: 1.0,
+                fadeDistance: 0.3
+            )
+        } else {
+            crosshairSettings = CrosshairAppearance.default
+        }
     }
     
     /// Toggle ROI overlay
     func toggleROIOverlay() {
-        roiSettings = ROIDisplaySettings(
-            isVisible: !roiSettings.isVisible,
-            globalOpacity: roiSettings.globalOpacity,
-            showOutline: roiSettings.showOutline,
-            showFilled: roiSettings.showFilled,
-            outlineWidth: roiSettings.outlineWidth,
-            outlineOpacity: roiSettings.outlineOpacity,
-            fillOpacity: roiSettings.fillOpacity,
-            sliceTolerance: roiSettings.sliceTolerance
-        )
+        // Create new settings with toggled visibility
+        if roiSettings.isVisible {
+            roiSettings = ROIDisplaySettings(
+                isVisible: false,
+                globalOpacity: 1.0,
+                showOutline: true,
+                showFilled: true,
+                outlineWidth: 1.5,
+                outlineOpacity: 0.8,
+                fillOpacity: 0.3,
+                sliceTolerance: 2.0
+            )
+        } else {
+            roiSettings = ROIDisplaySettings.default
+        }
     }
     
     /// Select an ROI (will highlight in all views)
