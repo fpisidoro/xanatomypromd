@@ -328,37 +328,11 @@ struct XAnatomyProMainView: View {
     // MARK: - Helper Views
     
     private var loadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView("Loading DICOM Data...")
-                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                .foregroundColor(.white)
-            
-            Text(dataManager.loadingProgress)
-                .font(.caption)
-                .foregroundColor(.gray)
-                .multilineTextAlignment(.center)
-            
-            if dataManager.isVolumeLoaded {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                    Text("CT Volume Ready")
-                        .foregroundColor(.green)
-                }
-            }
-            
-            if dataManager.isROILoaded {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                    Text("ROI Structures Ready")
-                        .foregroundColor(.green)
-                }
-            }
-        }
-        .padding()
-        .background(Color.black.opacity(0.8))
-        .cornerRadius(12)
+        MedicalProgressView(
+            current: dataManager.loadingCurrent,
+            total: dataManager.loadingTotal,
+            message: dataManager.loadingProgress.isEmpty ? "Initializing..." : dataManager.loadingProgress
+        )
     }
     
     private var statusIndicator: some View {
@@ -532,6 +506,9 @@ class XAnatomyDataManager: ObservableObject {
     @Published var patientInfo: PatientInfo?
     @Published var isLoading = false
     @Published var loadingProgress: String = ""
+    @Published var loadingCurrent: Int = 0
+    @Published var loadingTotal: Int = 0
+    @Published var isAxialReady = false
     
     private var volumeRenderer: MetalVolumeRenderer?
     
