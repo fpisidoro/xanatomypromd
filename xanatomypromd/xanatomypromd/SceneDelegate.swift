@@ -40,8 +40,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
     
     private func setupPureSwiftUI(_ windowScene: UIWindowScene) {
-        // Pure SwiftUI approach - using new layered architecture
-        let contentView = XAnatomyProMainView()
+        // Pure SwiftUI approach - using new modular StandaloneMPRView architecture
+        let contentView = XAnatomyProV2MainView()  // Using V2 with StandaloneMPRView
             .preferredColorScheme(.dark)
             .statusBarHidden(true)
         

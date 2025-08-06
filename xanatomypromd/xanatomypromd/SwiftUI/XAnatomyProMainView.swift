@@ -543,14 +543,23 @@ class XAnatomyDataManager: ObservableObject {
         do {
             // Get DICOM files from bundle
             let dicomFiles = getDICOMFiles()
-            print("📂 Found \(dicomFiles.count) DICOM files")
+            debugLog("Found \(dicomFiles.count) DICOM files", category: .volume)
             
             guard !dicomFiles.isEmpty else {
-                print("❌ No DICOM files found in bundle")
+                debugLog("No DICOM files found in bundle", category: .volume)
                 return
             }
             
+            // Set total for progress tracking
+            loadingTotal = dicomFiles.count
             loadingProgress = "Processing \(dicomFiles.count) DICOM files..."
+            
+            // Simulate progress updates (in real implementation, update during actual loading)
+            for (index, _) in dicomFiles.enumerated() {
+                loadingCurrent = index + 1
+                // Small delay to show progress animation
+                try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
+            }
             
             // Load volume using MetalVolumeRenderer
             if let renderer = volumeRenderer {
@@ -560,11 +569,11 @@ class XAnatomyDataManager: ObservableObject {
                 volumeData = loadedVolumeData
                 
                 loadingProgress = "Volume loaded successfully"
-                print("✅ Volume data loaded: \(loadedVolumeData.dimensions)")
+                debugLog("Volume data loaded: \(loadedVolumeData.dimensions)", category: .volume)
                 
-                    // Log volume info
+                // Log volume info
                 if let info = renderer.getVolumeInfo() {
-                    print("📊 Volume Info: \(info)")
+                    debugLog("Volume Info: \(info)", category: .volume)
                 }
             }
             
