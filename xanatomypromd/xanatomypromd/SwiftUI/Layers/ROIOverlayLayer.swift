@@ -161,21 +161,47 @@ struct ROIOverlayLayer: View {
         roiStructure: MinimalRTStructParser.SimpleROIStructure,
         xPosition: Float
     ) -> [MinimalRTStructParser.SimpleContour] {
-        var crossSectionPoints: [SIMD3<Float>] = []
+        // Group contours by Z position for interpolation
+        let sortedContours = roiStructure.contours.sorted { $0.slicePosition < $1.slicePosition }
+        var interpolatedPoints: [SIMD3<Float>] = []
         
-        // Find intersections with all contours
-        for contour in roiStructure.contours {
-            let intersections = findPlaneIntersections(
-                contour: contour,
-                planeAxis: 0, // X-axis
-                planePosition: xPosition
-            )
-            crossSectionPoints.append(contentsOf: intersections)
+        // Sample at regular Z intervals for smooth interpolation
+        guard let firstZ = sortedContours.first?.slicePosition,
+              let lastZ = sortedContours.last?.slicePosition else { return [] }
+        
+        let zStep = coordinateSystem.volumeSpacing.z * 0.5 // Sample at half slice spacing for smoothness
+        var currentZ = firstZ
+        
+        while currentZ <= lastZ {
+            // Find adjacent contours for interpolation
+            let (below, above) = findAdjacentContours(sortedContours, targetZ: currentZ)
+            
+            if let belowContour = below, let aboveContour = above {
+                // Interpolate between adjacent contours
+                let t = (currentZ - belowContour.slicePosition) / 
+                       (aboveContour.slicePosition - belowContour.slicePosition)
+                
+                // Find points at the X position for both contours
+                let belowPoints = findContourPointsAtX(belowContour, xPosition: xPosition)
+                let abovePoints = findContourPointsAtX(aboveContour, xPosition: xPosition)
+                
+                // Interpolate between the points
+                for (bp, ap) in zip(belowPoints, abovePoints) {
+                    let interpolated = bp + t * (ap - bp)
+                    interpolatedPoints.append(interpolated)
+                }
+            } else if let exactContour = below ?? above {
+                // Use exact contour if we're at an exact Z position
+                let points = findContourPointsAtX(exactContour, xPosition: xPosition)
+                interpolatedPoints.append(contentsOf: points)
+            }
+            
+            currentZ += zStep
         }
         
-        // Create contour from intersection points if enough points found
-        if crossSectionPoints.count >= 3 {
-            let sortedPoints = sortPointsInPlane(crossSectionPoints, plane: .sagittal)
+        // Create smooth contour from interpolated points
+        if interpolatedPoints.count >= 3 {
+            let sortedPoints = sortPointsInPlane(interpolatedPoints, plane: .sagittal)
             return [MinimalRTStructParser.SimpleContour(
                 points: sortedPoints,
                 slicePosition: xPosition
@@ -190,21 +216,47 @@ struct ROIOverlayLayer: View {
         roiStructure: MinimalRTStructParser.SimpleROIStructure,
         yPosition: Float
     ) -> [MinimalRTStructParser.SimpleContour] {
-        var crossSectionPoints: [SIMD3<Float>] = []
+        // Group contours by Z position for interpolation
+        let sortedContours = roiStructure.contours.sorted { $0.slicePosition < $1.slicePosition }
+        var interpolatedPoints: [SIMD3<Float>] = []
         
-        // Find intersections with all contours
-        for contour in roiStructure.contours {
-            let intersections = findPlaneIntersections(
-                contour: contour,
-                planeAxis: 1, // Y-axis
-                planePosition: yPosition
-            )
-            crossSectionPoints.append(contentsOf: intersections)
+        // Sample at regular Z intervals for smooth interpolation
+        guard let firstZ = sortedContours.first?.slicePosition,
+              let lastZ = sortedContours.last?.slicePosition else { return [] }
+        
+        let zStep = coordinateSystem.volumeSpacing.z * 0.5 // Sample at half slice spacing for smoothness
+        var currentZ = firstZ
+        
+        while currentZ <= lastZ {
+            // Find adjacent contours for interpolation
+            let (below, above) = findAdjacentContours(sortedContours, targetZ: currentZ)
+            
+            if let belowContour = below, let aboveContour = above {
+                // Interpolate between adjacent contours
+                let t = (currentZ - belowContour.slicePosition) / 
+                       (aboveContour.slicePosition - belowContour.slicePosition)
+                
+                // Find points at the Y position for both contours
+                let belowPoints = findContourPointsAtY(belowContour, yPosition: yPosition)
+                let abovePoints = findContourPointsAtY(aboveContour, yPosition: yPosition)
+                
+                // Interpolate between the points
+                for (bp, ap) in zip(belowPoints, abovePoints) {
+                    let interpolated = bp + t * (ap - bp)
+                    interpolatedPoints.append(interpolated)
+                }
+            } else if let exactContour = below ?? above {
+                // Use exact contour if we're at an exact Z position
+                let points = findContourPointsAtY(exactContour, yPosition: yPosition)
+                interpolatedPoints.append(contentsOf: points)
+            }
+            
+            currentZ += zStep
         }
         
-        // Create contour from intersection points if enough points found
-        if crossSectionPoints.count >= 3 {
-            let sortedPoints = sortPointsInPlane(crossSectionPoints, plane: .coronal)
+        // Create smooth contour from interpolated points
+        if interpolatedPoints.count >= 3 {
+            let sortedPoints = sortPointsInPlane(interpolatedPoints, plane: .coronal)
             return [MinimalRTStructParser.SimpleContour(
                 points: sortedPoints,
                 slicePosition: yPosition
@@ -380,6 +432,80 @@ struct ROIOverlayLayer: View {
                 )
             )
         }
+    }
+    
+    // MARK: - Helper Functions for Interpolation
+    
+    /// Find adjacent contours above and below target Z position
+    private func findAdjacentContours(
+        _ sortedContours: [MinimalRTStructParser.SimpleContour],
+        targetZ: Float
+    ) -> (below: MinimalRTStructParser.SimpleContour?, above: MinimalRTStructParser.SimpleContour?) {
+        var below: MinimalRTStructParser.SimpleContour?
+        var above: MinimalRTStructParser.SimpleContour?
+        
+        for contour in sortedContours {
+            if contour.slicePosition <= targetZ {
+                below = contour
+            } else if above == nil {
+                above = contour
+                break
+            }
+        }
+        
+        return (below, above)
+    }
+    
+    /// Find points where contour intersects X plane
+    private func findContourPointsAtX(
+        _ contour: MinimalRTStructParser.SimpleContour,
+        xPosition: Float
+    ) -> [SIMD3<Float>] {
+        var points: [SIMD3<Float>] = []
+        
+        for i in 0..<contour.points.count {
+            let p1 = contour.points[i]
+            let p2 = contour.points[(i + 1) % contour.points.count]
+            
+            // Check if edge crosses X plane
+            if (p1.x <= xPosition && p2.x >= xPosition) ||
+               (p1.x >= xPosition && p2.x <= xPosition) {
+                // Calculate intersection
+                let t = (xPosition - p1.x) / (p2.x - p1.x)
+                if t >= 0.0 && t <= 1.0 {
+                    let intersection = p1 + t * (p2 - p1)
+                    points.append(intersection)
+                }
+            }
+        }
+        
+        return points
+    }
+    
+    /// Find points where contour intersects Y plane
+    private func findContourPointsAtY(
+        _ contour: MinimalRTStructParser.SimpleContour,
+        yPosition: Float
+    ) -> [SIMD3<Float>] {
+        var points: [SIMD3<Float>] = []
+        
+        for i in 0..<contour.points.count {
+            let p1 = contour.points[i]
+            let p2 = contour.points[(i + 1) % contour.points.count]
+            
+            // Check if edge crosses Y plane
+            if (p1.y <= yPosition && p2.y >= yPosition) ||
+               (p1.y >= yPosition && p2.y <= yPosition) {
+                // Calculate intersection
+                let t = (yPosition - p1.y) / (p2.y - p1.y)
+                if t >= 0.0 && t <= 1.0 {
+                    let intersection = p1 + t * (p2 - p1)
+                    points.append(intersection)
+                }
+            }
+        }
+        
+        return points
     }
 }
 
