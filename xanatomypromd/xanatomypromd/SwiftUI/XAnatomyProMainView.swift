@@ -12,6 +12,7 @@ struct XAnatomyProMainView: View {
     @StateObject var dataManager = XAnatomyDataManager()
     
     @State private var currentPlane: MPRPlane = .axial
+    @State private var show3D: Bool = false
     @State private var windowLevel: CTWindowLevel = CTWindowLevel.softTissue
     @State private var crosshairSettings = CrosshairAppearance.default
     @State var roiSettings = ROIDisplaySettings.default
@@ -102,20 +103,34 @@ struct XAnatomyProMainView: View {
                 loadingView
             } else {
                 // THE CLEAN LAYERED SYSTEM
-                LayeredMPRView(
-                    coordinateSystem: coordinateSystem,
-                    plane: currentPlane,
-                    windowLevel: windowLevel,
-                    crosshairAppearance: crosshairSettings,
-                    roiSettings: roiSettings,
-                    volumeData: dataManager.volumeData,
-                    roiData: dataManager.roiData,
-                    viewSize: CGSize(
-                        width: geometry.size.width,
-                        height: geometry.size.height * 0.7
-                    ),
-                    allowInteraction: true
-                )
+                if show3D {
+                    Standalone3DView(
+                        coordinateSystem: coordinateSystem,
+                        sharedState: SharedViewingState(),
+                        volumeData: dataManager.volumeData,
+                        roiData: dataManager.roiData,
+                        viewSize: CGSize(
+                            width: geometry.size.width,
+                            height: geometry.size.height * 0.7
+                        ),
+                        allowInteraction: true
+                    )
+                } else {
+                    LayeredMPRView(
+                        coordinateSystem: coordinateSystem,
+                        plane: currentPlane,
+                        windowLevel: windowLevel,
+                        crosshairAppearance: crosshairSettings,
+                        roiSettings: roiSettings,
+                        volumeData: dataManager.volumeData,
+                        roiData: dataManager.roiData,
+                        viewSize: CGSize(
+                            width: geometry.size.width,
+                            height: geometry.size.height * 0.7
+                        ),
+                        allowInteraction: true
+                    )
+                }
                 .scaleEffect(scale)
                 .offset(dragOffset)
                 .clipped()
@@ -168,7 +183,10 @@ struct XAnatomyProMainView: View {
             
             HStack(spacing: 12) {
                 ForEach([MPRPlane.axial, MPRPlane.sagittal, MPRPlane.coronal], id: \.self) { plane in
-                    Button(action: { currentPlane = plane }) {
+                    Button(action: { 
+                        currentPlane = plane
+                        show3D = false
+                    }) {
                         VStack(spacing: 4) {
                             Text(plane.displayName)
                                 .font(.caption)
@@ -181,9 +199,27 @@ struct XAnatomyProMainView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .background(currentPlane == plane ? Color.blue : Color.gray.opacity(0.3))
+                        .background(!show3D && currentPlane == plane ? Color.blue : Color.gray.opacity(0.3))
                         .cornerRadius(8)
                     }
+                }
+                
+                // 3D Button
+                Button(action: { show3D = true }) {
+                    VStack(spacing: 4) {
+                        Text("3D")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                        
+                        Text("Volume")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(show3D ? Color.blue : Color.gray.opacity(0.3))
+                    .cornerRadius(8)
                 }
             }
         }
