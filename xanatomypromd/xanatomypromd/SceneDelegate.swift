@@ -48,18 +48,19 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window?.rootViewController = UIHostingController(rootView: contentView)
         window?.makeKeyAndVisible()
         
-        print("📱 Clean layered architecture initialized")
+        print("✅ SwiftUI X-Anatomy Pro v2.0 with layered architecture initialized successfully")
     }
     
     private func setupHybridApproach(_ windowScene: UIWindowScene) {
-        // Hybrid approach - works with existing UIKit structure
-        let storyboard = UIStoryboard(name: "Main", bundle: nil)
-        let viewController = storyboard.instantiateInitialViewController()
+        // Use V2 instead of hybrid approach
+        let contentView = XAnatomyProV2MainView()
+            .preferredColorScheme(.dark)
+            .statusBarHidden(true)
         
-        window?.rootViewController = viewController
+        window?.rootViewController = UIHostingController(rootView: contentView)
         window?.makeKeyAndVisible()
         
-        print("🔄 Hybrid UIKit/SwiftUI integration initialized")
+        print("✅ SwiftUI X-Anatomy Pro v2.0 with layered architecture initialized successfully")
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
