@@ -103,33 +103,35 @@ struct XAnatomyProMainView: View {
                 loadingView
             } else {
                 // THE CLEAN LAYERED SYSTEM
-                if show3D {
-                    Standalone3DView(
-                        coordinateSystem: coordinateSystem,
-                        sharedState: SharedViewingState(),
-                        volumeData: dataManager.volumeData,
-                        roiData: dataManager.roiData,
-                        viewSize: CGSize(
-                            width: geometry.size.width,
-                            height: geometry.size.height * 0.7
-                        ),
-                        allowInteraction: true
-                    )
-                } else {
-                    LayeredMPRView(
-                        coordinateSystem: coordinateSystem,
-                        plane: currentPlane,
-                        windowLevel: windowLevel,
-                        crosshairAppearance: crosshairSettings,
-                        roiSettings: roiSettings,
-                        volumeData: dataManager.volumeData,
-                        roiData: dataManager.roiData,
-                        viewSize: CGSize(
-                            width: geometry.size.width,
-                            height: geometry.size.height * 0.7
-                        ),
-                        allowInteraction: true
-                    )
+                Group {
+                    if show3D {
+                        Standalone3DView(
+                            coordinateSystem: coordinateSystem,
+                            sharedState: SharedViewingState(),
+                            volumeData: dataManager.volumeData,
+                            roiData: dataManager.roiData,
+                            viewSize: CGSize(
+                                width: geometry.size.width,
+                                height: geometry.size.height * 0.7
+                            ),
+                            allowInteraction: true
+                        )
+                    } else {
+                        LayeredMPRView(
+                            coordinateSystem: coordinateSystem,
+                            plane: currentPlane,
+                            windowLevel: windowLevel,
+                            crosshairAppearance: crosshairSettings,
+                            roiSettings: roiSettings,
+                            volumeData: dataManager.volumeData,
+                            roiData: dataManager.roiData,
+                            viewSize: CGSize(
+                                width: geometry.size.width,
+                                height: geometry.size.height * 0.7
+                            ),
+                            allowInteraction: true
+                        )
+                    }
                 }
                 .scaleEffect(scale)
                 .offset(dragOffset)
