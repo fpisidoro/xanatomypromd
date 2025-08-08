@@ -3,6 +3,15 @@
 ## Current State (MILESTONE ACHIEVED)
 The app now uses a fully modular StandaloneMPRView architecture where each MPR view is completely self-contained yet properly synchronized.
 
+## ⚠️ IMPORTANT: Multi-Dataset Support Required
+**See MULTI_DATASET_ARCHITECTURE.md for critical enhancement needed:**
+- Must support multiple CT scans simultaneously (male/female/test)
+- Each dataset needs independent coordinate system
+- Each dataset needs independent window level sync
+- Anatomy selection affects all datasets (different ROIs, same structure)
+
+This is NOT yet implemented but is a critical requirement for the production app.
+
 ## Key Files to Understand
 
 ### 1. StandaloneMPRView (`SwiftUI/Components/StandaloneMPRView.swift`)
