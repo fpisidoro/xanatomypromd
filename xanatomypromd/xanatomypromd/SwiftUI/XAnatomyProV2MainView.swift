@@ -1,5 +1,6 @@
 import SwiftUI
 import simd
+import MetalKit
 
 // MARK: - X-Anatomy Pro v2.0 Main View
 // Uses the new modular StandaloneMPRView architecture
@@ -13,9 +14,34 @@ struct XAnatomyProV2MainView: View {
     
     // MARK: - View Configuration
     @State private var layoutMode: LayoutMode = .automatic
-    @State private var selectedSingleViewPlane: MPRPlane = .axial
+    @State private var selectedSingleViewPlane: ViewType = .axial
     @State private var isLoading = true
     @State private var showControls = true
+    
+    enum ViewType {
+        case axial
+        case sagittal
+        case coronal
+        case threeDimensional
+        
+        var displayName: String {
+            switch self {
+            case .axial: return "Axial"
+            case .sagittal: return "Sagittal"
+            case .coronal: return "Coronal"
+            case .threeDimensional: return "3D"
+            }
+        }
+        
+        var mprPlane: MPRPlane? {
+            switch self {
+            case .axial: return .axial
+            case .sagittal: return .sagittal
+            case .coronal: return .coronal
+            case .threeDimensional: return nil
+            }
+        }
+    }
     
     enum LayoutMode {
         case single
@@ -104,24 +130,36 @@ struct XAnatomyProV2MainView: View {
             // Plane selector for single view
             if layoutMode == .single {
                 Picker("", selection: $selectedSingleViewPlane) {
-                    Text("Axial").tag(MPRPlane.axial)
-                    Text("Sagittal").tag(MPRPlane.sagittal)
-                    Text("Coronal").tag(MPRPlane.coronal)
+                    Text("Axial").tag(ViewType.axial)
+                    Text("Sagittal").tag(ViewType.sagittal)
+                    Text("Coronal").tag(ViewType.coronal)
+                    Text("3D").tag(ViewType.threeDimensional)
                 }
                 .pickerStyle(SegmentedPickerStyle())
                 .padding(.horizontal)
                 .padding(.vertical, 8)
             }
             
-            StandaloneMPRView(
-                plane: selectedSingleViewPlane,
-                coordinateSystem: coordinateSystem,
-                sharedState: sharedState,
-                volumeData: dataManager.volumeData,
-                roiData: dataManager.roiData,
-                viewSize: calculateViewSize(for: .single, in: geometry),
-                allowInteraction: true
-            )
+            if selectedSingleViewPlane == .threeDimensional {
+                Standalone3DView(
+                    coordinateSystem: coordinateSystem,
+                    sharedState: sharedState,
+                    volumeData: dataManager.volumeData,
+                    roiData: dataManager.roiData,
+                    viewSize: calculateViewSize(for: .single, in: geometry),
+                    allowInteraction: true
+                )
+            } else if let plane = selectedSingleViewPlane.mprPlane {
+                StandaloneMPRView(
+                    plane: plane,
+                    coordinateSystem: coordinateSystem,
+                    sharedState: sharedState,
+                    volumeData: dataManager.volumeData,
+                    roiData: dataManager.roiData,
+                    viewSize: calculateViewSize(for: .single, in: geometry),
+                    allowInteraction: true
+                )
+            }
         }
     }
     
@@ -218,26 +256,14 @@ struct XAnatomyProV2MainView: View {
                     allowInteraction: true
                 )
                 
-                // Fourth quadrant - could be 3D view or overview
-                ZStack {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.1))
-                    
-                    VStack {
-                        Image(systemName: "cube")
-                            .font(.largeTitle)
-                            .foregroundColor(.gray.opacity(0.5))
-                        Text("3D View")
-                            .font(.caption)
-                            .foregroundColor(.gray.opacity(0.5))
-                        Text("(Future)")
-                            .font(.caption2)
-                            .foregroundColor(.gray.opacity(0.3))
-                    }
-                }
-                .frame(
-                    width: calculateViewSize(for: .quad, in: geometry).width,
-                    height: calculateViewSize(for: .quad, in: geometry).height
+                // Fourth quadrant - 3D view
+                Standalone3DView(
+                    coordinateSystem: coordinateSystem,
+                    sharedState: sharedState,
+                    volumeData: dataManager.volumeData,
+                    roiData: dataManager.roiData,
+                    viewSize: calculateViewSize(for: .quad, in: geometry),
+                    allowInteraction: true
                 )
             }
         }
