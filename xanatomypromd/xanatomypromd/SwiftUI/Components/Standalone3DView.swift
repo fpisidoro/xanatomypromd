@@ -4,45 +4,22 @@ import MetalKit
 import simd
 import Combine
 
-// MARK: - Notifications for Volume Data Changes
-extension Notification.Name {
-    static let volumeDataChanged = Notification.Name("volumeDataChanged")
-}
-
 // MARK: - Standalone 3D View
-// Volume rendered 3D visualization with translucent CT and ROI overlay
-// Integrates with existing modular architecture for seamless synchronization
-
 struct Standalone3DView: View {
     
-    // MARK: - Configuration
-    
-    /// Shared coordinate system (for crosshair plane sync)
     @ObservedObject var coordinateSystem: DICOMCoordinateSystem
-    
-    /// Shared viewing state (for ROI selection sync)  
     @ObservedObject var sharedState: SharedViewingState
     
-    /// Data sources
     let volumeData: VolumeData?
     let roiData: MinimalRTStructParser.SimpleRTStructData?
-    
-    /// View configuration
     let viewSize: CGSize
     let allowInteraction: Bool
     
-    // MARK: - Local 3D State (Independent)
-    
-    @State private var rotationZ: Float = 0.0  // Only Z-axis rotation
+    @State private var rotationZ: Float = 0.0
     @State private var localZoom: CGFloat = 1.0
     @State private var lastZoom: CGFloat = 1.0
     @State private var localPan: CGSize = .zero
-    @State private var isDragging = false
-    
-    // 3D Rendering engine
     @StateObject private var renderer = Metal3DVolumeRenderer()
-    
-    // MARK: - Initialization
     
     init(
         coordinateSystem: DICOMCoordinateSystem,
@@ -60,8 +37,6 @@ struct Standalone3DView: View {
         self.allowInteraction = allowInteraction
     }
     
-    // MARK: - Body
-    
     var body: some View {
         ZStack {
             Color.black
@@ -70,7 +45,6 @@ struct Standalone3DView: View {
                 Metal3DRenderView(
                     renderer: renderer,
                     volumeData: volumeData,
-                    roiData: roiData,
                     rotationZ: rotationZ,
                     crosshairPosition: coordinateSystem.currentWorldPosition,
                     windowLevel: sharedState.windowLevel,
@@ -79,20 +53,15 @@ struct Standalone3DView: View {
                 )
                 .clipped()
             } else {
-                // Loading placeholder
                 VStack {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        .scaleEffect(1.5)
-                    
                     Text("Loading 3D Volume...")
                         .foregroundColor(.white)
                         .font(.caption)
-                        .padding(.top)
                 }
             }
             
-            // View label overlay
             VStack {
                 HStack {
                     Text("3D")
@@ -108,15 +77,9 @@ struct Standalone3DView: View {
             .padding(4)
         }
         .frame(width: viewSize.width, height: viewSize.height)
-        .gesture(
-            allowInteraction ? createGestureRecognizer() : nil
-        )
-        .onAppear {
-            setupRenderer()
-        }
+        .gesture(allowInteraction ? createGestureRecognizer() : nil)
+        .onAppear { setupRenderer() }
     }
-    
-    // MARK: - Setup
     
     private func setupRenderer() {
         guard let volumeData = volumeData else { return }
@@ -126,28 +89,18 @@ struct Standalone3DView: View {
         }
     }
     
-    // MARK: - Gesture Handling
-    
     private func createGestureRecognizer() -> some Gesture {
         SimultaneousGesture(
-            // Rotation gesture (horizontal drag)
             DragGesture()
                 .onChanged { value in
-                    isDragging = true
-                    // Horizontal drag = rotation around Z-axis
                     let rotationSensitivity: Float = 0.01
                     rotationZ += Float(value.translation.x) * rotationSensitivity
                     
-                    // Vertical drag = zoom (for now)
                     let zoomSensitivity: CGFloat = 0.01
                     let newZoom = max(0.5, min(3.0, localZoom + value.translation.y * zoomSensitivity))
                     localZoom = newZoom
-                }
-                .onEnded { _ in
-                    isDragging = false
                 },
             
-            // Zoom gesture
             MagnificationGesture()
                 .onChanged { value in
                     let delta = value / lastZoom
@@ -162,49 +115,30 @@ struct Standalone3DView: View {
     }
 }
 
-// MARK: - Metal 3D Renderer
-
 @MainActor
 class Metal3DVolumeRenderer: ObservableObject {
     private var device: MTLDevice?
     private var commandQueue: MTLCommandQueue?
     private var library: MTLLibrary?
     private var pipelineState: MTLComputePipelineState?
-    
-    // Volume data
     private var volumeTexture: MTLTexture?
-    private var roiMeshes: [Metal3DROIMesh] = []
     
     init() {
         setupMetal()
     }
     
     private func setupMetal() {
-        guard let device = MTLCreateSystemDefaultDevice() else {
-            print("❌ Metal device creation failed")
-            return
-        }
-        
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
         self.device = device
         self.commandQueue = device.makeCommandQueue()
-        
-        guard let library = device.makeDefaultLibrary() else {
-            print("❌ Metal library creation failed")
-            return
-        }
-        self.library = library
-        
+        self.library = device.makeDefaultLibrary()
         setupVolumeRenderingPipeline()
     }
     
     private func setupVolumeRenderingPipeline() {
         guard let device = device,
-              let library = library else { return }
-        
-        guard let function = library.makeFunction(name: "volumeRender3D") else {
-            print("❌ 3D volume render function not found")
-            return
-        }
+              let library = library,
+              let function = library.makeFunction(name: "volumeRender3D") else { return }
         
         do {
             pipelineState = try device.makeComputePipelineState(function: function)
@@ -216,7 +150,6 @@ class Metal3DVolumeRenderer: ObservableObject {
     func setupVolume(_ volumeData: VolumeData) {
         guard let device = device else { return }
         
-        // Create 3D texture from volume data
         let textureDescriptor = MTLTextureDescriptor()
         textureDescriptor.textureType = .type3D
         textureDescriptor.pixelFormat = .r16Sint
@@ -227,7 +160,6 @@ class Metal3DVolumeRenderer: ObservableObject {
         
         volumeTexture = device.makeTexture(descriptor: textureDescriptor)
         
-        // Copy volume data to texture
         volumeTexture?.replace(
             region: MTLRegionMake3D(0, 0, 0, volumeData.dimensions.x, volumeData.dimensions.y, volumeData.dimensions.z),
             mipmapLevel: 0,
@@ -239,10 +171,7 @@ class Metal3DVolumeRenderer: ObservableObject {
     }
     
     func setupROI(_ roiData: MinimalRTStructParser.SimpleRTStructData) {
-        // Convert RTStruct contours to 3D meshes
-        roiMeshes = roiData.roiStructures.compactMap { roi in
-            Metal3DROIMesh.fromROIStructure(roi, device: device)
-        }
+        // ROI setup placeholder
     }
     
     func render(to texture: MTLTexture, 
@@ -263,7 +192,6 @@ class Metal3DVolumeRenderer: ObservableObject {
         encoder.setTexture(volumeTexture, index: 0)
         encoder.setTexture(texture, index: 1)
         
-        // Setup render parameters
         var params = Volume3DRenderParams(
             rotationZ: rotationZ,
             crosshairPosition: crosshairPosition,
@@ -285,13 +213,10 @@ class Metal3DVolumeRenderer: ObservableObject {
         
         encoder.dispatchThreadgroups(groupsCount, threadsPerThreadgroup: threadsPerGroup)
         encoder.endEncoding()
-        
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
     }
 }
-
-// MARK: - Render Parameters
 
 struct Volume3DRenderParams {
     let rotationZ: Float
@@ -303,35 +228,9 @@ struct Volume3DRenderParams {
     let panY: Float
 }
 
-// MARK: - ROI Mesh
-
-struct Metal3DROIMesh {
-    let vertices: [SIMD3<Float>]
-    let color: SIMD3<Float>
-    let name: String
-    
-    static func fromROIStructure(_ roi: MinimalRTStructParser.SimpleROIStructure, device: MTLDevice?) -> Metal3DROIMesh? {
-        // Convert contours to 3D mesh vertices
-        var vertices: [SIMD3<Float>] = []
-        
-        for contour in roi.contours {
-            vertices.append(contentsOf: contour.points)
-        }
-        
-        return Metal3DROIMesh(
-            vertices: vertices,
-            color: roi.displayColor,
-            name: roi.roiName
-        )
-    }
-}
-
-// MARK: - Metal View Wrapper
-
 struct Metal3DRenderView: UIViewRepresentable {
     let renderer: Metal3DVolumeRenderer
     let volumeData: VolumeData
-    let roiData: MinimalRTStructParser.SimpleRTStructData?
     let rotationZ: Float
     let crosshairPosition: SIMD3<Float>
     let windowLevel: CTWindowLevel
@@ -380,9 +279,7 @@ struct Metal3DRenderView: UIViewRepresentable {
             self.pan = pan
         }
         
-        func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-            // Handle resize
-        }
+        func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
         
         func draw(in view: MTKView) {
             guard let drawable = view.currentDrawable else { return }
