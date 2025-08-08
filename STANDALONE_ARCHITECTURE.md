@@ -41,7 +41,9 @@ This is NOT yet implemented but is a critical requirement for the production app
 
 ## How Synchronization Works
 
-### Synchronized Elements:
+### Current Implementation (Single Dataset):
+
+#### Synchronized Elements:
 1. **Crosshairs**: Via `DICOMCoordinateSystem.currentWorldPosition`
    - When user drags crosshair in one view, it updates world position
    - All views automatically reflect new position
@@ -54,10 +56,23 @@ This is NOT yet implemented but is a critical requirement for the production app
    - ROI on/off state shared
    - Each view draws ROI in correct orientation
 
-### Independent Elements:
+#### Independent Elements:
 1. **Zoom**: Each view has `localZoom` state
 2. **Pan**: Each view has `localPan` state  
 3. **Slice Scrolling**: Updates coordinate system but each view responds independently
+
+### Future Multi-Dataset Synchronization (See MULTI_DATASET_ARCHITECTURE.md):
+
+#### Within Same Dataset:
+- **Crosshairs**: Only sync between views showing same dataset (male/female/test)
+- **Window Levels**: Only sync between views showing same dataset
+- **Slice Navigation**: Only affects views of same dataset
+
+#### Across All Datasets:
+- **Anatomy Selection**: Selecting "Liver" highlights it in ALL datasets
+  - Different ROI geometries in male vs female
+  - Same anatomical structure
+  - Handles sex-specific structures (prostate/uterus)
 
 ## Gesture Handling
 
@@ -72,6 +87,7 @@ Each StandaloneMPRView handles gestures independently:
 
 ## Adding New Views
 
+### Current Implementation:
 To add a new view type (e.g., 3D view, anatomy list):
 
 1. Create the view component
@@ -80,6 +96,26 @@ To add a new view type (e.g., 3D view, anatomy list):
    - `coordinateSystem` for spatial coordination
    - `sharedState` for synchronized settings
    - `volumeData` and `roiData` for content
+
+### Future Multi-Dataset Implementation:
+When adding views with multi-dataset support:
+
+1. Specify the dataset identity:
+   ```swift
+   StandaloneMPRView(
+       plane: .axial,
+       datasetID: .male,  // or .female, .test
+       coordinateSystem: multiDatasetManager.coordinateSystems[.male]!,
+       sharedState: multiDatasetManager.sharedStates[.male]!,
+       volumeData: multiDatasetManager.volumeData[.male],
+       roiData: multiDatasetManager.roiData[.male]
+   )
+   ```
+
+2. Views can show different datasets in same layout:
+   - Left side: Male anatomy (all 3 planes)
+   - Right side: Female anatomy (all 3 planes)
+   - Or mixed: Male axial, Female axial, Male sagittal, etc.
 
 ## Current UI State
 
@@ -104,11 +140,19 @@ To add a new view type (e.g., 3D view, anatomy list):
 
 ## Important Architecture Principles
 
+### Current (Single Dataset):
 1. **Each view is standalone**: Can work alone without other views
 2. **Minimal coupling**: Views only share what must be synchronized
 3. **Single authority**: DICOMCoordinateSystem is the spatial truth
 4. **Platform agnostic**: Works on any screen size/device
 5. **Performance**: Each view renders independently (no blocking)
+
+### Future (Multi-Dataset):
+6. **Dataset Independence**: Each dataset has its own coordinate space
+7. **Smart Synchronization**: Sync within dataset, not across
+8. **Anatomy Mapping**: Cross-dataset anatomy selection
+9. **Visual Identity**: Clear indication of which dataset each view shows
+10. **Comparison Mode**: Side-by-side different datasets
 
 ## Debug Controls
 
@@ -130,11 +174,21 @@ Located in `AppConfig.swift`:
 
 ## Testing the Architecture
 
+### Current Single Dataset Testing:
 Run the app and verify:
 1. Switch between 1/2/3/4 view modes - should be instant
 2. Scroll in one view - crosshairs update in others
 3. Change window level - all views update
 4. Zoom one view - others remain unchanged
 5. Toggle ROI - appears in all views correctly oriented
+
+### Future Multi-Dataset Testing:
+1. Load male and female datasets simultaneously
+2. Scroll in male axial - only male sagittal/coronal crosshairs update
+3. Change window in female view - only female views update
+4. Select "Liver" anatomy - highlights in both male AND female (different ROIs)
+5. Select "Prostate" - only highlights in male views
+6. Select "Uterus" - only highlights in female views
+7. Compare male vs female anatomy side-by-side with different windowing
 
 The architecture is proven to work and ready for UI enhancement!
