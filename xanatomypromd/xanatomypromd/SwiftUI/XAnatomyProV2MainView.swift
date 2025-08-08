@@ -129,15 +129,25 @@ struct XAnatomyProV2MainView: View {
         VStack(spacing: 0) {
             // Plane selector for single view
             if layoutMode == .single {
-                Picker("", selection: $selectedSingleViewPlane) {
-                    Text("Axial").tag(ViewType.axial)
-                    Text("Sag").tag(ViewType.sagittal)
-                    Text("Cor").tag(ViewType.coronal)
-                    Text("3D").tag(ViewType.threeDimensional)
+                VStack {
+                    Text("Debug: layoutMode = \(layoutMode.displayName)")
+                        .font(.caption)
+                        .foregroundColor(.yellow)
+                    
+                    Picker("", selection: $selectedSingleViewPlane) {
+                        Text("Axial").tag(ViewType.axial)
+                        Text("Sag").tag(ViewType.sagittal)
+                        Text("Cor").tag(ViewType.coronal)
+                        Text("3D").tag(ViewType.threeDimensional)
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 8)
+                    
+                    Text("Selected: \(selectedSingleViewPlane.displayName)")
+                        .font(.caption)
+                        .foregroundColor(.green)
                 }
-                .pickerStyle(SegmentedPickerStyle())
-                .padding(.horizontal, 4)
-                .padding(.vertical, 8)
             }
             
             if selectedSingleViewPlane == .threeDimensional {
