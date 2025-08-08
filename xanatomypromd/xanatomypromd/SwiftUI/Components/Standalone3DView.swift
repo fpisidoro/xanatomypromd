@@ -183,14 +183,29 @@ class Metal3DVolumeRenderer: ObservableObject {
         
         guard let commandQueue = commandQueue,
               let pipelineState = pipelineState,
-              let volumeTexture = volumeTexture else { return }
+              let volumeTexture = volumeTexture,
+              let device = device else { return }
+        
+        // Create intermediate texture for compute shader output
+        let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba8Unorm,
+            width: texture.width,
+            height: texture.height,
+            mipmapped: false
+        )
+        textureDescriptor.usage = [.shaderWrite, .shaderRead]
+        
+        guard let intermediateTexture = device.makeTexture(descriptor: textureDescriptor) else {
+            print("❌ Failed to create intermediate texture")
+            return
+        }
         
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
               let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
         
         encoder.setComputePipelineState(pipelineState)
         encoder.setTexture(volumeTexture, index: 0)
-        encoder.setTexture(texture, index: 1)
+        encoder.setTexture(intermediateTexture, index: 1)  // Use intermediate texture
         
         var params = Volume3DRenderParams(
             rotationZ: rotationZ,
@@ -213,6 +228,23 @@ class Metal3DVolumeRenderer: ObservableObject {
         
         encoder.dispatchThreadgroups(groupsCount, threadsPerThreadgroup: threadsPerGroup)
         encoder.endEncoding()
+        
+        // Copy intermediate texture to final texture using blit encoder
+        if let blitEncoder = commandBuffer.makeBlitCommandEncoder() {
+            blitEncoder.copy(
+                from: intermediateTexture,
+                sourceSlice: 0,
+                sourceLevel: 0,
+                sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                sourceSize: MTLSize(width: texture.width, height: texture.height, depth: 1),
+                to: texture,
+                destinationSlice: 0,
+                destinationLevel: 0,
+                destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
+            )
+            blitEncoder.endEncoding()
+        }
+        
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
     }
