@@ -2,6 +2,63 @@ import SwiftUI
 import Metal
 import MetalKit
 import simd
+import Combine
+
+// MARK: - Notifications for Volume Data Changes
+extension Notification.Name {
+    static let volumeDataChanged = Notification.Name("volumeDataChanged")
+}
+
+// MARK: - Temporary Type Definitions
+// These should match the ones in StandaloneMPRView.swift
+
+struct CTWindowLevel {
+    let name: String
+    let center: Float
+    let width: Float
+    
+    static let softTissue = CTWindowLevel(name: "Soft Tissue", center: 50, width: 350)
+    static let bone = CTWindowLevel(name: "Bone", center: 500, width: 2000)
+    static let lung = CTWindowLevel(name: "Lung", center: -600, width: 1600)
+}
+
+struct ROIDisplaySettings {
+    let isVisible: Bool
+    let globalOpacity: Float
+    let showOutline: Bool
+    let showFilled: Bool
+    let outlineWidth: Float
+    let outlineOpacity: Float
+    let fillOpacity: Float
+    let sliceTolerance: Float
+    
+    static let `default` = ROIDisplaySettings(
+        isVisible: true,
+        globalOpacity: 1.0,
+        showOutline: true,
+        showFilled: true,
+        outlineWidth: 1.5,
+        outlineOpacity: 0.8,
+        fillOpacity: 0.3,
+        sliceTolerance: 2.0
+    )
+}
+
+struct CrosshairAppearance {
+    let isVisible: Bool
+    let color: Color
+    let opacity: Float
+    let lineWidth: Float
+    let fadeDistance: Float
+    
+    static let `default` = CrosshairAppearance(
+        isVisible: true,
+        color: .green,
+        opacity: 0.6,
+        lineWidth: 1.0,
+        fadeDistance: 0.3
+    )
+}
 
 // MARK: - Standalone 3D View
 // Volume rendered 3D visualization with translucent CT and ROI overlay
@@ -67,6 +124,7 @@ struct Standalone3DView: View {
                     roiData: roiData,
                     rotationZ: rotationZ,
                     crosshairPosition: coordinateSystem.currentWorldPosition,
+                    windowLevel: sharedState.windowLevel,
                     zoom: localZoom,
                     pan: localPan
                 )
@@ -105,9 +163,6 @@ struct Standalone3DView: View {
             allowInteraction ? createGestureRecognizer() : nil
         )
         .onAppear {
-            setupRenderer()
-        }
-        .onChange(of: volumeData) { _ in
             setupRenderer()
         }
     }
@@ -228,7 +283,7 @@ class Metal3DVolumeRenderer: ObservableObject {
             region: MTLRegionMake3D(0, 0, 0, volumeData.dimensions.x, volumeData.dimensions.y, volumeData.dimensions.z),
             mipmapLevel: 0,
             slice: 0,
-            withBytes: volumeData.data,
+            withBytes: volumeData.voxelData,
             bytesPerRow: volumeData.dimensions.x * 2,
             bytesPerImage: volumeData.dimensions.x * volumeData.dimensions.y * 2
         )
@@ -244,6 +299,7 @@ class Metal3DVolumeRenderer: ObservableObject {
     func render(to texture: MTLTexture, 
                 rotationZ: Float,
                 crosshairPosition: SIMD3<Float>,
+                windowLevel: CTWindowLevel,
                 zoom: CGFloat,
                 pan: CGSize) {
         
@@ -262,8 +318,8 @@ class Metal3DVolumeRenderer: ObservableObject {
         var params = Volume3DRenderParams(
             rotationZ: rotationZ,
             crosshairPosition: crosshairPosition,
-            windowCenter: 50.0,   // Default soft tissue window
-            windowWidth: 350.0,   // Default soft tissue window
+            windowCenter: windowLevel.center,
+            windowWidth: windowLevel.width,
             zoom: Float(zoom),
             panX: Float(pan.width),
             panY: Float(pan.height)
@@ -329,6 +385,7 @@ struct Metal3DRenderView: UIViewRepresentable {
     let roiData: MinimalRTStructParser.SimpleRTStructData?
     let rotationZ: Float
     let crosshairPosition: SIMD3<Float>
+    let windowLevel: CTWindowLevel
     let zoom: CGFloat
     let pan: CGSize
     
@@ -344,6 +401,7 @@ struct Metal3DRenderView: UIViewRepresentable {
         context.coordinator.updateParams(
             rotationZ: rotationZ,
             crosshairPosition: crosshairPosition,
+            windowLevel: windowLevel,
             zoom: zoom,
             pan: pan
         )
@@ -357,6 +415,7 @@ struct Metal3DRenderView: UIViewRepresentable {
         let renderer: Metal3DVolumeRenderer
         private var rotationZ: Float = 0
         private var crosshairPosition = SIMD3<Float>(0, 0, 0)
+        private var windowLevel: CTWindowLevel = .softTissue
         private var zoom: CGFloat = 1.0
         private var pan: CGSize = .zero
         
@@ -364,9 +423,10 @@ struct Metal3DRenderView: UIViewRepresentable {
             self.renderer = renderer
         }
         
-        func updateParams(rotationZ: Float, crosshairPosition: SIMD3<Float>, zoom: CGFloat, pan: CGSize) {
+        func updateParams(rotationZ: Float, crosshairPosition: SIMD3<Float>, windowLevel: CTWindowLevel, zoom: CGFloat, pan: CGSize) {
             self.rotationZ = rotationZ
             self.crosshairPosition = crosshairPosition
+            self.windowLevel = windowLevel
             self.zoom = zoom
             self.pan = pan
         }
@@ -382,6 +442,7 @@ struct Metal3DRenderView: UIViewRepresentable {
                 to: drawable.texture,
                 rotationZ: rotationZ,
                 crosshairPosition: crosshairPosition,
+                windowLevel: windowLevel,
                 zoom: zoom,
                 pan: pan
             )
