@@ -94,10 +94,10 @@ struct Standalone3DView: View {
             DragGesture()
                 .onChanged { value in
                     let rotationSensitivity: Float = 0.01
-                    rotationZ += Float(value.translation.x) * rotationSensitivity
+                    rotationZ += Float(value.translation.width) * rotationSensitivity
                     
                     let zoomSensitivity: CGFloat = 0.01
-                    let newZoom = max(0.5, min(3.0, localZoom + value.translation.y * zoomSensitivity))
+                    let newZoom = max(0.5, min(3.0, localZoom + value.translation.height * zoomSensitivity))
                     localZoom = newZoom
                 },
             
