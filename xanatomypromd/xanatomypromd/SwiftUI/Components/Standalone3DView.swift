@@ -9,57 +9,6 @@ extension Notification.Name {
     static let volumeDataChanged = Notification.Name("volumeDataChanged")
 }
 
-// MARK: - Temporary Type Definitions
-// These should match the ones in StandaloneMPRView.swift
-
-struct CTWindowLevel {
-    let name: String
-    let center: Float
-    let width: Float
-    
-    static let softTissue = CTWindowLevel(name: "Soft Tissue", center: 50, width: 350)
-    static let bone = CTWindowLevel(name: "Bone", center: 500, width: 2000)
-    static let lung = CTWindowLevel(name: "Lung", center: -600, width: 1600)
-}
-
-struct ROIDisplaySettings {
-    let isVisible: Bool
-    let globalOpacity: Float
-    let showOutline: Bool
-    let showFilled: Bool
-    let outlineWidth: Float
-    let outlineOpacity: Float
-    let fillOpacity: Float
-    let sliceTolerance: Float
-    
-    static let `default` = ROIDisplaySettings(
-        isVisible: true,
-        globalOpacity: 1.0,
-        showOutline: true,
-        showFilled: true,
-        outlineWidth: 1.5,
-        outlineOpacity: 0.8,
-        fillOpacity: 0.3,
-        sliceTolerance: 2.0
-    )
-}
-
-struct CrosshairAppearance {
-    let isVisible: Bool
-    let color: Color
-    let opacity: Float
-    let lineWidth: Float
-    let fadeDistance: Float
-    
-    static let `default` = CrosshairAppearance(
-        isVisible: true,
-        color: .green,
-        opacity: 0.6,
-        lineWidth: 1.0,
-        fadeDistance: 0.3
-    )
-}
-
 // MARK: - Standalone 3D View
 // Volume rendered 3D visualization with translucent CT and ROI overlay
 // Integrates with existing modular architecture for seamless synchronization
