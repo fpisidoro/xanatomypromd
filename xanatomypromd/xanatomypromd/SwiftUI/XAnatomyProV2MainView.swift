@@ -131,12 +131,12 @@ struct XAnatomyProV2MainView: View {
             if layoutMode == .single {
                 Picker("", selection: $selectedSingleViewPlane) {
                     Text("Axial").tag(ViewType.axial)
-                    Text("Sagittal").tag(ViewType.sagittal)
-                    Text("Coronal").tag(ViewType.coronal)
+                    Text("Sag").tag(ViewType.sagittal)
+                    Text("Cor").tag(ViewType.coronal)
                     Text("3D").tag(ViewType.threeDimensional)
                 }
                 .pickerStyle(SegmentedPickerStyle())
-                .padding(.horizontal)
+                .padding(.horizontal, 4)
                 .padding(.vertical, 8)
             }
             
