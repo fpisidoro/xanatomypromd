@@ -123,7 +123,7 @@ float2 rayBoxIntersect(float3 rayOrigin, float3 rayDir, float3 boxMin, float3 bo
     return float2(tNear, tFar);
 }
 
-// Diagnostic version - test volume data directly
+// Fixed 3D Volume Rendering - proper coordinate mapping
 kernel void volumeRender3D(
     texture3d<short, access::read> volumeTexture [[texture(0)]],
     texture2d<float, access::write> outputTexture [[texture(1)]],
@@ -134,36 +134,65 @@ kernel void volumeRender3D(
         return;
     }
     
-    // Test: directly sample volume at various locations
+    // Screen coordinates to normalized coordinates [0,1]
+    float2 screenPos = float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height());
+    
+    // Create orthographic projection through volume
+    // Map screen position directly to volume coordinates
     uint3 volumeDim = uint3(volumeTexture.get_width(), volumeTexture.get_height(), volumeTexture.get_depth());
     
-    // Sample center of volume
-    uint3 centerPos = volumeDim / 2;
-    short centerValue = volumeTexture.read(centerPos).r;
+    float3 accumulatedColor = float3(0.0);
+    float accumulatedAlpha = 0.0;
     
-    // Sample corner of volume  
-    uint3 cornerPos = uint3(volumeDim.x / 4, volumeDim.y / 4, volumeDim.z / 2);
-    short cornerValue = volumeTexture.read(cornerPos).r;
+    // Ray march from front to back through volume
+    int numSteps = int(volumeDim.z);
     
-    // Map screen position to different volume samples
-    float2 uv = float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height());
-    uint3 testPos = uint3(uv.x * float(volumeDim.x), uv.y * float(volumeDim.y), volumeDim.z / 2);
-    testPos = min(testPos, volumeDim - 1);
-    short testValue = volumeTexture.read(testPos).r;
-    
-    // Show raw values as colors
-    float normalizedValue = (float(testValue) + 1000.0) / 3000.0; // Map typical CT range to 0-1
-    normalizedValue = clamp(normalizedValue, 0.0, 1.0);
-    
-    // Color code the output
-    float3 color;
-    if (normalizedValue < 0.1) {
-        color = float3(0.0, 0.0, 1.0); // Blue for air/low density
-    } else if (normalizedValue < 0.5) {
-        color = float3(0.0, 1.0, 0.0); // Green for soft tissue
-    } else {
-        color = float3(1.0, 0.0, 0.0); // Red for bone/high density
+    for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
+        // Calculate 3D position in volume
+        float3 volumePos = float3(
+            screenPos.x * float(volumeDim.x),
+            screenPos.y * float(volumeDim.y),
+            float(step)
+        );
+        
+        // Clamp to volume bounds
+        uint3 samplePos = uint3(
+            min(uint(volumePos.x), volumeDim.x - 1),
+            min(uint(volumePos.y), volumeDim.y - 1),
+            min(uint(volumePos.z), volumeDim.z - 1)
+        );
+        
+        // Sample volume
+        short rawValue = volumeTexture.read(samplePos).r;
+        float hounsfield = float(rawValue);
+        
+        // Apply windowing
+        float windowMin = params.windowCenter - params.windowWidth / 2.0;
+        float windowMax = params.windowCenter + params.windowWidth / 2.0;
+        float windowed = clamp((hounsfield - windowMin) / (windowMax - windowMin), 0.0, 1.0);
+        
+        // Get alpha and color based on tissue type
+        float alpha = 0.0;
+        float3 color = float3(0.0);
+        
+        if (hounsfield > 200) {  // Bone
+            alpha = 0.3;
+            color = float3(1.0, 0.9, 0.8) * windowed;
+        } else if (hounsfield > 50) {  // Dense tissue
+            alpha = 0.1;
+            color = float3(0.8, 0.3, 0.3) * windowed;
+        } else if (hounsfield > -100) {  // Soft tissue
+            alpha = 0.05;
+            color = float3(0.9, 0.7, 0.6) * windowed;
+        }
+        // Air and fat are transparent (alpha = 0)
+        
+        // Front-to-back compositing
+        accumulatedColor += color * alpha * (1.0 - accumulatedAlpha);
+        accumulatedAlpha += alpha * (1.0 - accumulatedAlpha);
     }
     
-    outputTexture.write(float4(color, 1.0), gid);
+    // Final output
+    float3 finalColor = accumulatedColor;
+    outputTexture.write(float4(finalColor, 1.0), gid);
 }
