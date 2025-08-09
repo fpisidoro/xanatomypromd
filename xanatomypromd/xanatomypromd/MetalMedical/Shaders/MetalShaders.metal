@@ -123,7 +123,7 @@ float2 rayBoxIntersect(float3 rayOrigin, float3 rayDir, float3 boxMin, float3 bo
     return float2(tNear, tFar);
 }
 
-// Fixed 3D Volume Rendering - proper coordinate mapping
+// 3D Volume Rendering - Coronal view with Z rotation
 kernel void volumeRender3D(
     texture3d<short, access::read> volumeTexture [[texture(0)]],
     texture2d<float, access::write> outputTexture [[texture(1)]],
@@ -134,25 +134,35 @@ kernel void volumeRender3D(
         return;
     }
     
-    // Screen coordinates to normalized coordinates [0,1]
-    float2 screenPos = float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height());
+    // Screen coordinates to normalized device coordinates [-1, 1]
+    float2 ndc = (float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height())) * 2.0 - 1.0;
+    ndc.y = -ndc.y; // Flip Y
     
-    // Create orthographic projection through volume
-    // Map screen position directly to volume coordinates
+    // Apply rotation around Z axis
+    float cosZ = cos(params.rotationZ);
+    float sinZ = sin(params.rotationZ);
+    float2 rotatedNdc = float2(
+        ndc.x * cosZ - ndc.y * sinZ,
+        ndc.x * sinZ + ndc.y * cosZ
+    );
+    
+    // Volume dimensions and setup
     uint3 volumeDim = uint3(volumeTexture.get_width(), volumeTexture.get_height(), volumeTexture.get_depth());
     
     float3 accumulatedColor = float3(0.0);
     float accumulatedAlpha = 0.0;
     
-    // Ray march from front to back through volume
-    int numSteps = int(volumeDim.z);
+    // Ray march through volume in CORONAL direction (Y-axis)
+    // Coronal view: looking from anterior to posterior
+    int numSteps = int(volumeDim.y);
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Calculate 3D position in volume
+        // Map to volume coordinates for coronal view
+        // X = left-right, Y = anterior-posterior (ray direction), Z = superior-inferior
         float3 volumePos = float3(
-            screenPos.x * float(volumeDim.x),
-            screenPos.y * float(volumeDim.y),
-            float(step)
+            (rotatedNdc.x + 1.0) * 0.5 * float(volumeDim.x),  // X: left-right
+            float(step),                                        // Y: anterior-posterior (ray direction)
+            (rotatedNdc.y + 1.0) * 0.5 * float(volumeDim.z)   // Z: superior-inferior
         );
         
         // Clamp to volume bounds
@@ -176,20 +186,21 @@ kernel void volumeRender3D(
         float3 color = float3(0.0);
         
         if (hounsfield > 200) {  // Bone
-            alpha = 0.3;
+            alpha = 0.4;
             color = float3(1.0, 0.9, 0.8) * windowed;
         } else if (hounsfield > 50) {  // Dense tissue
             alpha = 0.1;
             color = float3(0.8, 0.3, 0.3) * windowed;
         } else if (hounsfield > -100) {  // Soft tissue
-            alpha = 0.05;
+            alpha = 0.03;
             color = float3(0.9, 0.7, 0.6) * windowed;
         }
-        // Air and fat are transparent (alpha = 0)
+        // Air and fat are transparent
         
         // Front-to-back compositing
-        accumulatedColor += color * alpha * (1.0 - accumulatedAlpha);
-        accumulatedAlpha += alpha * (1.0 - accumulatedAlpha);
+        float stepAlpha = alpha / float(numSteps) * 50.0;  // Normalize for step count
+        accumulatedColor += color * stepAlpha * (1.0 - accumulatedAlpha);
+        accumulatedAlpha += stepAlpha * (1.0 - accumulatedAlpha);
     }
     
     // Final output
