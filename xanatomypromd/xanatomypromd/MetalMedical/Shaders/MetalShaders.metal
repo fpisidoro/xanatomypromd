@@ -138,6 +138,16 @@ kernel void volumeRender3D(
     float2 ndc = (float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height())) * 2.0 - 1.0;
     ndc.y = -ndc.y; // Flip Y
     
+    // Apply correct aspect ratio using DICOM spacing
+    // From logs: Spacing: SIMD3<Float>(0.585938, 0.585938, 2.78) mm
+    float3 spacing = float3(0.585938, 0.585938, 2.78);
+    
+    // Normalize NDC by spacing to get correct proportions
+    float2 correctedNdc = float2(
+        ndc.x * spacing.x / spacing.y,  // X relative to Y
+        ndc.y * spacing.z / spacing.y   // Z relative to Y (correct vertical scaling)
+    );
+    
     // Volume dimensions and setup
     uint3 volumeDim = uint3(volumeTexture.get_width(), volumeTexture.get_height(), volumeTexture.get_depth());
     
@@ -152,11 +162,11 @@ kernel void volumeRender3D(
     int numSteps = int(volumeDim.y);  // Still marching through Y (anterior-posterior)
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Base position in volume
+        // Base position in volume using corrected aspect ratio
         float3 basePos = float3(
-            (ndc.x + 1.0) * 0.5 * float(volumeDim.x),          // X: left-right
-            float(step),                                        // Y: anterior-posterior (ray direction)
-            (1.0 - (ndc.y + 1.0) * 0.5) * float(volumeDim.z)   // Z: superior-inferior (flipped)
+            (correctedNdc.x + 1.0) * 0.5 * float(volumeDim.x),          // X: left-right
+            float(step),                                                  // Y: anterior-posterior (ray direction)
+            (1.0 - (correctedNdc.y + 1.0) * 0.5) * float(volumeDim.z)   // Z: superior-inferior (flipped)
         );
         
         // Apply rotation around Z-axis (rotate the sampling position)
@@ -210,46 +220,43 @@ kernel void volumeRender3D(
         accumulatedAlpha += stepAlpha * (1.0 - accumulatedAlpha);
     }
     
-    // Add crosshair planes (green)
+    // Add crosshair planes (green intersecting planes)
     float3 crosshairColor = float3(0.0, 1.0, 0.0);  // Bright green
-    float planeThickness = 2.0;  // Thickness in voxels
+    float planeThickness = 1.5;  // Thickness in voxels
     
-    // Get crosshair position in volume coordinates
-    float3 crosshairVoxel = params.crosshairPosition;
+    // Get crosshair position in volume coordinates (center of volume for now)
+    float3 crosshairVoxel = float3(volumeDim) * 0.5;  // Center position
     
-    // Check if current ray intersects crosshair planes
-    for (int step = 0; step < int(volumeDim.y) && accumulatedAlpha < 0.98; step++) {
-        float3 basePos = float3(
-            (ndc.x + 1.0) * 0.5 * float(volumeDim.x),
-            float(step),
-            (1.0 - (ndc.y + 1.0) * 0.5) * float(volumeDim.z)
-        );
-        
-        // Apply same rotation as volume
-        float3 center = float3(volumeDim) * 0.5;
-        float3 offsetFromCenter = basePos - center;
-        float cosZ = cos(params.rotationZ);
-        float sinZ = sin(params.rotationZ);
-        
-        float3 rotatedOffset = float3(
-            offsetFromCenter.x * cosZ - offsetFromCenter.y * sinZ,
-            offsetFromCenter.x * sinZ + offsetFromCenter.y * cosZ,
-            offsetFromCenter.z
-        );
-        
-        float3 volumePos = center + rotatedOffset;
-        
-        // Check proximity to crosshair planes
-        bool nearXPlane = abs(volumePos.x - crosshairVoxel.x) < planeThickness;
-        bool nearYPlane = abs(volumePos.y - crosshairVoxel.y) < planeThickness;
-        bool nearZPlane = abs(volumePos.z - crosshairVoxel.z) < planeThickness;
-        
-        if (nearXPlane || nearYPlane || nearZPlane) {
-            float planeAlpha = 0.3 * (1.0 - accumulatedAlpha);
-            accumulatedColor += crosshairColor * planeAlpha;
-            accumulatedAlpha += planeAlpha;
-            break;
-        }
+    // Convert current screen position to volume position (same as main loop)
+    float3 currentBasePos = float3(
+        (correctedNdc.x + 1.0) * 0.5 * float(volumeDim.x),
+        volumeDim.y * 0.5,  // Middle Y position for plane intersection
+        (1.0 - (correctedNdc.y + 1.0) * 0.5) * float(volumeDim.z)
+    );
+    
+    // Apply same rotation as volume
+    float3 center = float3(volumeDim) * 0.5;
+    float3 offsetFromCenter = currentBasePos - center;
+    float cosZ = cos(params.rotationZ);
+    float sinZ = sin(params.rotationZ);
+    
+    float3 rotatedOffset = float3(
+        offsetFromCenter.x * cosZ - offsetFromCenter.y * sinZ,
+        offsetFromCenter.x * sinZ + offsetFromCenter.y * cosZ,
+        offsetFromCenter.z
+    );
+    
+    float3 currentVolumePos = center + rotatedOffset;
+    
+    // Check if current pixel is on any crosshair plane
+    bool onXPlane = abs(currentVolumePos.x - crosshairVoxel.x) < planeThickness;
+    bool onYPlane = abs(currentVolumePos.y - crosshairVoxel.y) < planeThickness;
+    bool onZPlane = abs(currentVolumePos.z - crosshairVoxel.z) < planeThickness;
+    
+    // Draw crosshair planes
+    if (onXPlane || onYPlane || onZPlane) {
+        float planeAlpha = 0.4;
+        accumulatedColor = mix(accumulatedColor, crosshairColor, planeAlpha);
     }
     
     // Final output
