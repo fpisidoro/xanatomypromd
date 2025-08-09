@@ -215,7 +215,6 @@ kernel void volumeRender3D(
     float planeThickness = 2.0;  // Thickness in voxels
     
     // Get crosshair position in volume coordinates
-    uint3 volumeDim = uint3(volumeTexture.get_width(), volumeTexture.get_height(), volumeTexture.get_depth());
     float3 crosshairVoxel = params.crosshairPosition;
     
     // Check if current ray intersects crosshair planes
