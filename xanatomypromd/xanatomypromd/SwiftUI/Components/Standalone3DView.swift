@@ -123,6 +123,7 @@ class Metal3DVolumeRenderer: ObservableObject {
     private var pipelineState: MTLComputePipelineState?
     private var copyPipelineState: MTLRenderPipelineState?
     private var volumeTexture: MTLTexture?
+    private var hasLoggedFirstRender = false
     
     init() {
         setupMetal()
@@ -211,10 +212,9 @@ class Metal3DVolumeRenderer: ObservableObject {
                 pan: CGSize) {
         
         // Only log first render to avoid spam
-        static var firstRender = true
-        if firstRender {
+        if !hasLoggedFirstRender {
             print("🎨 3D Render started - Rotation: \(rotationZ), Zoom: \(zoom), Window: \(windowLevel.name)")
-            firstRender = false
+            hasLoggedFirstRender = true
         }
         
         guard let commandQueue = commandQueue,
