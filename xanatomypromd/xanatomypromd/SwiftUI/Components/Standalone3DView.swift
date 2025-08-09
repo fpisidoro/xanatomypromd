@@ -252,23 +252,29 @@ class Metal3DVolumeRenderer: ObservableObject {
 
 struct Volume3DRenderParams {
     let rotationZ: Float           // 4 bytes
-    let crosshairPosition: SIMD3<Float>  // 12 bytes  
+    let _padding1: (Float, Float, Float)  // 12 bytes padding to align to 16-byte boundary
+    let crosshairPosition: SIMD3<Float>  // 12 bytes at 16-byte aligned offset
+    let _padding2: Float           // 4 bytes padding
     let windowCenter: Float        // 4 bytes
-    let windowWidth: Float         // 4 bytes
+    let windowWidth: Float         // 4 bytes  
     let zoom: Float               // 4 bytes
+    let _padding3: Float           // 4 bytes padding
     let panX: Float               // 4 bytes
     let panY: Float               // 4 bytes
-    // Total: 36 bytes, but Metal aligns to 16-byte boundaries
-    // So Metal expects: 4 + 12 + 4 + 4 + 4 + 4 + 4 = 36 bytes, padded to 48 bytes
+    let _padding4: (Float, Float)  // 8 bytes padding to reach 64 bytes total
     
     init(rotationZ: Float, crosshairPosition: SIMD3<Float>, windowCenter: Float, windowWidth: Float, zoom: Float, panX: Float, panY: Float) {
         self.rotationZ = rotationZ
+        self._padding1 = (0, 0, 0)
         self.crosshairPosition = crosshairPosition
+        self._padding2 = 0
         self.windowCenter = windowCenter
         self.windowWidth = windowWidth
         self.zoom = zoom
+        self._padding3 = 0
         self.panX = panX
         self.panY = panY
+        self._padding4 = (0, 0)
     }
 }
 
