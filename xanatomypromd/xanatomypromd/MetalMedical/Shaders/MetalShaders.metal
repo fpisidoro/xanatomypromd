@@ -88,15 +88,15 @@ struct Volume3DRenderParams {
     float panY;
 };
 
-// Alpha transfer function for volume rendering
+// Alpha transfer function for volume rendering - increased visibility
 float getAlphaForHU(float hu) {
     if (hu < -800) return 0.0;          // Air
-    if (hu < -100) return 0.02;         // Fat - barely visible
-    if (hu < 50) return 0.05;           // Soft tissue - very transparent
-    if (hu < 100) return 0.15;          // Muscle
-    if (hu < 200) return 0.35;          // Dense tissue
-    if (hu < 400) return 0.6;           // Bone
-    return 0.85;                        // Dense bone
+    if (hu < -100) return 0.1;          // Fat - more visible
+    if (hu < 50) return 0.2;            // Soft tissue - more visible
+    if (hu < 100) return 0.4;           // Muscle - more visible
+    if (hu < 200) return 0.6;           // Dense tissue - more visible
+    if (hu < 400) return 0.8;           // Bone - more visible
+    return 1.0;                         // Dense bone - fully opaque
 }
 
 // Color mapping for tissues
@@ -204,7 +204,7 @@ kernel void volumeRender3D(
             float windowed = clamp((hounsfield - windowMin) / (windowMax - windowMin), 0.0, 1.0);
             
             // Get alpha and color
-            float alpha = getAlphaForHU(hounsfield) * stepSize * 50.0;
+            float alpha = getAlphaForHU(hounsfield) * stepSize * 200.0;  // Increased from 50 to 200
             float3 color = getColorForHU(hounsfield) * windowed;
             
             // Compositing
