@@ -162,7 +162,7 @@ public struct DICOMParser {
         // Safety check for reasonable length values
         if length == 0xFFFFFFFF {
             // Undefined length - this is a sequence or item
-            print("🔄 Found undefined length sequence at tag \(tag) - parsing sequence data...")
+            // print("🔄 Found undefined length sequence at tag \(tag) - parsing sequence data...")  // Commented out verbose logging
             
             // Parse undefined length sequence by finding the sequence delimiter
             let sequenceData = parseUndefinedLengthSequence(data, startOffset: currentOffset)
@@ -210,7 +210,7 @@ public struct DICOMParser {
         var offset = startOffset
         let sequenceStart = offset
         
-        print("   🔍 Parsing undefined length sequence starting at offset \(offset)...")
+        // print("   🔍 Parsing undefined length sequence starting at offset \(offset)...")  // Commented out verbose logging
         
         // Search for sequence delimiter (FFFE,E0DD)
         while offset + 8 <= data.count {
@@ -220,7 +220,7 @@ public struct DICOMParser {
             if group == 0xFFFE && element == 0xE0DD {
                 // Found sequence delimiter
                 let sequenceLength = offset - sequenceStart
-                print("   ✅ Found sequence delimiter at offset \(offset), sequence length: \(sequenceLength) bytes")
+                // print("   ✅ Found sequence delimiter at offset \(offset), sequence length: \(sequenceLength) bytes")  // Commented out verbose logging
                 
                 let sequenceData = data.subdata(in: sequenceStart..<offset)
                 let totalBytesRead = sequenceLength + 8 // Include delimiter
@@ -232,7 +232,7 @@ public struct DICOMParser {
         }
         
         // If no delimiter found, treat rest of data as sequence
-        print("   ⚠️ No sequence delimiter found, using rest of data as sequence")
+        // print("   ⚠️ No sequence delimiter found, using rest of data as sequence")  // Commented out verbose logging
         let sequenceData = data.subdata(in: sequenceStart..<data.count)
         let totalBytesRead = data.count - sequenceStart
         
