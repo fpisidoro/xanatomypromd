@@ -224,12 +224,17 @@ kernel void volumeRender3D(
         float t = tStart + float(i) * stepSize;
         float3 samplePos = cameraPos + t * rayDir;
         
-        // Convert to texture coordinates
+        // Convert to texture coordinates (normalized 0-1)
         float3 texCoord = samplePos + 0.5; // Convert from [-0.5, 0.5] to [0, 1]
         
         if (all(texCoord >= 0.0) && all(texCoord <= 1.0)) {
-            // Sample volume
-            uint3 sampleIdx = uint3(texCoord * volumeSize);
+            // Sample volume with proper coordinate scaling
+            uint3 volumeDim = uint3(volumeTexture.get_width(), volumeTexture.get_height(), volumeTexture.get_depth());
+            uint3 sampleIdx = uint3(texCoord * float3(volumeDim));
+            
+            // Clamp to valid range
+            sampleIdx = min(sampleIdx, volumeDim - 1);
+            
             short rawValue = volumeTexture.read(sampleIdx).r;
             float hounsfield = float(rawValue);
             

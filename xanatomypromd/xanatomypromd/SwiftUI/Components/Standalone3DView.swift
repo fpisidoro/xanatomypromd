@@ -160,7 +160,7 @@ class Metal3DVolumeRenderer: ObservableObject {
     private func setupVolumeRenderingPipeline() {
         guard let device = device,
               let library = library,
-              let function = library.makeFunction(name: "volumeRender3DTest") else { return }
+              let function = library.makeFunction(name: "volumeRender3D") else { return }
         
         do {
             pipelineState = try device.makeComputePipelineState(function: function)
