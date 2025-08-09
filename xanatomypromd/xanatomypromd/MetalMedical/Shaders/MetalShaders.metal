@@ -168,8 +168,9 @@ kernel void volumeRender3D(
     float tStart = max(intersection.x, 0.0);
     float tEnd = intersection.y;
     
+    // Debug: if no intersection, show red instead of black
     if (tStart >= tEnd) {
-        outputTexture.write(float4(0.0, 0.0, 0.0, 1.0), gid);
+        outputTexture.write(float4(1.0, 0.0, 0.0, 1.0), gid); // Red for debugging
         return;
     }
     
@@ -212,7 +213,12 @@ kernel void volumeRender3D(
         }
     }
     
-    // Final output
+    // Final output - if no accumulation happened, show green for debugging
+    if (accumulatedAlpha <= 0.001) {
+        outputTexture.write(float4(0.0, 1.0, 0.0, 1.0), gid); // Green = ray marched but found nothing
+        return;
+    }
+    
     float3 finalColor = accumulatedColor;
     outputTexture.write(float4(finalColor, 1.0), gid);
 }
