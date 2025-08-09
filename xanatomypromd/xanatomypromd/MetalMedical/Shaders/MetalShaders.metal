@@ -130,6 +130,25 @@ float2 rayBoxIntersect(float3 rayOrigin, float3 rayDir, float3 boxMin, float3 bo
     return float2(tNear, tFar);
 }
 
+// Simple test kernel - replace complex volume rendering temporarily
+kernel void volumeRender3DTest(
+    texture3d<short, access::read> volumeTexture [[texture(0)]],
+    texture2d<float, access::write> outputTexture [[texture(1)]],
+    constant Volume3DRenderParams& params [[buffer(0)]],
+    uint2 gid [[thread_position_in_grid]]
+) {
+    if (gid.x >= outputTexture.get_width() || gid.y >= outputTexture.get_height()) {
+        return;
+    }
+    
+    // Simple test pattern
+    float2 uv = float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height());
+    
+    // Test: show gradient instead of volume
+    float3 testColor = float3(uv.x, uv.y, 0.5);
+    outputTexture.write(float4(testColor, 1.0), gid);
+}
+
 // 3D Volume Rendering Kernel
 kernel void volumeRender3D(
     texture3d<short, access::read> volumeTexture [[texture(0)]],
