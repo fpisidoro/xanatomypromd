@@ -121,6 +121,7 @@ class Metal3DVolumeRenderer: ObservableObject {
     private var commandQueue: MTLCommandQueue?
     private var library: MTLLibrary?
     private var pipelineState: MTLComputePipelineState?
+    private var copyPipelineState: MTLRenderPipelineState?
     private var volumeTexture: MTLTexture?
     
     init() {
@@ -133,6 +134,26 @@ class Metal3DVolumeRenderer: ObservableObject {
         self.commandQueue = device.makeCommandQueue()
         self.library = device.makeDefaultLibrary()
         setupVolumeRenderingPipeline()
+        setupCopyPipeline()
+    }
+    
+    private func setupCopyPipeline() {
+        guard let device = device,
+              let library = library else { return }
+        
+        let vertexFunction = library.makeFunction(name: "vertex_simple")
+        let fragmentFunction = library.makeFunction(name: "fragment_simple")
+        
+        let pipelineDescriptor = MTLRenderPipelineDescriptor()
+        pipelineDescriptor.vertexFunction = vertexFunction
+        pipelineDescriptor.fragmentFunction = fragmentFunction
+        pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        
+        do {
+            copyPipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+        } catch {
+            print("❌ Copy pipeline state creation failed: \(error)")
+        }
     }
     
     private func setupVolumeRenderingPipeline() {
@@ -145,6 +166,10 @@ class Metal3DVolumeRenderer: ObservableObject {
         } catch {
             print("❌ 3D pipeline state creation failed: \(error)")
         }
+    }
+    
+    private func getCopyPipelineState() -> MTLRenderPipelineState? {
+        return copyPipelineState
     }
     
     func setupVolume(_ volumeData: VolumeData) {
@@ -229,20 +254,31 @@ class Metal3DVolumeRenderer: ObservableObject {
         encoder.dispatchThreadgroups(groupsCount, threadsPerThreadgroup: threadsPerGroup)
         encoder.endEncoding()
         
-        // Copy intermediate texture to final texture using blit encoder
-        if let blitEncoder = commandBuffer.makeBlitCommandEncoder() {
-            blitEncoder.copy(
-                from: intermediateTexture,
-                sourceSlice: 0,
-                sourceLevel: 0,
-                sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-                sourceSize: MTLSize(width: texture.width, height: texture.height, depth: 1),
-                to: texture,
-                destinationSlice: 0,
-                destinationLevel: 0,
-                destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
-            )
-            blitEncoder.endEncoding()
+        // Copy intermediate texture to final texture using render pass
+        let renderPassDescriptor = MTLRenderPassDescriptor()
+        renderPassDescriptor.colorAttachments[0].texture = texture
+        renderPassDescriptor.colorAttachments[0].loadAction = .clear
+        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        renderPassDescriptor.colorAttachments[0].storeAction = .store
+        
+        if let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
+            // Use simple copy render pass
+            if let copyPipelineState = getCopyPipelineState() {
+                renderEncoder.setRenderPipelineState(copyPipelineState)
+                renderEncoder.setFragmentTexture(intermediateTexture, index: 0)
+                
+                // Draw fullscreen quad
+                let vertices: [Float] = [
+                    -1, -1, 0, 1,  // Bottom-left
+                     1, -1, 1, 1,  // Bottom-right
+                    -1,  1, 0, 0,  // Top-left
+                     1,  1, 1, 0   // Top-right
+                ]
+                
+                renderEncoder.setVertexBytes(vertices, length: vertices.count * 4, index: 0)
+                renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+            }
+            renderEncoder.endEncoding()
         }
         
         commandBuffer.commit()
