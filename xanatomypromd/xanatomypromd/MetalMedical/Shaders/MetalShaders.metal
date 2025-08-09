@@ -157,12 +157,12 @@ kernel void volumeRender3D(
     int numSteps = int(volumeDim.y);
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Map to volume coordinates for coronal view
+        // Map to volume coordinates for coronal view (FIXED orientation)
         // X = left-right, Y = anterior-posterior (ray direction), Z = superior-inferior
         float3 volumePos = float3(
-            (rotatedNdc.x + 1.0) * 0.5 * float(volumeDim.x),  // X: left-right
-            float(step),                                        // Y: anterior-posterior (ray direction)
-            (rotatedNdc.y + 1.0) * 0.5 * float(volumeDim.z)   // Z: superior-inferior
+            (rotatedNdc.x + 1.0) * 0.5 * float(volumeDim.x),          // X: left-right
+            float(step),                                                // Y: anterior-posterior (ray direction)
+            (1.0 - (rotatedNdc.y + 1.0) * 0.5) * float(volumeDim.z)   // Z: superior-inferior (FLIPPED)
         );
         
         // Clamp to volume bounds
