@@ -188,26 +188,69 @@ kernel void volumeRender3D(
         float windowMax = params.windowCenter + params.windowWidth / 2.0;
         float windowed = clamp((hounsfield - windowMin) / (windowMax - windowMin), 0.0, 1.0);
         
-        // Get alpha and color based on tissue type
+        // Get alpha and color based on tissue type - enhanced visibility
         float alpha = 0.0;
         float3 color = float3(0.0);
         
         if (hounsfield > 200) {  // Bone
-            alpha = 0.4;
-            color = float3(1.0, 0.9, 0.8) * windowed;
+            alpha = 0.8;
+            color = float3(1.0, 1.0, 1.0) * windowed;  // Pure white bone
         } else if (hounsfield > 50) {  // Dense tissue
-            alpha = 0.1;
-            color = float3(0.8, 0.3, 0.3) * windowed;
+            alpha = 0.3;
+            color = float3(1.0, 0.2, 0.2) * windowed;  // Bright red tissue
         } else if (hounsfield > -100) {  // Soft tissue
-            alpha = 0.03;
-            color = float3(0.9, 0.7, 0.6) * windowed;
+            alpha = 0.1;
+            color = float3(0.8, 0.4, 0.4) * windowed;  // Pink soft tissue
         }
         // Air and fat are transparent
         
         // Front-to-back compositing
-        float stepAlpha = alpha / float(numSteps) * 50.0;  // Normalize for step count
+        float stepAlpha = alpha / float(numSteps) * 80.0;  // Increased from 50
         accumulatedColor += color * stepAlpha * (1.0 - accumulatedAlpha);
         accumulatedAlpha += stepAlpha * (1.0 - accumulatedAlpha);
+    }
+    
+    // Add crosshair planes (green)
+    float3 crosshairColor = float3(0.0, 1.0, 0.0);  // Bright green
+    float planeThickness = 2.0;  // Thickness in voxels
+    
+    // Get crosshair position in volume coordinates
+    uint3 volumeDim = uint3(volumeTexture.get_width(), volumeTexture.get_height(), volumeTexture.get_depth());
+    float3 crosshairVoxel = params.crosshairPosition;
+    
+    // Check if current ray intersects crosshair planes
+    for (int step = 0; step < int(volumeDim.y) && accumulatedAlpha < 0.98; step++) {
+        float3 basePos = float3(
+            (ndc.x + 1.0) * 0.5 * float(volumeDim.x),
+            float(step),
+            (1.0 - (ndc.y + 1.0) * 0.5) * float(volumeDim.z)
+        );
+        
+        // Apply same rotation as volume
+        float3 center = float3(volumeDim) * 0.5;
+        float3 offsetFromCenter = basePos - center;
+        float cosZ = cos(params.rotationZ);
+        float sinZ = sin(params.rotationZ);
+        
+        float3 rotatedOffset = float3(
+            offsetFromCenter.x * cosZ - offsetFromCenter.y * sinZ,
+            offsetFromCenter.x * sinZ + offsetFromCenter.y * cosZ,
+            offsetFromCenter.z
+        );
+        
+        float3 volumePos = center + rotatedOffset;
+        
+        // Check proximity to crosshair planes
+        bool nearXPlane = abs(volumePos.x - crosshairVoxel.x) < planeThickness;
+        bool nearYPlane = abs(volumePos.y - crosshairVoxel.y) < planeThickness;
+        bool nearZPlane = abs(volumePos.z - crosshairVoxel.z) < planeThickness;
+        
+        if (nearXPlane || nearYPlane || nearZPlane) {
+            float planeAlpha = 0.3 * (1.0 - accumulatedAlpha);
+            accumulatedColor += crosshairColor * planeAlpha;
+            accumulatedAlpha += planeAlpha;
+            break;
+        }
     }
     
     // Final output
