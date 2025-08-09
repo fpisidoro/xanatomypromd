@@ -175,6 +175,8 @@ class Metal3DVolumeRenderer: ObservableObject {
     func setupVolume(_ volumeData: VolumeData) {
         guard let device = device else { return }
         
+        print("🎯 Setting up volume: \(volumeData.dimensions)")
+        
         let textureDescriptor = MTLTextureDescriptor()
         textureDescriptor.textureType = .type3D
         textureDescriptor.pixelFormat = .r16Sint
@@ -193,6 +195,8 @@ class Metal3DVolumeRenderer: ObservableObject {
             bytesPerRow: volumeData.dimensions.x * 2,
             bytesPerImage: volumeData.dimensions.x * volumeData.dimensions.y * 2
         )
+        
+        print("✅ Volume texture created: \(volumeTexture?.width ?? 0)x\(volumeTexture?.height ?? 0)x\(volumeTexture?.depth ?? 0)")
     }
     
     func setupROI(_ roiData: MinimalRTStructParser.SimpleRTStructData) {
@@ -206,14 +210,19 @@ class Metal3DVolumeRenderer: ObservableObject {
                 zoom: CGFloat,
                 pan: CGSize) {
         
+        print("🎨 3D Render - Rotation: \(rotationZ), Zoom: \(zoom), Window: \(windowLevel.name)")
+        
         guard let commandQueue = commandQueue,
               let pipelineState = pipelineState,
               let volumeTexture = volumeTexture,
-              let device = device else { return }
+              let device = device else { 
+            print("❌ 3D Render failed - missing components")
+            return 
+        }
         
         // Create intermediate texture for compute shader output
         let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .rgba8Unorm,
+            pixelFormat: .bgra8Unorm,  // Match final texture format
             width: texture.width,
             height: texture.height,
             mipmapped: false
