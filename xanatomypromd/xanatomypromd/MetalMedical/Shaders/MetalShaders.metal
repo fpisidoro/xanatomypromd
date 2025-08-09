@@ -123,7 +123,7 @@ float2 rayBoxIntersect(float3 rayOrigin, float3 rayDir, float3 boxMin, float3 bo
     return float2(tNear, tFar);
 }
 
-// 3D Volume Rendering with ray casting
+// Diagnostic version - test volume data directly
 kernel void volumeRender3D(
     texture3d<short, access::read> volumeTexture [[texture(0)]],
     texture2d<float, access::write> outputTexture [[texture(1)]],
@@ -134,91 +134,36 @@ kernel void volumeRender3D(
         return;
     }
     
-    // Screen coordinates to normalized device coordinates
-    float2 ndc = (float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height())) * 2.0 - 1.0;
-    ndc.y = -ndc.y; // Flip Y for correct orientation
-    
-    // Apply zoom and pan
-    ndc /= params.zoom;
-    ndc.x += params.panX / params.zoom;
-    ndc.y += params.panY / params.zoom;
-    
-    // Create camera and ray
-    float3 cameraPos = float3(0.0, 0.0, -1.5);
-    float3 rayDir = normalize(float3(ndc.x, ndc.y, 1.0));
-    
-    // Apply rotation around Z axis
-    float cosZ = cos(params.rotationZ);
-    float sinZ = sin(params.rotationZ);
-    float3x3 rotationMatrix = float3x3(
-        float3(cosZ, -sinZ, 0.0),
-        float3(sinZ, cosZ, 0.0),
-        float3(0.0, 0.0, 1.0)
-    );
-    
-    cameraPos = rotationMatrix * cameraPos;
-    rayDir = rotationMatrix * rayDir;
-    
-    // Volume bounds [-0.5, 0.5]
-    float3 volumeMin = float3(-0.5, -0.5, -0.5);
-    float3 volumeMax = float3(0.5, 0.5, 0.5);
-    
-    // Ray-volume intersection
-    float2 intersection = rayBoxIntersect(cameraPos, rayDir, volumeMin, volumeMax);
-    float tStart = max(intersection.x, 0.0);
-    float tEnd = intersection.y;
-    
-    // Debug: if no intersection, show red instead of black
-    if (tStart >= tEnd) {
-        outputTexture.write(float4(1.0, 0.0, 0.0, 1.0), gid); // Red for debugging
-        return;
-    }
-    
-    // Ray marching
-    float stepSize = 0.01;
-    int maxSteps = int((tEnd - tStart) / stepSize) + 1;
-    
-    float3 accumulatedColor = float3(0.0);
-    float accumulatedAlpha = 0.0;
-    
+    // Test: directly sample volume at various locations
     uint3 volumeDim = uint3(volumeTexture.get_width(), volumeTexture.get_height(), volumeTexture.get_depth());
     
-    for (int i = 0; i < maxSteps && accumulatedAlpha < 0.95; i++) {
-        float t = tStart + float(i) * stepSize;
-        float3 samplePos = cameraPos + t * rayDir;
-        
-        // Convert to texture coordinates [0,1]
-        float3 texCoord = samplePos + 0.5;
-        
-        if (all(texCoord >= 0.0) && all(texCoord <= 1.0)) {
-            // Sample volume
-            uint3 sampleIdx = uint3(texCoord * float3(volumeDim));
-            sampleIdx = min(sampleIdx, volumeDim - 1);
-            
-            short rawValue = volumeTexture.read(sampleIdx).r;
-            float hounsfield = float(rawValue);
-            
-            // Apply windowing
-            float windowMin = params.windowCenter - params.windowWidth / 2.0;
-            float windowMax = params.windowCenter + params.windowWidth / 2.0;
-            float windowed = clamp((hounsfield - windowMin) / (windowMax - windowMin), 0.0, 1.0);
-            
-            // Get alpha and color
-            float alpha = getAlphaForHU(hounsfield) * stepSize * 80.0;  // Reduced from 200 to 80
-            float3 color = getColorForHU(hounsfield) * windowed;
-            
-            // Compositing
-            accumulatedColor += color * alpha * (1.0 - accumulatedAlpha);
-            accumulatedAlpha += alpha * (1.0 - accumulatedAlpha);
-        }
+    // Sample center of volume
+    uint3 centerPos = volumeDim / 2;
+    short centerValue = volumeTexture.read(centerPos).r;
+    
+    // Sample corner of volume  
+    uint3 cornerPos = uint3(volumeDim.x / 4, volumeDim.y / 4, volumeDim.z / 2);
+    short cornerValue = volumeTexture.read(cornerPos).r;
+    
+    // Map screen position to different volume samples
+    float2 uv = float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height());
+    uint3 testPos = uint3(uv.x * float(volumeDim.x), uv.y * float(volumeDim.y), volumeDim.z / 2);
+    testPos = min(testPos, volumeDim - 1);
+    short testValue = volumeTexture.read(testPos).r;
+    
+    // Show raw values as colors
+    float normalizedValue = (float(testValue) + 1000.0) / 3000.0; // Map typical CT range to 0-1
+    normalizedValue = clamp(normalizedValue, 0.0, 1.0);
+    
+    // Color code the output
+    float3 color;
+    if (normalizedValue < 0.1) {
+        color = float3(0.0, 0.0, 1.0); // Blue for air/low density
+    } else if (normalizedValue < 0.5) {
+        color = float3(0.0, 1.0, 0.0); // Green for soft tissue
+    } else {
+        color = float3(1.0, 0.0, 0.0); // Red for bone/high density
     }
     
-    // Final output - if no accumulation happened, show green for debugging
-    if (accumulatedAlpha <= 0.001) {
-        outputTexture.write(float4(0.0, 1.0, 0.0, 1.0), gid); // Green = ray marched but found nothing
-        return;
-    }
-    
-    float3 finalColor = accumulatedColor;
-    outputTexture.write(float4(finalColor, 1.0), gid);
+    outputTexture.write(float4(color, 1.0), gid);
 }
