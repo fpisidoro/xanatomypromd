@@ -138,32 +138,39 @@ kernel void volumeRender3D(
     float2 ndc = (float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height())) * 2.0 - 1.0;
     ndc.y = -ndc.y; // Flip Y
     
-    // Apply rotation around Z axis
-    float cosZ = cos(params.rotationZ);
-    float sinZ = sin(params.rotationZ);
-    float2 rotatedNdc = float2(
-        ndc.x * cosZ - ndc.y * sinZ,
-        ndc.x * sinZ + ndc.y * cosZ
-    );
-    
     // Volume dimensions and setup
     uint3 volumeDim = uint3(volumeTexture.get_width(), volumeTexture.get_height(), volumeTexture.get_depth());
     
     float3 accumulatedColor = float3(0.0);
     float accumulatedAlpha = 0.0;
     
-    // Ray march through volume in CORONAL direction (Y-axis)
-    // Coronal view: looking from anterior to posterior
-    int numSteps = int(volumeDim.y);
+    // Apply Z-axis rotation to viewing direction (not screen coordinates)
+    float cosZ = cos(params.rotationZ);
+    float sinZ = sin(params.rotationZ);
+    
+    // Ray march through volume with rotated viewing direction
+    int numSteps = int(volumeDim.y);  // Still marching through Y (anterior-posterior)
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Map to volume coordinates for coronal view (FIXED orientation)
-        // X = left-right, Y = anterior-posterior (ray direction), Z = superior-inferior
-        float3 volumePos = float3(
-            (rotatedNdc.x + 1.0) * 0.5 * float(volumeDim.x),          // X: left-right
-            float(step),                                                // Y: anterior-posterior (ray direction)
-            (1.0 - (rotatedNdc.y + 1.0) * 0.5) * float(volumeDim.z)   // Z: superior-inferior (FLIPPED)
+        // Base position in volume
+        float3 basePos = float3(
+            (ndc.x + 1.0) * 0.5 * float(volumeDim.x),          // X: left-right
+            float(step),                                        // Y: anterior-posterior (ray direction)
+            (1.0 - (ndc.y + 1.0) * 0.5) * float(volumeDim.z)   // Z: superior-inferior (flipped)
         );
+        
+        // Apply rotation around Z-axis (rotate the sampling position)
+        float3 center = float3(volumeDim) * 0.5;  // Volume center
+        float3 offsetFromCenter = basePos - center;
+        
+        // Rotate X and Y coordinates around Z-axis
+        float3 rotatedOffset = float3(
+            offsetFromCenter.x * cosZ - offsetFromCenter.y * sinZ,
+            offsetFromCenter.x * sinZ + offsetFromCenter.y * cosZ,
+            offsetFromCenter.z  // Z unchanged
+        );
+        
+        float3 volumePos = center + rotatedOffset;
         
         // Clamp to volume bounds
         uint3 samplePos = uint3(
