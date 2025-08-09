@@ -210,7 +210,12 @@ class Metal3DVolumeRenderer: ObservableObject {
                 zoom: CGFloat,
                 pan: CGSize) {
         
-        print("🎨 3D Render - Rotation: \(rotationZ), Zoom: \(zoom), Window: \(windowLevel.name)")
+        // Only log first render to avoid spam
+        static var firstRender = true
+        if firstRender {
+            print("🎨 3D Render started - Rotation: \(rotationZ), Zoom: \(zoom), Window: \(windowLevel.name)")
+            firstRender = false
+        }
         
         guard let commandQueue = commandQueue,
               let pipelineState = pipelineState,
@@ -337,6 +342,9 @@ struct Metal3DRenderView: UIViewRepresentable {
         mtkView.device = MTLCreateSystemDefaultDevice()
         mtkView.backgroundColor = UIColor.black
         mtkView.delegate = context.coordinator
+        mtkView.enableSetNeedsDisplay = true  // Manual render control
+        mtkView.isPaused = false  // Allow rendering
+        mtkView.preferredFramesPerSecond = 30  // Limit to 30 FPS
         return mtkView
     }
     
@@ -348,6 +356,7 @@ struct Metal3DRenderView: UIViewRepresentable {
             zoom: zoom,
             pan: pan
         )
+        uiView.setNeedsDisplay()  // Trigger single render
     }
     
     func makeCoordinator() -> Coordinator {
@@ -361,6 +370,7 @@ struct Metal3DRenderView: UIViewRepresentable {
         private var windowLevel: CTWindowLevel = .softTissue
         private var zoom: CGFloat = 1.0
         private var pan: CGSize = .zero
+        private var lastRenderTime: CFTimeInterval = 0
         
         init(renderer: Metal3DVolumeRenderer) {
             self.renderer = renderer
@@ -378,6 +388,13 @@ struct Metal3DRenderView: UIViewRepresentable {
         
         func draw(in view: MTKView) {
             guard let drawable = view.currentDrawable else { return }
+            
+            // Throttle rendering to avoid spam
+            let now = CACurrentMediaTime()
+            if now - lastRenderTime < 0.033 { // Max 30 FPS
+                return
+            }
+            lastRenderTime = now
             
             renderer.render(
                 to: drawable.texture,
