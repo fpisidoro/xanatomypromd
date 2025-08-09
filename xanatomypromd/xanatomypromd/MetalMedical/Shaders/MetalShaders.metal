@@ -154,7 +154,7 @@ kernel void volumeRender3D(
     float3 accumulatedColor = float3(0.0);
     float accumulatedAlpha = 0.0;
     
-    // Apply Z-axis rotation to viewing direction (not screen coordinates)
+    // Apply Z-axis rotation to viewing direction (calculate once)
     float cosZ = cos(params.rotationZ);
     float sinZ = sin(params.rotationZ);
     
@@ -234,11 +234,9 @@ kernel void volumeRender3D(
         (1.0 - (correctedNdc.y + 1.0) * 0.5) * float(volumeDim.z)
     );
     
-    // Apply same rotation as volume
+    // Apply same rotation as volume (reuse rotation values)
     float3 center = float3(volumeDim) * 0.5;
     float3 offsetFromCenter = currentBasePos - center;
-    float cosZ = cos(params.rotationZ);
-    float sinZ = sin(params.rotationZ);
     
     float3 rotatedOffset = float3(
         offsetFromCenter.x * cosZ - offsetFromCenter.y * sinZ,
