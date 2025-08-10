@@ -164,16 +164,17 @@ kernel void volumeRender3D(
     int numSteps = int(volumeDim.y);
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Map screen to physical space, then to voxels
-        // Screen maps to physical mm uniformly, then convert to voxel indices
-        float3 physicalPos = float3(
-            (viewNdc.x + 1.0) * 0.5 * physicalDimensions.x,  // Physical X in mm
-            float(step) * params.spacingY,                    // Physical Y in mm (step through slices)
-            (viewNdc.y + 1.0) * 0.5 * physicalDimensions.z   // Physical Z in mm
-        );
+        // The volume is 512x512x53 but Z voxels are ~4.74x thicker
+        // So 53 Z voxels = ~251 X voxels worth of physical distance
+        // Map screen Y to only the equivalent X-distance worth of Z voxels
+        float physicallyEquivalentZ = float(volumeDim.z) * params.spacingZ / params.spacingX; // ~251
+        float zCenter = float(volumeDim.z) * 0.5;
         
-        // Convert physical mm to voxel indices
-        float3 basePos = physicalPos / float3(params.spacingX, params.spacingY, params.spacingZ);
+        float3 basePos = float3(
+            (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
+            float(step),
+            zCenter + viewNdc.y * physicallyEquivalentZ * 0.5
+        );
         
         // Apply rotation around Z-axis
         float3 offsetFromCenter = basePos - volumeCenter;
