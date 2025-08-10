@@ -81,6 +81,8 @@ kernel void mprSliceExtractionHardware(
 struct Volume3DRenderParams {
     float rotationZ;
     float3 crosshairPosition;
+    float3 volumeOrigin;        // Add volume origin
+    float3 volumeSpacing;       // Add volume spacing
     float windowCenter;
     float windowWidth;
     float zoom;
@@ -154,6 +156,15 @@ kernel void volumeRender3D(
     float3 accumulatedColor = float3(0.0);
     float accumulatedAlpha = 0.0;
     
+    // Convert crosshair world position to volume coordinates for use in ray marching
+    float3 crosshairVoxel = (params.crosshairPosition - params.volumeOrigin) / params.volumeSpacing;
+    
+    // Define crosshair line colors (X=red, Y=green, Z=blue for clarity)
+    float3 xAxisColor = float3(1.0, 0.2, 0.2);  // Red for X-axis (left-right)
+    float3 yAxisColor = float3(0.2, 1.0, 0.2);  // Green for Y-axis (anterior-posterior)
+    float3 zAxisColor = float3(0.2, 0.2, 1.0);  // Blue for Z-axis (superior-inferior)
+    float lineThickness = 1.5;  // Thickness in voxels
+    
     // Apply Z-axis rotation to viewing direction (calculate once)
     float cosZ = cos(params.rotationZ);
     float sinZ = sin(params.rotationZ);
@@ -182,12 +193,14 @@ kernel void volumeRender3D(
         
         float3 volumePos = center + rotatedOffset;
         
-        // Clamp to volume bounds
-        uint3 samplePos = uint3(
-            min(uint(volumePos.x), volumeDim.x - 1),
-            min(uint(volumePos.y), volumeDim.y - 1),
-            min(uint(volumePos.z), volumeDim.z - 1)
-        );
+        // FIXED: Proper bounds checking - skip samples outside volume
+        if (volumePos.x < 0 || volumePos.x >= float(volumeDim.x) ||
+            volumePos.y < 0 || volumePos.y >= float(volumeDim.y) ||
+            volumePos.z < 0 || volumePos.z >= float(volumeDim.z)) {
+            continue;  // Skip this sample completely
+        }
+        
+        uint3 samplePos = uint3(volumePos);
         
         // Sample volume
         short rawValue = volumeTexture.read(samplePos).r;
@@ -214,48 +227,40 @@ kernel void volumeRender3D(
         }
         // Air and fat are transparent
         
+        // Check if this sample is near a crosshair line
+        // X-axis line (extends along X, fixed Y and Z)
+        float distToXLine = length(float2(volumePos.y - crosshairVoxel.y, volumePos.z - crosshairVoxel.z));
+        // Y-axis line (extends along Y, fixed X and Z)
+        float distToYLine = length(float2(volumePos.x - crosshairVoxel.x, volumePos.z - crosshairVoxel.z));
+        // Z-axis line (extends along Z, fixed X and Y)
+        float distToZLine = length(float2(volumePos.x - crosshairVoxel.x, volumePos.y - crosshairVoxel.y));
+        
+        // If near a crosshair line, blend its color
+        bool onCrosshair = false;
+        float3 crosshairColor = float3(0.0);
+        if (distToXLine < lineThickness) {
+            crosshairColor = xAxisColor;
+            onCrosshair = true;
+        } else if (distToYLine < lineThickness) {
+            crosshairColor = yAxisColor;
+            onCrosshair = true;
+        } else if (distToZLine < lineThickness) {
+            crosshairColor = zAxisColor;
+            onCrosshair = true;
+        }
+        
+        if (onCrosshair) {
+            // Override with crosshair color
+            color = crosshairColor;
+            alpha = 0.9;  // High opacity for crosshairs
+        }
+        
         // Front-to-back compositing
         float stepAlpha = alpha / float(numSteps) * 80.0;  // Increased from 50
         accumulatedColor += color * stepAlpha * (1.0 - accumulatedAlpha);
         accumulatedAlpha += stepAlpha * (1.0 - accumulatedAlpha);
     }
-    
-    // Add crosshair planes (green intersecting planes)
-    float3 crosshairColor = float3(0.0, 1.0, 0.0);  // Bright green
-    float planeThickness = 1.5;  // Thickness in voxels
-    
-    // Get crosshair position in volume coordinates (center of volume for now)
-    float3 crosshairVoxel = float3(volumeDim) * 0.5;  // Center position
-    
-    // Convert current screen position to volume position (same as main loop)
-    float3 currentBasePos = float3(
-        (correctedNdc.x + 1.0) * 0.5 * float(volumeDim.x),
-        volumeDim.y * 0.5,  // Middle Y position for plane intersection
-        (1.0 - (correctedNdc.y + 1.0) * 0.5) * float(volumeDim.z)
-    );
-    
-    // Apply same rotation as volume (reuse rotation values)
-    float3 center = float3(volumeDim) * 0.5;
-    float3 offsetFromCenter = currentBasePos - center;
-    
-    float3 rotatedOffset = float3(
-        offsetFromCenter.x * cosZ - offsetFromCenter.y * sinZ,
-        offsetFromCenter.x * sinZ + offsetFromCenter.y * cosZ,
-        offsetFromCenter.z
-    );
-    
-    float3 currentVolumePos = center + rotatedOffset;
-    
-    // Check if current pixel is on any crosshair plane
-    bool onXPlane = abs(currentVolumePos.x - crosshairVoxel.x) < planeThickness;
-    bool onYPlane = abs(currentVolumePos.y - crosshairVoxel.y) < planeThickness;
-    bool onZPlane = abs(currentVolumePos.z - crosshairVoxel.z) < planeThickness;
-    
-    // Draw crosshair planes
-    if (onXPlane || onYPlane || onZPlane) {
-        float planeAlpha = 0.4;
-        accumulatedColor = mix(accumulatedColor, crosshairColor, planeAlpha);
-    }
+
     
     // Final output
     float3 finalColor = accumulatedColor;
