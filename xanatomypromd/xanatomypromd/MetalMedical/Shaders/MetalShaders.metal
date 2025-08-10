@@ -161,14 +161,11 @@ kernel void volumeRender3D(
     int numSteps = int(volumeDim.y);
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Convert NDC to voxel coordinates
-        // Apply Z-axis spacing correction to fix vertical stretching
-        float zSpacingCorrection = params.spacingZ / params.spacingX;  // ~4.74 for 2.78/0.585938
-        
+        // Convert NDC to voxel coordinates - simple direct mapping
         float3 basePos = float3(
             (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
             float(step),
-            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z) / zSpacingCorrection  // Compress Z to account for thicker slices
+            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z)
         );
         
         // Apply rotation around Z-axis
@@ -211,32 +208,39 @@ kernel void volumeRender3D(
             color = float3(0.8, 0.4, 0.4) * windowed;
         }
         
-        // Crosshair axes - simple colored lines through volume center
-        float lineThickness = 1.5;
+        // Crosshair axes - bright colored lines through volume center
+        float lineThickness = 2.5;  // Thicker lines
         
-        // X-axis (red) - runs along X at center Y and Z
+        // X-axis (bright red) - runs along X at center Y and Z
         if (abs(volumePos.y - volumeCenter.y) < lineThickness && 
             abs(volumePos.z - volumeCenter.z) < lineThickness) {
-            color = float3(1.0, 0.0, 0.0);  // Red
+            color = float3(1.0, 0.2, 0.2);  // Bright red
             alpha = 1.0;
         }
         
-        // Y-axis (green) - runs along Y at center X and Z
+        // Y-axis (bright green) - runs along Y at center X and Z
         if (abs(volumePos.x - volumeCenter.x) < lineThickness && 
             abs(volumePos.z - volumeCenter.z) < lineThickness) {
-            color = float3(0.0, 1.0, 0.0);  // Green
+            color = float3(0.2, 1.0, 0.2);  // Bright green
             alpha = 1.0;
         }
         
-        // Z-axis (blue) - runs along Z at center X and Y
+        // Z-axis (bright blue) - runs along Z at center X and Y
         if (abs(volumePos.x - volumeCenter.x) < lineThickness && 
             abs(volumePos.y - volumeCenter.y) < lineThickness) {
-            color = float3(0.0, 0.0, 1.0);  // Blue
+            color = float3(0.2, 0.2, 1.0);  // Bright blue
             alpha = 1.0;
         }
         
-        // Front-to-back compositing
-        float stepAlpha = alpha / float(numSteps) * 50.0;
+        // Center intersection point - white sphere
+        float centerDist = length(volumePos - volumeCenter);
+        if (centerDist < 3.0) {
+            color = float3(1.0, 1.0, 0.0);  // Yellow center
+            alpha = 1.0;
+        }
+        
+        // Front-to-back compositing with higher visibility
+        float stepAlpha = alpha / float(numSteps) * 80.0;  // Increased from 50
         accumulatedColor += color * stepAlpha * (1.0 - accumulatedAlpha);
         accumulatedAlpha += stepAlpha * (1.0 - accumulatedAlpha);
     }
