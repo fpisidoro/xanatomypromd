@@ -136,6 +136,12 @@ kernel void volumeRender3D(
         return;
     }
     
+    // DEBUG: Just output a gradient to verify shader is running
+    float2 uv = float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height());
+    float3 color = float3(uv.x, uv.y, 0.5);
+    outputTexture.write(float4(color, 1.0), gid);
+    return;
+    
     // Screen coordinates to normalized device coordinates [-1, 1]
     float2 ndc = (float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height())) * 2.0 - 1.0;
     ndc.y = -ndc.y; // Flip Y
@@ -224,16 +230,21 @@ kernel void volumeRender3D(
         
         uint3 samplePos = uint3(volumePos);
         
-        // Sample volume
+        // Sample volume as signed integer
         short rawValue = volumeTexture.read(samplePos).r;
         float hounsfield = float(rawValue);
         
-        // Debug: Always show something for bone
-        if (hounsfield > 200) {
-            accumulatedColor = float3(1.0, 1.0, 1.0);  // White for bone
-            accumulatedAlpha = 1.0;
-            break;  // Stop on first bone hit for debugging
+        // Debug: Show any non-zero values
+        if (abs(hounsfield) > 10) {  // Any non-air value
+            // Map hounsfield to grayscale for debugging
+            float intensity = clamp((hounsfield + 1000.0) / 3000.0, 0.0, 1.0);  // Map [-1000, 2000] to [0, 1]
+            accumulatedColor += float3(intensity) * 0.01;
+            accumulatedAlpha += 0.01;
+            // Continue to accumulate through volume
         }
+        
+        // Skip the normal rendering for now to focus on debug
+        continue;
         
         // Apply windowing
         float windowMin = params.windowCenter - params.windowWidth / 2.0;
