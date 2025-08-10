@@ -191,10 +191,27 @@ kernel void volumeRender3D(
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
         // Simple 3D position in volume space
         // We're ray marching through Y (front to back)
+        
+        // The volume is 512x512x53 - we should NOT stretch it
+        // Instead, we should only ray march through the actual volume bounds
+        float aspectRatio = float(volumeDim.z) / float(volumeDim.x);  // 53/512 ≈ 0.1035
+        
+        // Map screen coordinates to volume, but respect aspect ratio
+        // Screen Y should only map to the actual Z range of the volume
+        float screenY = float(gid.y) / float(outputTexture.get_height());
+        
+        // Center the volume vertically and apply aspect ratio
+        float zPos = (screenY - 0.5) / aspectRatio + 0.5;
+        
+        // Skip rays that are outside the volume
+        if (zPos < 0.0 || zPos > 1.0) {
+            continue;
+        }
+        
         float3 basePos = float3(
             float(gid.x) * float(volumeDim.x) / float(outputTexture.get_width()),   // X coordinate
             float(step),                                                             // Y coordinate (depth)
-            float(gid.y) * float(volumeDim.z) / float(outputTexture.get_height())   // Z coordinate
+            zPos * float(volumeDim.z)                                               // Z coordinate (with aspect correction)
         );
         
         // Apply rotation around Z-axis (rotate the sampling position)
