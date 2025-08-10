@@ -161,12 +161,11 @@ kernel void volumeRender3D(
     int numSteps = int(volumeDim.y);
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Map screen Y to volume Z with proper spacing compensation
-        // Compress Y mapping because Z voxels represent more physical distance
+        // Direct mapping - no scaling needed
         float3 basePos = float3(
             (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
             float(step),
-            (viewNdc.y * params.spacingZ / params.spacingX + 1.0) * 0.5 * float(volumeDim.z)
+            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z)
         );
         
         // Apply rotation around Z-axis
