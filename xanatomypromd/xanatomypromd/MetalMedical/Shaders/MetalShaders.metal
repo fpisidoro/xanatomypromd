@@ -140,18 +140,11 @@ kernel void volumeRender3D(
     float2 ndc = (float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height())) * 2.0 - 1.0;
     ndc.y = -ndc.y; // Flip Y
     
-    // Apply correct aspect ratio using DICOM spacing
-    // From logs: Spacing: SIMD3<Float>(0.585938, 0.585938, 2.78) mm
-    float3 spacing = float3(0.585938, 0.585938, 2.78);
-    
-    // Normalize NDC by spacing to get correct proportions
-    float2 correctedNdc = float2(
-        ndc.x * spacing.x / spacing.y,  // X relative to Y
-        ndc.y * spacing.z / spacing.y   // Z relative to Y (correct vertical scaling)
-    );
-    
     // Volume dimensions and setup
     uint3 volumeDim = uint3(volumeTexture.get_width(), volumeTexture.get_height(), volumeTexture.get_depth());
+    
+    // Apply zoom and pan
+    float2 viewNdc = ndc / params.zoom - float2(params.panX, params.panY) / (params.zoom * 100.0);
     
     float3 accumulatedColor = float3(0.0);
     float accumulatedAlpha = 0.0;
@@ -188,30 +181,54 @@ kernel void volumeRender3D(
     // Physical size of the volume in mm
     float3 physicalSize = float3(volumeDim) * params.volumeSpacing;
     
-    // We want to fit the volume on screen maintaining aspect ratio
-    // Use X dimension as reference (full screen width)
-    float screenToPhysicalX = physicalSize.x / float(outputTexture.get_width());
+    // Ray marching setup for coronal view
+    // We're looking from anterior to posterior (along Y-axis)
+    // Screen X maps to anatomical X (left-right)
+    // Screen Y maps to anatomical Z (superior-inferior)
     
-    // Ray march through volume with rotated viewing direction
-    int numSteps = int(volumeDim.y);  // Still marching through Y (anterior-posterior)
+    // Ray march through volume along Y-axis (anterior-posterior)
+    int numSteps = int(volumeDim.y);  // March through entire Y dimension
+    float stepSize = 1.0;  // Step in voxel units
+    
+    // For coronal view projection:
+    // Screen X maps to Volume X (left-right) 
+    // Screen Y maps to Volume Z (superior-inferior)
+    // Ray marches through Volume Y (anterior-posterior)
+    
+    // Calculate physical dimensions to maintain proper aspect ratio
+    float physicalWidth = float(volumeDim.x) * params.volumeSpacing.x;   // Width in mm
+    float physicalHeight = float(volumeDim.z) * params.volumeSpacing.z;  // Height in mm (Z not Y!)
+    
+    // Aspect ratios
+    float physicalAspect = physicalWidth / physicalHeight;
+    float screenAspect = float(outputTexture.get_width()) / float(outputTexture.get_height());
+    
+    // Calculate scaling to maintain anatomically correct proportions
+    float2 scale;
+    if (physicalAspect > screenAspect) {
+        // Physical volume is wider than screen - fit width
+        scale = float2(1.0, screenAspect / physicalAspect);
+    } else {
+        // Physical volume is taller than screen - fit height
+        scale = float2(physicalAspect / screenAspect, 1.0);
+    }
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Map screen pixels to physical mm, then to voxels
-        // This maintains the actual proportions of the volume
+        // Map screen to voxel space maintaining proper aspect ratio
+        // Scale and then map from NDC [-1,1] to voxel coordinates
+        float2 scaledNdc = viewNdc * scale;
         
-        // Physical position in mm
-        float3 physicalPos = float3(
-            float(gid.x) * screenToPhysicalX,                                          // X in mm
-            float(step) * params.volumeSpacing.y,                                      // Y in mm
-            (float(gid.y) - float(outputTexture.get_height()) * 0.5) * screenToPhysicalX + physicalSize.z * 0.5  // Z in mm, centered
+        // Convert to voxel coordinates
+        float3 basePos = float3(
+            (scaledNdc.x + 1.0) * 0.5 * float(volumeDim.x),  // X: left-right  
+            float(step),                                      // Y: anterior-posterior (ray step)
+            (scaledNdc.y + 1.0) * 0.5 * float(volumeDim.z)   // Z: superior-inferior
         );
         
-        // Convert physical position to voxel indices
-        float3 basePos = physicalPos / params.volumeSpacing;
-        
-        // Check bounds
-        if (basePos.z < 0 || basePos.z >= float(volumeDim.z)) {
-            continue;  // Outside volume in Z
+        // Skip pixels outside volume
+        if (basePos.x < 0 || basePos.x >= float(volumeDim.x) ||
+            basePos.z < 0 || basePos.z >= float(volumeDim.z)) {
+            continue;
         }
         
         // Apply rotation around Z-axis (rotate the sampling position)
