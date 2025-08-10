@@ -113,12 +113,12 @@ struct Standalone3DView: View {
         SimultaneousGesture(
             DragGesture()
                 .onChanged { value in
+                    // Only rotate with horizontal swipes
                     let rotationSensitivity: Float = 0.01
                     rotationZ += Float(value.translation.width) * rotationSensitivity
                     
-                    let zoomSensitivity: CGFloat = 0.01
-                    let newZoom = max(0.5, min(3.0, localZoom + value.translation.height * zoomSensitivity))
-                    localZoom = newZoom
+                    // Remove vertical zoom - that was the problem!
+                    // Vertical swipes should do nothing or could rotate on another axis
                 },
             
             MagnificationGesture()

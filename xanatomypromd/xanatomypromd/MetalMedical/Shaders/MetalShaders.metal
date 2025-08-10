@@ -139,7 +139,7 @@ kernel void volumeRender3D(
     
     // Screen coordinates to normalized device coordinates [-1, 1]
     float2 ndc = (float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height())) * 2.0 - 1.0;
-    ndc.y = -ndc.y; // Flip Y
+    // Don't flip Y - keep image right-side up
     
     // Volume dimensions and setup
     uint3 volumeDim = uint3(volumeTexture.get_width(), volumeTexture.get_height(), volumeTexture.get_depth());
