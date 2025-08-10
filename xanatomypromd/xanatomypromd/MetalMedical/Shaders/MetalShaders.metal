@@ -164,14 +164,11 @@ kernel void volumeRender3D(
     int numSteps = int(volumeDim.y);
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Simple aspect ratio fix: screen Y needs to sample fewer Z voxels
-        // because each Z voxel represents more physical distance
-        float zAspectRatio = params.spacingZ / params.spacingX; // ~4.74
-        
+        // Direct mapping without any scaling
         float3 basePos = float3(
             (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
             float(step),
-            (viewNdc.y / zAspectRatio + 1.0) * 0.5 * float(volumeDim.z)
+            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z)
         );
         
         // Apply rotation around Z-axis
