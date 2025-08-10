@@ -176,7 +176,7 @@ kernel void volumeRender3D(
     float3 xAxisColor = float3(1.0, 0.0, 0.0);  // Pure red for X-axis (left-right)
     float3 yAxisColor = float3(0.0, 1.0, 0.0);  // Pure green for Y-axis (anterior-posterior)
     float3 zAxisColor = float3(0.0, 0.0, 1.0);  // Pure blue for Z-axis (superior-inferior)
-    float lineThickness = 3.0;  // Thickness in voxels (increased for better visibility)
+    float lineThickness = 1.0;  // THIN lines (was 3.0)
     
     // Apply Z-axis rotation to viewing direction (calculate once)
     float cosZ = cos(params.rotationZ);
@@ -191,11 +191,29 @@ kernel void volumeRender3D(
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
         // Simple 3D position in volume space
         // We're ray marching through Y (front to back)
+        
+        // MAINTAIN ASPECT RATIO - don't stretch to fill screen
+        // Volume is 512x512x53, so Z dimension is much smaller
+        // Map screen coordinates to volume maintaining proportions
+        
+        // Get screen position in normalized coordinates [0,1]
+        float2 screenNorm = float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height());
+        
+        // Center the volume in screen space
+        float2 centered = screenNorm - 0.5;
+        
+        // Apply aspect ratio correction based on volume dimensions
+        // X and Y are 512, Z is 53, so Z is ~10% of X/Y
+        float volumeAspectZ = float(volumeDim.z) / float(volumeDim.x);  // 53/512 = ~0.1
+        
         float3 basePos = float3(
-            float(gid.x) * float(volumeDim.x) / float(outputTexture.get_width()),   // X coordinate
-            float(step),                                                             // Y coordinate (depth)
-            float(gid.y) * float(volumeDim.z) / float(outputTexture.get_height())   // Z coordinate
+            (centered.x + 0.5) * float(volumeDim.x),                    // X: maintain full width
+            float(step),                                                 // Y: ray depth
+            (centered.y * volumeAspectZ + 0.5) * float(volumeDim.x)     // Z: scale by aspect ratio
         );
+        
+        // Clamp Z to actual volume bounds
+        basePos.z = clamp(basePos.z, 0.0, float(volumeDim.z - 1));
         
         // Apply rotation around Z-axis (rotate the sampling position)
         float3 offsetFromCenter = basePos - volumeCenter;
