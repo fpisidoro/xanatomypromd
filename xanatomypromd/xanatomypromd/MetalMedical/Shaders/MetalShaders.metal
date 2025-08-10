@@ -150,8 +150,11 @@ kernel void volumeRender3D(
     float3 accumulatedColor = float3(0.0);
     float accumulatedAlpha = 0.0;
     
-    // Volume center for rotation
+    // Volume center for rotation - in voxel space
     float3 volumeCenter = float3(volumeDim) * 0.5;
+    
+    // Physical volume dimensions in mm
+    float3 physicalDimensions = float3(volumeDim) * float3(params.spacingX, params.spacingY, params.spacingZ);
     
     // Apply Z-axis rotation to viewing direction (calculate once)
     float cosZ = cos(params.rotationZ);
@@ -161,12 +164,16 @@ kernel void volumeRender3D(
     int numSteps = int(volumeDim.y);
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Direct mapping - no scaling needed
-        float3 basePos = float3(
-            (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
-            float(step),
-            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z)
+        // Map screen to physical space, then to voxels
+        // Screen maps to physical mm uniformly, then convert to voxel indices
+        float3 physicalPos = float3(
+            (viewNdc.x + 1.0) * 0.5 * physicalDimensions.x,  // Physical X in mm
+            float(step) * params.spacingY,                    // Physical Y in mm (step through slices)
+            (viewNdc.y + 1.0) * 0.5 * physicalDimensions.z   // Physical Z in mm
         );
+        
+        // Convert physical mm to voxel indices
+        float3 basePos = physicalPos / float3(params.spacingX, params.spacingY, params.spacingZ);
         
         // Apply rotation around Z-axis
         float3 offsetFromCenter = basePos - volumeCenter;
