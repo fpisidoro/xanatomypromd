@@ -189,15 +189,12 @@ kernel void volumeRender3D(
     int numSteps = int(volumeDim.y);  // Still marching through Y (anterior-posterior)
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // We're looking at the volume from the FRONT (coronal view)
-        // Screen X (left-right) maps to Volume X (left-right)
-        // Screen Y (up-down) maps to Volume Z (superior-inferior) 
-        // Ray marches through Volume Y (anterior-posterior)
-        
+        // Simple 3D position in volume space
+        // We're ray marching through Y (front to back)
         float3 basePos = float3(
-            float(gid.x) * float(volumeDim.x) / float(outputTexture.get_width()),     // X: screen X → volume X
-            float(step),                                                               // Y: ray depth → volume Y
-            float(volumeDim.z - 1) - (float(gid.y) * float(volumeDim.z) / float(outputTexture.get_height()))  // Z: screen Y → volume Z (INVERTED - top of screen is top of patient)
+            float(gid.x) * float(volumeDim.x) / float(outputTexture.get_width()),   // X coordinate
+            float(step),                                                             // Y coordinate (depth)
+            float(gid.y) * float(volumeDim.z) / float(outputTexture.get_height())   // Z coordinate
         );
         
         // Apply rotation around Z-axis (rotate the sampling position)
