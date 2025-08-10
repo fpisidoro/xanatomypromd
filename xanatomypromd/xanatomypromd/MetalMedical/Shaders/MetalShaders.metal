@@ -185,17 +185,34 @@ kernel void volumeRender3D(
     // Volume center for rotation
     float3 volumeCenter = float3(volumeDim) * 0.5;
     
+    // Physical size of the volume in mm
+    float3 physicalSize = float3(volumeDim) * params.volumeSpacing;
+    
+    // We want to fit the volume on screen maintaining aspect ratio
+    // Use X dimension as reference (full screen width)
+    float screenToPhysicalX = physicalSize.x / float(outputTexture.get_width());
+    
     // Ray march through volume with rotated viewing direction
     int numSteps = int(volumeDim.y);  // Still marching through Y (anterior-posterior)
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Simple 3D position in volume space - exactly like MPR views
-        // Just map screen coordinates to volume coordinates directly
-        float3 basePos = float3(
-            float(gid.x) * float(volumeDim.x) / float(outputTexture.get_width()),   // X coordinate
-            float(step),                                                             // Y coordinate (depth)
-            float(gid.y) * float(volumeDim.z) / float(outputTexture.get_height())   // Z coordinate
+        // Map screen pixels to physical mm, then to voxels
+        // This maintains the actual proportions of the volume
+        
+        // Physical position in mm
+        float3 physicalPos = float3(
+            float(gid.x) * screenToPhysicalX,                                          // X in mm
+            float(step) * params.volumeSpacing.y,                                      // Y in mm
+            (float(gid.y) - float(outputTexture.get_height()) * 0.5) * screenToPhysicalX + physicalSize.z * 0.5  // Z in mm, centered
         );
+        
+        // Convert physical position to voxel indices
+        float3 basePos = physicalPos / params.volumeSpacing;
+        
+        // Check bounds
+        if (basePos.z < 0 || basePos.z >= float(volumeDim.z)) {
+            continue;  // Outside volume in Z
+        }
         
         // Apply rotation around Z-axis (rotate the sampling position)
         float3 offsetFromCenter = basePos - volumeCenter;
