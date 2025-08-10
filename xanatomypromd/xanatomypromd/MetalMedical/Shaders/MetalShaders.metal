@@ -158,16 +158,14 @@ kernel void volumeRender3D(
     
     // CROSSHAIR POSITION IN 3D VOLUME
     // Convert from DICOM world coordinates (mm) to voxel indices
+    // This is the SAME coordinate system used by MPR views
     float3 crosshairVoxel = (params.crosshairPosition - params.volumeOrigin) / params.volumeSpacing;
     
-    // DEFAULT TO VOLUME CENTER - this is where crosshairs should start
-    // The center of a 512x512x53 volume is at (256, 256, 26.5)
-    if (length(params.crosshairPosition - params.volumeOrigin) < 0.001) {
-        crosshairVoxel = float3(volumeDim) * 0.5;
-    }
-    
-    // Ensure crosshair is within volume bounds
+    // Clamp to volume bounds for safety
     crosshairVoxel = clamp(crosshairVoxel, float3(0.0), float3(volumeDim) - float3(1.0));
+    
+    // Debug: The crosshair should be at the same position as MPR views
+    // For a centered scan, this would be around (256, 256, 26.5) for 512x512x53
     
     // Define crosshair line colors (X=red, Y=green, Z=blue for clarity)
     float3 xAxisColor = float3(1.0, 0.0, 0.0);  // Pure red for X-axis (left-right)
