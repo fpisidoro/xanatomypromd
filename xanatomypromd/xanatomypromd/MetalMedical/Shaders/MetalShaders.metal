@@ -136,189 +136,78 @@ kernel void volumeRender3D(
         return;
     }
     
-    // DEBUG: Just output a gradient to verify shader is running
-    float2 uv = float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height());
-    float3 color = float3(uv.x, uv.y, 0.5);
-    outputTexture.write(float4(color, 1.0), gid);
-    return;
-    
-    // Screen coordinates to normalized device coordinates [-1, 1]
-    float2 ndc = (float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height())) * 2.0 - 1.0;
-    ndc.y = -ndc.y; // Flip Y
-    
-    // Volume dimensions and setup
+    // Volume dimensions
     uint3 volumeDim = uint3(volumeTexture.get_width(), volumeTexture.get_height(), volumeTexture.get_depth());
     
-    // Apply zoom and pan
-    float2 viewNdc = ndc / params.zoom - float2(params.panX, params.panY) / (params.zoom * 100.0);
+    // Screen to NDC
+    float2 uv = float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height());
     
+    // Calculate aspect ratio correction based on DICOM spacing
+    // For coronal view: X width and Z height
+    float aspectCorrection = (params.volumeSpacing.z / params.volumeSpacing.x) * 
+                            (float(volumeDim.x) / float(volumeDim.z)) * 
+                            (float(outputTexture.get_height()) / float(outputTexture.get_width()));
+    
+    // Apply aspect correction to UV coordinates
+    float2 correctedUV = uv;
+    if (aspectCorrection > 1.0) {
+        // Volume is taller, add letterbox on sides
+        correctedUV.x = (uv.x - 0.5) / aspectCorrection + 0.5;
+    } else {
+        // Volume is wider, add letterbox top/bottom
+        correctedUV.y = (uv.y - 0.5) * aspectCorrection + 0.5;
+    }
+    
+    // Check if we're in letterbox area
+    if (correctedUV.x < 0.0 || correctedUV.x > 1.0 || correctedUV.y < 0.0 || correctedUV.y > 1.0) {
+        outputTexture.write(float4(0.0, 0.0, 0.0, 1.0), gid);
+        return;
+    }
+    
+    // Ray marching through volume
     float3 accumulatedColor = float3(0.0);
     float accumulatedAlpha = 0.0;
     
-    // CROSSHAIR POSITION IN 3D VOLUME
-    // The MPR views send us currentWorldPosition which is the center in DICOM mm
-    // We convert to voxel space: (world - origin) / spacing
-    float3 crosshairVoxel = (params.crosshairPosition - params.volumeOrigin) / params.volumeSpacing;
-    
-    // If the position hasn't been initialized, default to center
-    // Center of 512x512x53 volume is at voxel (256, 256, 26.5)
-    if (crosshairVoxel.x < 1.0 && crosshairVoxel.y < 1.0 && crosshairVoxel.z < 1.0) {
-        crosshairVoxel = float3(float(volumeDim.x) * 0.5, 
-                               float(volumeDim.y) * 0.5, 
-                               float(volumeDim.z) * 0.5);
-    }
-    
-    // Clamp to volume bounds for safety
-    crosshairVoxel = clamp(crosshairVoxel, float3(0.0), float3(volumeDim) - float3(1.0));
-    
-    // Define crosshair line colors (X=red, Y=green, Z=blue for clarity)
-    float3 xAxisColor = float3(1.0, 0.0, 0.0);  // Pure red for X-axis (left-right)
-    float3 yAxisColor = float3(0.0, 1.0, 0.0);  // Pure green for Y-axis (anterior-posterior)
-    float3 zAxisColor = float3(0.0, 0.0, 1.0);  // Pure blue for Z-axis (superior-inferior)
-    float lineThickness = 1.0;  // THIN lines (was 3.0)
-    
-    // Apply Z-axis rotation to viewing direction (calculate once)
-    float cosZ = cos(params.rotationZ);
-    float sinZ = sin(params.rotationZ);
-    
-    // Volume center for rotation
-    float3 volumeCenter = float3(volumeDim) * 0.5;
-    
-    // Physical size of the volume in mm
-    float3 physicalSize = float3(volumeDim) * params.volumeSpacing;
-    
-    // Ray marching setup for coronal view
-    // We're looking from anterior to posterior (along Y-axis)
-    // Screen X maps to anatomical X (left-right)
-    // Screen Y maps to anatomical Z (superior-inferior)
-    
-    // Ray march through volume along Y-axis (anterior-posterior)
-    int numSteps = int(volumeDim.y);  // March through entire Y dimension
-    
-    for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Simple direct mapping for coronal view:
-        // Screen pixels map directly to volume voxels
-        // NDC X [-1,1] maps to voxel X [0, volumeDim.x]
-        // NDC Y [-1,1] maps to voxel Z [0, volumeDim.z] (note: Z, not Y!)
-        // Step through Y dimension (anterior-posterior)
-        
-        // Convert NDC to voxel coordinates
-        float3 basePos = float3(
-            (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),  // X: left-right
-            float(step),                                     // Y: anterior-posterior (ray step)
-            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z)   // Z: superior-inferior
+    // March through Y axis (anterior to posterior)
+    for (int step = 0; step < int(volumeDim.y); step++) {
+        // Map corrected UV to volume coordinates
+        float3 pos = float3(
+            correctedUV.x * float(volumeDim.x),
+            float(step),
+            correctedUV.y * float(volumeDim.z)
         );
         
-        // Apply rotation around Z-axis (rotate the sampling position)
-        float3 offsetFromCenter = basePos - volumeCenter;
-        
-        // Rotate X and Y coordinates around Z-axis
-        float3 rotatedOffset = float3(
-            offsetFromCenter.x * cosZ - offsetFromCenter.y * sinZ,
-            offsetFromCenter.x * sinZ + offsetFromCenter.y * cosZ,
-            offsetFromCenter.z  // Z unchanged
-        );
-        
-        float3 volumePos = volumeCenter + rotatedOffset;
-        
-        // FIXED: Proper bounds checking - skip samples outside volume
-        if (volumePos.x < 0 || volumePos.x >= float(volumeDim.x) ||
-            volumePos.y < 0 || volumePos.y >= float(volumeDim.y) ||
-            volumePos.z < 0 || volumePos.z >= float(volumeDim.z)) {
-            continue;  // Skip this sample completely
-        }
-        
-        uint3 samplePos = uint3(volumePos);
-        
-        // Sample volume as signed integer
-        short rawValue = volumeTexture.read(samplePos).r;
-        float hounsfield = float(rawValue);
-        
-        // Debug: Show any non-zero values
-        if (abs(hounsfield) > 10) {  // Any non-air value
-            // Map hounsfield to grayscale for debugging
-            float intensity = clamp((hounsfield + 1000.0) / 3000.0, 0.0, 1.0);  // Map [-1000, 2000] to [0, 1]
-            accumulatedColor += float3(intensity) * 0.01;
-            accumulatedAlpha += 0.01;
-            // Continue to accumulate through volume
-        }
-        
-        // Skip the normal rendering for now to focus on debug
-        continue;
-        
-        // Apply windowing
-        float windowMin = params.windowCenter - params.windowWidth / 2.0;
-        float windowMax = params.windowCenter + params.windowWidth / 2.0;
-        float windowed = clamp((hounsfield - windowMin) / (windowMax - windowMin), 0.0, 1.0);
-        
-        // Get alpha and color based on tissue type - enhanced visibility
-        float alpha = 0.0;
-        float3 color = float3(0.0);
-        
-        if (hounsfield > 200) {  // Bone
-            alpha = 0.8;
-            color = float3(1.0, 1.0, 1.0) * windowed;  // Pure white bone
-        } else if (hounsfield > 50) {  // Dense tissue
-            alpha = 0.3;
-            color = float3(1.0, 0.2, 0.2) * windowed;  // Bright red tissue
-        } else if (hounsfield > -100) {  // Soft tissue
-            alpha = 0.1;
-            color = float3(0.8, 0.4, 0.4) * windowed;  // Pink soft tissue
-        }
-        // Air and fat are transparent
-        
-        // WE ARE IN A 3D VOLUME. JUST DRAW 3 FUCKING LINES.
-        // volumePos is our current position in 3D space
-        // crosshairVoxel is where the lines intersect (256, 256, 26.5)
-        
-        // LINE 1 - RED - Runs along X axis through (ANY X, crosshair.y, crosshair.z)
-        if (abs(volumePos.y - crosshairVoxel.y) < lineThickness && 
-            abs(volumePos.z - crosshairVoxel.z) < lineThickness) {
-            color = xAxisColor;
-            alpha = 1.0;
-        }
-        
-        // LINE 2 - GREEN - Runs along Y axis through (crosshair.x, ANY Y, crosshair.z)
-        if (abs(volumePos.x - crosshairVoxel.x) < lineThickness && 
-            abs(volumePos.z - crosshairVoxel.z) < lineThickness) {
-            color = yAxisColor;
-            alpha = 1.0;
-        }
-        
-        // LINE 3 - BLUE - Runs along Z axis through (crosshair.x, crosshair.y, ANY Z)
-        if (abs(volumePos.x - crosshairVoxel.x) < lineThickness && 
-            abs(volumePos.y - crosshairVoxel.y) < lineThickness) {
-            color = zAxisColor;
-            alpha = 1.0;
-        }
-        
-        // INTERSECTION POINT - YELLOW
-        if (abs(volumePos.x - crosshairVoxel.x) < lineThickness * 2.0 &&
-            abs(volumePos.y - crosshairVoxel.y) < lineThickness * 2.0 &&
-            abs(volumePos.z - crosshairVoxel.z) < lineThickness * 2.0) {
-            color = float3(1.0, 1.0, 0.0);
-            alpha = 1.0;
-        }
-        
-        // Front-to-back compositing with increased visibility
-        float stepAlpha = alpha * 2.0 / float(numSteps);  // Increased multiplier from 80 to 2
-        accumulatedColor += color * stepAlpha * (1.0 - accumulatedAlpha);
-        accumulatedAlpha += stepAlpha * (1.0 - accumulatedAlpha);
-        
-        // Early termination if we've accumulated enough
-        if (accumulatedAlpha > 0.98) {
-            break;
+        // Sample volume
+        if (pos.x >= 0 && pos.x < float(volumeDim.x) &&
+            pos.y >= 0 && pos.y < float(volumeDim.y) &&
+            pos.z >= 0 && pos.z < float(volumeDim.z)) {
+            
+            uint3 samplePos = uint3(pos);
+            short rawValue = volumeTexture.read(samplePos).r;
+            float hounsfield = float(rawValue);
+            
+            // Simple tissue classification
+            float alpha = 0.0;
+            float3 color = float3(0.0);
+            
+            if (hounsfield > 200) {  // Bone
+                alpha = 0.9;
+                color = float3(1.0);
+            } else if (hounsfield > -100 && hounsfield < 100) {  // Soft tissue
+                alpha = 0.1;
+                color = float3(0.8, 0.6, 0.6);
+            }
+            
+            // Accumulate
+            if (alpha > 0.0) {
+                float stepAlpha = alpha / float(volumeDim.y);
+                accumulatedColor += color * stepAlpha * (1.0 - accumulatedAlpha);
+                accumulatedAlpha += stepAlpha * (1.0 - accumulatedAlpha);
+                
+                if (accumulatedAlpha > 0.95) break;
+            }
         }
     }
-
     
-    // Final output with debug check
-    float3 finalColor = accumulatedColor;
-    
-    // Debug: if nothing was accumulated, show a dim gray to indicate we're rendering
-    if (accumulatedAlpha < 0.01) {
-        finalColor = float3(0.1, 0.1, 0.1);  // Dark gray background
-    }
-    
-    outputTexture.write(float4(finalColor, 1.0), gid);
+    outputTexture.write(float4(accumulatedColor, 1.0), gid);
 }
