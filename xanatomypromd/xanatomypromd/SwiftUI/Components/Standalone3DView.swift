@@ -15,11 +15,15 @@ struct Standalone3DView: View {
     let viewSize: CGSize
     let allowInteraction: Bool
     
+    // PERSISTENT 3D view state - maintains rotation/zoom when switching views
     @State private var rotationZ: Float = 0.0
     @State private var localZoom: CGFloat = 1.0
     @State private var lastZoom: CGFloat = 1.0
     @State private var localPan: CGSize = .zero
     @StateObject private var renderer = Metal3DVolumeRenderer()
+    
+    // SYNC: Track crosshair changes for real-time updates
+    @State private var lastCrosshairPosition: SIMD3<Float> = SIMD3<Float>(0, 0, 0)
     
     init(
         coordinateSystem: DICOMCoordinateSystem,
@@ -46,12 +50,20 @@ struct Standalone3DView: View {
                     renderer: renderer,
                     volumeData: volumeData,
                     rotationZ: rotationZ,
-                    crosshairPosition: coordinateSystem.currentWorldPosition,
+                    crosshairPosition: coordinateSystem.currentWorldPosition,  // ALWAYS synced
+                    coordinateSystem: coordinateSystem,
                     windowLevel: sharedState.windowLevel,
                     zoom: localZoom,
                     pan: localPan
                 )
                 .clipped()
+                .onReceive(coordinateSystem.$currentWorldPosition) { newPosition in
+                    // SYNC: Update when crosshairs move in MPR views
+                    if newPosition != lastCrosshairPosition {
+                        lastCrosshairPosition = newPosition
+                        // Force 3D view to re-render with new crosshair position
+                    }
+                }
             } else {
                 VStack {
                     ProgressView()
@@ -78,7 +90,15 @@ struct Standalone3DView: View {
         }
         .frame(width: viewSize.width, height: viewSize.height)
         .gesture(allowInteraction ? createGestureRecognizer() : nil)
-        .onAppear { setupRenderer() }
+        .onAppear { 
+            setupRenderer()
+            // SYNC: Initialize with current crosshair position
+            lastCrosshairPosition = coordinateSystem.currentWorldPosition
+            print("🎯 3D View appeared - synced to crosshair: \(coordinateSystem.currentWorldPosition)")
+        }
+        .onDisappear {
+            print("🎯 3D View disappeared - preserving rotation: \(rotationZ), zoom: \(localZoom)")
+        }
     }
     
     private func setupRenderer() {
@@ -207,6 +227,8 @@ class Metal3DVolumeRenderer: ObservableObject {
     func render(to texture: MTLTexture, 
                 rotationZ: Float,
                 crosshairPosition: SIMD3<Float>,
+                volumeOrigin: SIMD3<Float>,
+                volumeSpacing: SIMD3<Float>,
                 windowLevel: CTWindowLevel,
                 zoom: CGFloat,
                 pan: CGSize) {
@@ -249,6 +271,8 @@ class Metal3DVolumeRenderer: ObservableObject {
         var params = Volume3DRenderParams(
             rotationZ: rotationZ,
             crosshairPosition: crosshairPosition,
+            volumeOrigin: volumeOrigin,
+            volumeSpacing: volumeSpacing,
             windowCenter: windowLevel.center,
             windowWidth: windowLevel.width,
             zoom: Float(zoom),
@@ -305,26 +329,34 @@ struct Volume3DRenderParams {
     let _padding1: (Float, Float, Float)  // 12 bytes padding to align to 16-byte boundary
     let crosshairPosition: SIMD3<Float>  // 12 bytes at 16-byte aligned offset
     let _padding2: Float           // 4 bytes padding
+    let volumeOrigin: SIMD3<Float>     // 12 bytes
+    let _padding3: Float           // 4 bytes padding
+    let volumeSpacing: SIMD3<Float>    // 12 bytes
+    let _padding4: Float           // 4 bytes padding
     let windowCenter: Float        // 4 bytes
     let windowWidth: Float         // 4 bytes  
     let zoom: Float               // 4 bytes
-    let _padding3: Float           // 4 bytes padding
+    let _padding5: Float           // 4 bytes padding
     let panX: Float               // 4 bytes
     let panY: Float               // 4 bytes
-    let _padding4: (Float, Float)  // 8 bytes padding to reach 64 bytes total
+    let _padding6: (Float, Float)  // 8 bytes padding
     
-    init(rotationZ: Float, crosshairPosition: SIMD3<Float>, windowCenter: Float, windowWidth: Float, zoom: Float, panX: Float, panY: Float) {
+    init(rotationZ: Float, crosshairPosition: SIMD3<Float>, volumeOrigin: SIMD3<Float>, volumeSpacing: SIMD3<Float>, windowCenter: Float, windowWidth: Float, zoom: Float, panX: Float, panY: Float) {
         self.rotationZ = rotationZ
         self._padding1 = (0, 0, 0)
         self.crosshairPosition = crosshairPosition
         self._padding2 = 0
+        self.volumeOrigin = volumeOrigin
+        self._padding3 = 0
+        self.volumeSpacing = volumeSpacing
+        self._padding4 = 0
         self.windowCenter = windowCenter
         self.windowWidth = windowWidth
         self.zoom = zoom
-        self._padding3 = 0
+        self._padding5 = 0
         self.panX = panX
         self.panY = panY
-        self._padding4 = (0, 0)
+        self._padding6 = (0, 0)
     }
 }
 
@@ -333,6 +365,7 @@ struct Metal3DRenderView: UIViewRepresentable {
     let volumeData: VolumeData
     let rotationZ: Float
     let crosshairPosition: SIMD3<Float>
+    let coordinateSystem: DICOMCoordinateSystem
     let windowLevel: CTWindowLevel
     let zoom: CGFloat
     let pan: CGSize
@@ -352,6 +385,8 @@ struct Metal3DRenderView: UIViewRepresentable {
         context.coordinator.updateParams(
             rotationZ: rotationZ,
             crosshairPosition: crosshairPosition,
+            volumeOrigin: coordinateSystem.volumeOrigin,
+            volumeSpacing: coordinateSystem.volumeSpacing,
             windowLevel: windowLevel,
             zoom: zoom,
             pan: pan
@@ -367,6 +402,8 @@ struct Metal3DRenderView: UIViewRepresentable {
         let renderer: Metal3DVolumeRenderer
         private var rotationZ: Float = 0
         private var crosshairPosition = SIMD3<Float>(0, 0, 0)
+        private var volumeOrigin = SIMD3<Float>(0, 0, 0)
+        private var volumeSpacing = SIMD3<Float>(1, 1, 1)
         private var windowLevel: CTWindowLevel = .softTissue
         private var zoom: CGFloat = 1.0
         private var pan: CGSize = .zero
@@ -376,9 +413,11 @@ struct Metal3DRenderView: UIViewRepresentable {
             self.renderer = renderer
         }
         
-        func updateParams(rotationZ: Float, crosshairPosition: SIMD3<Float>, windowLevel: CTWindowLevel, zoom: CGFloat, pan: CGSize) {
+        func updateParams(rotationZ: Float, crosshairPosition: SIMD3<Float>, volumeOrigin: SIMD3<Float>, volumeSpacing: SIMD3<Float>, windowLevel: CTWindowLevel, zoom: CGFloat, pan: CGSize) {
             self.rotationZ = rotationZ
             self.crosshairPosition = crosshairPosition
+            self.volumeOrigin = volumeOrigin
+            self.volumeSpacing = volumeSpacing
             self.windowLevel = windowLevel
             self.zoom = zoom
             self.pan = pan
@@ -400,6 +439,8 @@ struct Metal3DRenderView: UIViewRepresentable {
                 to: drawable.texture,
                 rotationZ: rotationZ,
                 crosshairPosition: crosshairPosition,
+                volumeOrigin: volumeOrigin,
+                volumeSpacing: volumeSpacing,
                 windowLevel: windowLevel,
                 zoom: zoom,
                 pan: pan

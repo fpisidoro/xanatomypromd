@@ -79,15 +79,21 @@ kernel void mprSliceExtractionHardware(
 // MARK: - 3D Volume Rendering Shaders
 
 struct Volume3DRenderParams {
-    float rotationZ;
-    float3 crosshairPosition;
-    float3 volumeOrigin;        // Add volume origin
-    float3 volumeSpacing;       // Add volume spacing
-    float windowCenter;
-    float windowWidth;
-    float zoom;
-    float panX;
-    float panY;
+    float rotationZ;                // 4 bytes
+    float3 _padding1;               // 12 bytes padding to align to 16-byte boundary
+    float3 crosshairPosition;       // 12 bytes at 16-byte aligned offset
+    float _padding2;                // 4 bytes padding
+    float3 volumeOrigin;            // 12 bytes
+    float _padding3;                // 4 bytes padding
+    float3 volumeSpacing;           // 12 bytes
+    float _padding4;                // 4 bytes padding
+    float windowCenter;             // 4 bytes
+    float windowWidth;              // 4 bytes
+    float zoom;                     // 4 bytes
+    float _padding5;                // 4 bytes padding
+    float panX;                     // 4 bytes
+    float panY;                     // 4 bytes
+    float2 _padding6;               // 8 bytes padding
 };
 
 // Alpha transfer function for volume rendering - balanced visibility
