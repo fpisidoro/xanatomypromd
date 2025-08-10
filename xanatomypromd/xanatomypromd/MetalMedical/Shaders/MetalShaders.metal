@@ -188,48 +188,20 @@ kernel void volumeRender3D(
     
     // Ray march through volume along Y-axis (anterior-posterior)
     int numSteps = int(volumeDim.y);  // March through entire Y dimension
-    float stepSize = 1.0;  // Step in voxel units
-    
-    // For coronal view projection:
-    // Screen X maps to Volume X (left-right) 
-    // Screen Y maps to Volume Z (superior-inferior)
-    // Ray marches through Volume Y (anterior-posterior)
-    
-    // Calculate physical dimensions to maintain proper aspect ratio
-    float physicalWidth = float(volumeDim.x) * params.volumeSpacing.x;   // Width in mm
-    float physicalHeight = float(volumeDim.z) * params.volumeSpacing.z;  // Height in mm (Z not Y!)
-    
-    // Aspect ratios
-    float physicalAspect = physicalWidth / physicalHeight;
-    float screenAspect = float(outputTexture.get_width()) / float(outputTexture.get_height());
-    
-    // Calculate scaling to maintain anatomically correct proportions
-    float2 scale;
-    if (physicalAspect > screenAspect) {
-        // Physical volume is wider than screen - fit width
-        scale = float2(1.0, screenAspect / physicalAspect);
-    } else {
-        // Physical volume is taller than screen - fit height
-        scale = float2(physicalAspect / screenAspect, 1.0);
-    }
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Map screen to voxel space maintaining proper aspect ratio
-        // Scale and then map from NDC [-1,1] to voxel coordinates
-        float2 scaledNdc = viewNdc * scale;
+        // Simple direct mapping for coronal view:
+        // Screen pixels map directly to volume voxels
+        // NDC X [-1,1] maps to voxel X [0, volumeDim.x]
+        // NDC Y [-1,1] maps to voxel Z [0, volumeDim.z] (note: Z, not Y!)
+        // Step through Y dimension (anterior-posterior)
         
-        // Convert to voxel coordinates
+        // Convert NDC to voxel coordinates
         float3 basePos = float3(
-            (scaledNdc.x + 1.0) * 0.5 * float(volumeDim.x),  // X: left-right  
-            float(step),                                      // Y: anterior-posterior (ray step)
-            (scaledNdc.y + 1.0) * 0.5 * float(volumeDim.z)   // Z: superior-inferior
+            (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),  // X: left-right
+            float(step),                                     // Y: anterior-posterior (ray step)
+            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z)   // Z: superior-inferior
         );
-        
-        // Skip pixels outside volume
-        if (basePos.x < 0 || basePos.x >= float(volumeDim.x) ||
-            basePos.z < 0 || basePos.z >= float(volumeDim.z)) {
-            continue;
-        }
         
         // Apply rotation around Z-axis (rotate the sampling position)
         float3 offsetFromCenter = basePos - volumeCenter;
@@ -255,6 +227,13 @@ kernel void volumeRender3D(
         // Sample volume
         short rawValue = volumeTexture.read(samplePos).r;
         float hounsfield = float(rawValue);
+        
+        // Debug: Always show something for bone
+        if (hounsfield > 200) {
+            accumulatedColor = float3(1.0, 1.0, 1.0);  // White for bone
+            accumulatedAlpha = 1.0;
+            break;  // Stop on first bone hit for debugging
+        }
         
         // Apply windowing
         float windowMin = params.windowCenter - params.windowWidth / 2.0;
@@ -310,14 +289,25 @@ kernel void volumeRender3D(
             alpha = 1.0;
         }
         
-        // Front-to-back compositing
-        float stepAlpha = alpha / float(numSteps) * 80.0;  // Increased from 50
+        // Front-to-back compositing with increased visibility
+        float stepAlpha = alpha * 2.0 / float(numSteps);  // Increased multiplier from 80 to 2
         accumulatedColor += color * stepAlpha * (1.0 - accumulatedAlpha);
         accumulatedAlpha += stepAlpha * (1.0 - accumulatedAlpha);
+        
+        // Early termination if we've accumulated enough
+        if (accumulatedAlpha > 0.98) {
+            break;
+        }
     }
 
     
-    // Final output
+    // Final output with debug check
     float3 finalColor = accumulatedColor;
+    
+    // Debug: if nothing was accumulated, show a dim gray to indicate we're rendering
+    if (accumulatedAlpha < 0.01) {
+        finalColor = float3(0.1, 0.1, 0.1);  // Dark gray background
+    }
+    
     outputTexture.write(float4(finalColor, 1.0), gid);
 }
