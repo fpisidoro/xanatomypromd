@@ -161,12 +161,14 @@ kernel void volumeRender3D(
     float sinZ = sin(params.rotationZ);
     
     // Ray march through volume along Y-axis (anterior-posterior)
-    int numSteps = int(volumeDim.y);
+    // Adjust step size based on spacing to sample uniformly in physical space
+    float stepSize = params.spacingY / params.spacingX;  // How many voxel units per physical mm
+    int numSteps = int(float(volumeDim.y) / stepSize);  // Fewer steps needed
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
         float3 basePos = float3(
             (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
-            float(step),
+            float(step) * stepSize,  // Step through Y using physical step size
             (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z)
         );
         
