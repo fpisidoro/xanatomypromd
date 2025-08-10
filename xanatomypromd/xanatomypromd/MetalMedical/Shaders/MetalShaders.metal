@@ -137,77 +137,81 @@ kernel void volumeRender3D(
         return;
     }
     
-    // Volume dimensions
+    // Screen coordinates to normalized device coordinates [-1, 1]
+    float2 ndc = (float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height())) * 2.0 - 1.0;
+    ndc.y = -ndc.y; // Flip Y
+    
+    // Volume dimensions and setup
     uint3 volumeDim = uint3(volumeTexture.get_width(), volumeTexture.get_height(), volumeTexture.get_depth());
     
-    // Screen to NDC
-    float2 uv = float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height());
+    // Apply zoom and pan
+    float2 viewNdc = ndc / params.zoom - float2(params.panX, params.panY) / (params.zoom * 100.0);
     
-    // Calculate aspect ratio correction based on DICOM spacing
-    // For coronal view: X width and Z height
-    float aspectCorrection = (params.spacingZ / params.spacingX) * 
-                            (float(volumeDim.x) / float(volumeDim.z)) * 
-                            (float(outputTexture.get_height()) / float(outputTexture.get_width()));
-    
-    // Apply aspect correction to UV coordinates
-    float2 correctedUV = uv;
-    if (aspectCorrection > 1.0) {
-        // Volume is taller, add letterbox on sides
-        correctedUV.x = (uv.x - 0.5) / aspectCorrection + 0.5;
-    } else {
-        // Volume is wider, add letterbox top/bottom
-        correctedUV.y = (uv.y - 0.5) * aspectCorrection + 0.5;
-    }
-    
-    // Check if we're in letterbox area
-    if (correctedUV.x < 0.0 || correctedUV.x > 1.0 || correctedUV.y < 0.0 || correctedUV.y > 1.0) {
-        outputTexture.write(float4(0.0, 0.0, 0.0, 1.0), gid);
-        return;
-    }
-    
-    // Ray marching through volume
     float3 accumulatedColor = float3(0.0);
     float accumulatedAlpha = 0.0;
     
-    // March through Y axis (anterior to posterior)
-    for (int step = 0; step < int(volumeDim.y); step++) {
-        // Map corrected UV to volume coordinates
-        float3 pos = float3(
-            correctedUV.x * float(volumeDim.x),
+    // Volume center for rotation
+    float3 volumeCenter = float3(volumeDim) * 0.5;
+    
+    // Apply Z-axis rotation to viewing direction (calculate once)
+    float cosZ = cos(params.rotationZ);
+    float sinZ = sin(params.rotationZ);
+    
+    // Ray march through volume along Y-axis (anterior-posterior)
+    int numSteps = int(volumeDim.y);
+    
+    for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
+        // Convert NDC to voxel coordinates
+        float3 basePos = float3(
+            (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
             float(step),
-            correctedUV.y * float(volumeDim.z)
+            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z)
         );
         
-        // Sample volume
-        if (pos.x >= 0 && pos.x < float(volumeDim.x) &&
-            pos.y >= 0 && pos.y < float(volumeDim.y) &&
-            pos.z >= 0 && pos.z < float(volumeDim.z)) {
-            
-            uint3 samplePos = uint3(pos);
-            short rawValue = volumeTexture.read(samplePos).r;
-            float hounsfield = float(rawValue);
-            
-            // Simple tissue classification
-            float alpha = 0.0;
-            float3 color = float3(0.0);
-            
-            if (hounsfield > 200) {  // Bone
-                alpha = 0.9;
-                color = float3(1.0);
-            } else if (hounsfield > -100 && hounsfield < 100) {  // Soft tissue
-                alpha = 0.1;
-                color = float3(0.8, 0.6, 0.6);
-            }
-            
-            // Accumulate
-            if (alpha > 0.0) {
-                float stepAlpha = alpha / float(volumeDim.y);
-                accumulatedColor += color * stepAlpha * (1.0 - accumulatedAlpha);
-                accumulatedAlpha += stepAlpha * (1.0 - accumulatedAlpha);
-                
-                if (accumulatedAlpha > 0.95) break;
-            }
+        // Apply rotation around Z-axis
+        float3 offsetFromCenter = basePos - volumeCenter;
+        float3 rotatedOffset = float3(
+            offsetFromCenter.x * cosZ - offsetFromCenter.y * sinZ,
+            offsetFromCenter.x * sinZ + offsetFromCenter.y * cosZ,
+            offsetFromCenter.z
+        );
+        float3 volumePos = volumeCenter + rotatedOffset;
+        
+        // Bounds checking
+        if (volumePos.x < 0 || volumePos.x >= float(volumeDim.x) ||
+            volumePos.y < 0 || volumePos.y >= float(volumeDim.y) ||
+            volumePos.z < 0 || volumePos.z >= float(volumeDim.z)) {
+            continue;
         }
+        
+        uint3 samplePos = uint3(volumePos);
+        short rawValue = volumeTexture.read(samplePos).r;
+        float hounsfield = float(rawValue);
+        
+        // Apply windowing
+        float windowMin = params.windowCenter - params.windowWidth / 2.0;
+        float windowMax = params.windowCenter + params.windowWidth / 2.0;
+        float windowed = clamp((hounsfield - windowMin) / (windowMax - windowMin), 0.0, 1.0);
+        
+        // Get alpha and color based on tissue type
+        float alpha = 0.0;
+        float3 color = float3(0.0);
+        
+        if (hounsfield > 200) {  // Bone
+            alpha = 0.8;
+            color = float3(1.0, 1.0, 1.0) * windowed;
+        } else if (hounsfield > 50) {  // Dense tissue
+            alpha = 0.3;
+            color = float3(1.0, 0.2, 0.2) * windowed;
+        } else if (hounsfield > -100) {  // Soft tissue
+            alpha = 0.1;
+            color = float3(0.8, 0.4, 0.4) * windowed;
+        }
+        
+        // Front-to-back compositing
+        float stepAlpha = alpha / float(numSteps) * 50.0;
+        accumulatedColor += color * stepAlpha * (1.0 - accumulatedAlpha);
+        accumulatedAlpha += stepAlpha * (1.0 - accumulatedAlpha);
     }
     
     outputTexture.write(float4(accumulatedColor, 1.0), gid);
