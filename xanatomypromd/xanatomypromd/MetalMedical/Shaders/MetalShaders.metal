@@ -156,14 +156,18 @@ kernel void volumeRender3D(
     float3 accumulatedColor = float3(0.0);
     float accumulatedAlpha = 0.0;
     
-    // Convert crosshair world position to volume coordinates for use in ray marching
+    // Convert crosshair world position (DICOM mm) to voxel coordinates
+    // This matches EXACTLY how the MPR views calculate positions
     float3 crosshairVoxel = (params.crosshairPosition - params.volumeOrigin) / params.volumeSpacing;
+    
+    // Clamp crosshair to volume bounds to ensure it's visible
+    crosshairVoxel = clamp(crosshairVoxel, float3(0.0), float3(volumeDim) - 1.0);
     
     // Define crosshair line colors (X=red, Y=green, Z=blue for clarity)
     float3 xAxisColor = float3(1.0, 0.2, 0.2);  // Red for X-axis (left-right)
     float3 yAxisColor = float3(0.2, 1.0, 0.2);  // Green for Y-axis (anterior-posterior)
     float3 zAxisColor = float3(0.2, 0.2, 1.0);  // Blue for Z-axis (superior-inferior)
-    float lineThickness = 1.5;  // Thickness in voxels
+    float lineThickness = 2.0;  // Thickness in voxels (increased for visibility)
     
     // Apply Z-axis rotation to viewing direction (calculate once)
     float cosZ = cos(params.rotationZ);
@@ -227,32 +231,49 @@ kernel void volumeRender3D(
         }
         // Air and fat are transparent
         
-        // Check if this sample is near a crosshair line
-        // X-axis line (extends along X, fixed Y and Z)
-        float distToXLine = length(float2(volumePos.y - crosshairVoxel.y, volumePos.z - crosshairVoxel.z));
-        // Y-axis line (extends along Y, fixed X and Z)
-        float distToYLine = length(float2(volumePos.x - crosshairVoxel.x, volumePos.z - crosshairVoxel.z));
-        // Z-axis line (extends along Z, fixed X and Y)
-        float distToZLine = length(float2(volumePos.x - crosshairVoxel.x, volumePos.y - crosshairVoxel.y));
+        // Check if this voxel position is near one of the crosshair lines
+        // The crosshairVoxel position is already in voxel coordinates (matches MPR views)
         
-        // If near a crosshair line, blend its color
-        bool onCrosshair = false;
-        float3 crosshairColor = float3(0.0);
-        if (distToXLine < lineThickness) {
-            crosshairColor = xAxisColor;
-            onCrosshair = true;
-        } else if (distToYLine < lineThickness) {
-            crosshairColor = yAxisColor;
-            onCrosshair = true;
-        } else if (distToZLine < lineThickness) {
-            crosshairColor = zAxisColor;
-            onCrosshair = true;
-        }
+        // Calculate distance to each axis line in voxel space
+        // X-axis line: extends along X direction, fixed at crosshair's Y and Z
+        float distToXLine = sqrt(pow(volumePos.y - crosshairVoxel.y, 2.0) + pow(volumePos.z - crosshairVoxel.z, 2.0));
         
-        if (onCrosshair) {
-            // Override with crosshair color
-            color = crosshairColor;
-            alpha = 0.9;  // High opacity for crosshairs
+        // Y-axis line: extends along Y direction, fixed at crosshair's X and Z  
+        float distToYLine = sqrt(pow(volumePos.x - crosshairVoxel.x, 2.0) + pow(volumePos.z - crosshairVoxel.z, 2.0));
+        
+        // Z-axis line: extends along Z direction, fixed at crosshair's X and Y
+        float distToZLine = sqrt(pow(volumePos.x - crosshairVoxel.x, 2.0) + pow(volumePos.y - crosshairVoxel.y, 2.0));
+        
+        // First check if we're at the crosshair center point
+        float distToCenter = length(volumePos - crosshairVoxel);
+        if (distToCenter < lineThickness * 1.5) {
+            // Draw bright center point where all lines intersect
+            float3 centerColor = float3(1.0, 1.0, 0.0);  // Yellow center
+            float centerAlpha = 1.0 * (1.0 - distToCenter / (lineThickness * 1.5));
+            color = mix(color, centerColor, centerAlpha);
+            alpha = max(alpha, centerAlpha * 0.95);
+        } else {
+            // Draw crosshair lines with proper visibility
+            // Priority order: check all lines and blend the closest one
+            float minDist = min(min(distToXLine, distToYLine), distToZLine);
+            
+            if (minDist < lineThickness) {
+                // Determine which line we're closest to and apply its color
+                float3 crosshairColor;
+                float lineAlpha = 0.9 * (1.0 - minDist / lineThickness);  // Increased opacity
+                
+                if (minDist == distToXLine) {
+                    crosshairColor = xAxisColor;
+                } else if (minDist == distToYLine) {
+                    crosshairColor = yAxisColor;
+                } else {
+                    crosshairColor = zAxisColor;
+                }
+                
+                // Blend crosshair with tissue
+                color = mix(color, crosshairColor, lineAlpha);
+                alpha = max(alpha, lineAlpha);
+            }
         }
         
         // Front-to-back compositing
