@@ -164,17 +164,10 @@ kernel void volumeRender3D(
     int numSteps = int(volumeDim.y);
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Map to a smaller range of Z voxels to maintain physical proportions
-        // 512 X-voxels at 0.585938mm = 300mm
-        // To cover 300mm in Z: 300mm / 2.78mm = 108 voxels worth
-        // But we only have 53 Z-voxels, so just use what we have
-        // The key is to map screen Y to fewer Z indices
-        float zRange = float(volumeDim.z) * params.spacingX / params.spacingZ; // ~11.2 voxels
-        
         float3 basePos = float3(
             (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
             float(step),
-            volumeCenter.z + viewNdc.y * zRange * 0.5  // Map to smaller Z range centered
+            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z)
         );
         
         // Apply rotation around Z-axis
