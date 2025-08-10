@@ -192,17 +192,12 @@ kernel void volumeRender3D(
         // Simple 3D position in volume space
         // We're ray marching through Y (front to back)
         
-        // The volume is 512x512x53 - we should maintain proper proportions
-        // But we need to account for DICOM spacing too!
-        // Spacing is typically (0.585938, 0.585938, 2.78) mm
-        // So physical Z dimension is 53 * 2.78 = 147.34 mm
-        // And physical X dimension is 512 * 0.585938 = 300 mm
-        // Aspect ratio = 147.34 / 300 ≈ 0.49
-        
+        // Use the actual DICOM spacing passed in params to maintain proper aspect ratio
+        // Physical dimensions = voxel dimensions * spacing
         float physicalAspectRatio = (float(volumeDim.z) * params.volumeSpacing.z) / 
                                     (float(volumeDim.x) * params.volumeSpacing.x);
         
-        // Map screen coordinates to volume
+        // Map screen coordinates to volume with proper aspect ratio
         float screenY = float(gid.y) / float(outputTexture.get_height());
         
         // Center the volume vertically and apply physical aspect ratio
@@ -216,7 +211,7 @@ kernel void volumeRender3D(
         float3 basePos = float3(
             float(gid.x) * float(volumeDim.x) / float(outputTexture.get_width()),   // X coordinate
             float(step),                                                             // Y coordinate (depth)
-            zPos * float(volumeDim.z)                                               // Z coordinate (with aspect correction)
+            zPos * float(volumeDim.z)                                               // Z coordinate (with proper spacing)
         );
         
         // Apply rotation around Z-axis (rotate the sampling position)
