@@ -162,10 +162,13 @@ kernel void volumeRender3D(
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
         // Convert NDC to voxel coordinates
+        // Apply Z-axis spacing correction to fix vertical stretching
+        float zSpacingCorrection = params.spacingZ / params.spacingX;  // ~4.74 for 2.78/0.585938
+        
         float3 basePos = float3(
             (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
             float(step),
-            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z)
+            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z) / zSpacingCorrection  // Compress Z to account for thicker slices
         );
         
         // Apply rotation around Z-axis
@@ -206,6 +209,30 @@ kernel void volumeRender3D(
         } else if (hounsfield > -100) {  // Soft tissue
             alpha = 0.1;
             color = float3(0.8, 0.4, 0.4) * windowed;
+        }
+        
+        // Crosshair axes - simple colored lines through volume center
+        float lineThickness = 1.5;
+        
+        // X-axis (red) - runs along X at center Y and Z
+        if (abs(volumePos.y - volumeCenter.y) < lineThickness && 
+            abs(volumePos.z - volumeCenter.z) < lineThickness) {
+            color = float3(1.0, 0.0, 0.0);  // Red
+            alpha = 1.0;
+        }
+        
+        // Y-axis (green) - runs along Y at center X and Z
+        if (abs(volumePos.x - volumeCenter.x) < lineThickness && 
+            abs(volumePos.z - volumeCenter.z) < lineThickness) {
+            color = float3(0.0, 1.0, 0.0);  // Green
+            alpha = 1.0;
+        }
+        
+        // Z-axis (blue) - runs along Z at center X and Y
+        if (abs(volumePos.x - volumeCenter.x) < lineThickness && 
+            abs(volumePos.y - volumeCenter.y) < lineThickness) {
+            color = float3(0.0, 0.0, 1.0);  // Blue
+            alpha = 1.0;
         }
         
         // Front-to-back compositing
