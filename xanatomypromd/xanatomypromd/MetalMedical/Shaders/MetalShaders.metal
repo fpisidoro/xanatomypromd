@@ -157,15 +157,20 @@ kernel void volumeRender3D(
     float accumulatedAlpha = 0.0;
     
     // CROSSHAIR POSITION IN 3D VOLUME
-    // Convert from DICOM world coordinates (mm) to voxel indices
-    // This is the SAME coordinate system used by MPR views
+    // The MPR views send us currentWorldPosition which is the center in DICOM mm
+    // We convert to voxel space: (world - origin) / spacing
     float3 crosshairVoxel = (params.crosshairPosition - params.volumeOrigin) / params.volumeSpacing;
+    
+    // If the position hasn't been initialized, default to center
+    // Center of 512x512x53 volume is at voxel (256, 256, 26.5)
+    if (crosshairVoxel.x < 1.0 && crosshairVoxel.y < 1.0 && crosshairVoxel.z < 1.0) {
+        crosshairVoxel = float3(float(volumeDim.x) * 0.5, 
+                               float(volumeDim.y) * 0.5, 
+                               float(volumeDim.z) * 0.5);
+    }
     
     // Clamp to volume bounds for safety
     crosshairVoxel = clamp(crosshairVoxel, float3(0.0), float3(volumeDim) - float3(1.0));
-    
-    // Debug: The crosshair should be at the same position as MPR views
-    // For a centered scan, this would be around (256, 256, 26.5) for 512x512x53
     
     // Define crosshair line colors (X=red, Y=green, Z=blue for clarity)
     float3 xAxisColor = float3(1.0, 0.0, 0.0);  // Pure red for X-axis (left-right)
@@ -184,17 +189,13 @@ kernel void volumeRender3D(
     int numSteps = int(volumeDim.y);  // Still marching through Y (anterior-posterior)
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Base position in volume WITHOUT rotation - this is what we check against crosshairs
-        // We're looking at the volume from the front (coronal view)
+        // Simple 3D position in volume space
+        // We're ray marching through Y (front to back)
         float3 basePos = float3(
-            float(gid.x),                    // X: screen horizontal maps to volume X
-            float(step),                      // Y: ray marches through depth (anterior-posterior)
-            float(outputTexture.get_height() - gid.y - 1)  // Z: screen vertical maps to volume Z (flipped)
+            float(gid.x) * float(volumeDim.x) / float(outputTexture.get_width()),   // X coordinate
+            float(step),                                                             // Y coordinate (depth)
+            float(gid.y) * float(volumeDim.z) / float(outputTexture.get_height())   // Z coordinate
         );
-        
-        // Scale to volume dimensions
-        basePos.x = basePos.x * float(volumeDim.x) / float(outputTexture.get_width());
-        basePos.z = basePos.z * float(volumeDim.z) / float(outputTexture.get_height());
         
         // Apply rotation around Z-axis (rotate the sampling position)
         float3 offsetFromCenter = basePos - volumeCenter;
