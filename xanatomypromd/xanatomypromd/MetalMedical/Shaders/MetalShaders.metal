@@ -189,29 +189,12 @@ kernel void volumeRender3D(
     int numSteps = int(volumeDim.y);  // Still marching through Y (anterior-posterior)
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Simple 3D position in volume space
-        // We're ray marching through Y (front to back)
-        
-        // Use the actual DICOM spacing passed in params to maintain proper aspect ratio
-        // Physical dimensions = voxel dimensions * spacing
-        float physicalAspectRatio = (float(volumeDim.z) * params.volumeSpacing.z) / 
-                                    (float(volumeDim.x) * params.volumeSpacing.x);
-        
-        // Map screen coordinates to volume with proper aspect ratio
-        float screenY = float(gid.y) / float(outputTexture.get_height());
-        
-        // Center the volume vertically and apply physical aspect ratio
-        float zPos = (screenY - 0.5) / physicalAspectRatio + 0.5;
-        
-        // Skip rays that are outside the volume
-        if (zPos < 0.0 || zPos > 1.0) {
-            continue;
-        }
-        
+        // Simple 3D position in volume space - exactly like MPR views
+        // Just map screen coordinates to volume coordinates directly
         float3 basePos = float3(
             float(gid.x) * float(volumeDim.x) / float(outputTexture.get_width()),   // X coordinate
             float(step),                                                             // Y coordinate (depth)
-            zPos * float(volumeDim.z)                                               // Z coordinate (with proper spacing)
+            float(gid.y) * float(volumeDim.z) / float(outputTexture.get_height())   // Z coordinate
         );
         
         // Apply rotation around Z-axis (rotate the sampling position)
