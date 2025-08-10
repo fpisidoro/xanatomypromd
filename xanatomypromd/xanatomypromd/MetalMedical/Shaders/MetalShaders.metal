@@ -78,22 +78,17 @@ kernel void mprSliceExtractionHardware(
 
 // MARK: - 3D Volume Rendering Shaders
 
+// Simple struct matching Swift - just floats, no SIMD types
 struct Volume3DRenderParams {
-    float rotationZ;                // 4 bytes
-    float3 _padding1;               // 12 bytes padding to align to 16-byte boundary
-    float3 crosshairPosition;       // 12 bytes at 16-byte aligned offset
-    float _padding2;                // 4 bytes padding
-    float3 volumeOrigin;            // 12 bytes
-    float _padding3;                // 4 bytes padding
-    float3 volumeSpacing;           // 12 bytes
-    float _padding4;                // 4 bytes padding
-    float windowCenter;             // 4 bytes
-    float windowWidth;              // 4 bytes
-    float zoom;                     // 4 bytes
-    float _padding5;                // 4 bytes padding
-    float panX;                     // 4 bytes
-    float panY;                     // 4 bytes
-    float2 _padding6;               // 8 bytes padding
+    float rotationZ;
+    float windowCenter;
+    float windowWidth;
+    float zoom;
+    float panX;
+    float panY;
+    float spacingX;
+    float spacingY;
+    float spacingZ;
 };
 
 // Alpha transfer function for volume rendering - balanced visibility
@@ -150,7 +145,7 @@ kernel void volumeRender3D(
     
     // Calculate aspect ratio correction based on DICOM spacing
     // For coronal view: X width and Z height
-    float aspectCorrection = (params.volumeSpacing.z / params.volumeSpacing.x) * 
+    float aspectCorrection = (params.spacingZ / params.spacingX) * 
                             (float(volumeDim.x) / float(volumeDim.z)) * 
                             (float(outputTexture.get_height()) / float(outputTexture.get_width()));
     

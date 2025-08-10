@@ -280,6 +280,9 @@ class Metal3DVolumeRenderer: ObservableObject {
             panY: Float(pan.height)
         )
         
+        print("Swift struct size: \(MemoryLayout<Volume3DRenderParams>.size) bytes")
+        print("Swift struct stride: \(MemoryLayout<Volume3DRenderParams>.stride) bytes")
+        print("Swift struct alignment: \(MemoryLayout<Volume3DRenderParams>.alignment) bytes")
         encoder.setBytes(&params, length: MemoryLayout<Volume3DRenderParams>.size, index: 0)
         
         let threadsPerGroup = MTLSize(width: 8, height: 8, depth: 1)
@@ -324,39 +327,29 @@ class Metal3DVolumeRenderer: ObservableObject {
     }
 }
 
+// Simple struct without complex alignment issues
 struct Volume3DRenderParams {
-    let rotationZ: Float           // 4 bytes
-    let _padding1: (Float, Float, Float)  // 12 bytes padding to align to 16-byte boundary
-    let crosshairPosition: SIMD3<Float>  // 12 bytes at 16-byte aligned offset
-    let _padding2: Float           // 4 bytes padding
-    let volumeOrigin: SIMD3<Float>     // 12 bytes
-    let _padding3: Float           // 4 bytes padding
-    let volumeSpacing: SIMD3<Float>    // 12 bytes
-    let _padding4: Float           // 4 bytes padding
-    let windowCenter: Float        // 4 bytes
-    let windowWidth: Float         // 4 bytes  
-    let zoom: Float               // 4 bytes
-    let _padding5: Float           // 4 bytes padding
-    let panX: Float               // 4 bytes
-    let panY: Float               // 4 bytes
-    let _padding6: (Float, Float)  // 8 bytes padding
+    let rotationZ: Float
+    let windowCenter: Float
+    let windowWidth: Float
+    let zoom: Float
+    let panX: Float
+    let panY: Float
+    // Add spacing as individual floats to avoid SIMD alignment issues
+    let spacingX: Float
+    let spacingY: Float
+    let spacingZ: Float
     
     init(rotationZ: Float, crosshairPosition: SIMD3<Float>, volumeOrigin: SIMD3<Float>, volumeSpacing: SIMD3<Float>, windowCenter: Float, windowWidth: Float, zoom: Float, panX: Float, panY: Float) {
         self.rotationZ = rotationZ
-        self._padding1 = (0, 0, 0)
-        self.crosshairPosition = crosshairPosition
-        self._padding2 = 0
-        self.volumeOrigin = volumeOrigin
-        self._padding3 = 0
-        self.volumeSpacing = volumeSpacing
-        self._padding4 = 0
         self.windowCenter = windowCenter
         self.windowWidth = windowWidth
         self.zoom = zoom
-        self._padding5 = 0
         self.panX = panX
         self.panY = panY
-        self._padding6 = (0, 0)
+        self.spacingX = volumeSpacing.x
+        self.spacingY = volumeSpacing.y
+        self.spacingZ = volumeSpacing.z
     }
 }
 
