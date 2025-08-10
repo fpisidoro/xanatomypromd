@@ -156,18 +156,18 @@ kernel void volumeRender3D(
     float3 accumulatedColor = float3(0.0);
     float accumulatedAlpha = 0.0;
     
-    // Convert crosshair world position (DICOM mm) to voxel coordinates
-    // This matches EXACTLY how the MPR views calculate positions
+    // CROSSHAIR POSITION IN 3D VOLUME
+    // Convert from DICOM world coordinates (mm) to voxel indices
     float3 crosshairVoxel = (params.crosshairPosition - params.volumeOrigin) / params.volumeSpacing;
     
-    // Ensure crosshair starts at center if not initialized (0,0,0 in world coords)
-    if (length(params.crosshairPosition) < 0.001) {
-        // Start at volume center
+    // DEFAULT TO VOLUME CENTER - this is where crosshairs should start
+    // The center of a 512x512x53 volume is at (256, 256, 26.5)
+    if (length(params.crosshairPosition - params.volumeOrigin) < 0.001) {
         crosshairVoxel = float3(volumeDim) * 0.5;
     }
     
-    // Clamp crosshair to volume bounds to ensure it's visible
-    crosshairVoxel = clamp(crosshairVoxel, float3(1.0), float3(volumeDim) - 1.0);
+    // Ensure crosshair is within volume bounds
+    crosshairVoxel = clamp(crosshairVoxel, float3(0.0), float3(volumeDim) - float3(1.0));
     
     // Define crosshair line colors (X=red, Y=green, Z=blue for clarity)
     float3 xAxisColor = float3(1.0, 0.0, 0.0);  // Pure red for X-axis (left-right)
@@ -239,46 +239,46 @@ kernel void volumeRender3D(
         }
         // Air and fat are transparent
         
-        // Draw 3D crosshair lines at the correct position
-        // volumePos is the current voxel we're sampling in the ray march
-        // crosshairVoxel is where the crosshairs should be (synced with MPR views)
+        // SIMPLE 3D CROSSHAIR LINES - Three lines intersecting at crosshairVoxel
+        // volumePos is the current voxel position in our ray march
+        // crosshairVoxel is the target position (starts at center, syncs with MPR)
         
-        // Check distance to each axis line
-        // X-axis line (red): extends along X, passes through (any X, crosshair Y, crosshair Z)
-        bool onXLine = (abs(volumePos.y - crosshairVoxel.y) < lineThickness && 
-                        abs(volumePos.z - crosshairVoxel.z) < lineThickness);
+        // Draw the three crosshair lines WITHIN the volume
+        // Each line extends through the entire volume in one dimension
         
-        // Y-axis line (green): extends along Y, passes through (crosshair X, any Y, crosshair Z)
-        bool onYLine = (abs(volumePos.x - crosshairVoxel.x) < lineThickness && 
-                        abs(volumePos.z - crosshairVoxel.z) < lineThickness);
+        // X-axis line (RED): Horizontal line at Y=crosshair.y, Z=crosshair.z
+        // This line extends from X=0 to X=volumeDim.x
+        if (abs(volumePos.y - crosshairVoxel.y) < lineThickness && 
+            abs(volumePos.z - crosshairVoxel.z) < lineThickness) {
+            // We're on the X-axis line - make it RED
+            color = xAxisColor;
+            alpha = 1.0;
+        }
         
-        // Z-axis line (blue): extends along Z, passes through (crosshair X, crosshair Y, any Z)
-        bool onZLine = (abs(volumePos.x - crosshairVoxel.x) < lineThickness && 
-                        abs(volumePos.y - crosshairVoxel.y) < lineThickness);
+        // Y-axis line (GREEN): Line through volume at X=crosshair.x, Z=crosshair.z  
+        // This line extends from Y=0 to Y=volumeDim.y (front to back)
+        if (abs(volumePos.x - crosshairVoxel.x) < lineThickness && 
+            abs(volumePos.z - crosshairVoxel.z) < lineThickness) {
+            // We're on the Y-axis line - make it GREEN
+            color = yAxisColor;
+            alpha = 1.0;
+        }
         
-        // Check if at crosshair center (intersection point)
+        // Z-axis line (BLUE): Vertical line at X=crosshair.x, Y=crosshair.y
+        // This line extends from Z=0 to Z=volumeDim.z (bottom to top)
+        if (abs(volumePos.x - crosshairVoxel.x) < lineThickness && 
+            abs(volumePos.y - crosshairVoxel.y) < lineThickness) {
+            // We're on the Z-axis line - make it BLUE
+            color = zAxisColor;
+            alpha = 1.0;
+        }
+        
+        // Center point (YELLOW): Where all three lines intersect
         float distToCenter = length(volumePos - crosshairVoxel);
-        bool atCenter = distToCenter < lineThickness * 1.5;
-        
-        // Apply crosshair colors with proper blending
-        if (atCenter) {
-            // Bright yellow center point where all lines meet
-            float3 centerColor = float3(1.0, 1.0, 0.0);
-            float centerAlpha = 1.0 - (distToCenter / (lineThickness * 1.5));
-            color = mix(color, centerColor, centerAlpha * 0.95);
-            alpha = max(alpha, 0.95);
-        } else if (onXLine) {
-            // Red X-axis line
-            color = mix(color, xAxisColor, 0.8);
-            alpha = max(alpha, 0.8);
-        } else if (onYLine) {
-            // Green Y-axis line  
-            color = mix(color, yAxisColor, 0.8);
-            alpha = max(alpha, 0.8);
-        } else if (onZLine) {
-            // Blue Z-axis line
-            color = mix(color, zAxisColor, 0.8);
-            alpha = max(alpha, 0.8);
+        if (distToCenter < lineThickness * 2.0) {
+            // At the intersection point - make it YELLOW and BRIGHT
+            color = float3(1.0, 1.0, 0.0);
+            alpha = 1.0;
         }
         
         // Front-to-back compositing
