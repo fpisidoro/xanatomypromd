@@ -243,43 +243,35 @@ kernel void volumeRender3D(
         }
         // Air and fat are transparent
         
-        // SIMPLE 3D CROSSHAIR LINES - Three lines intersecting at crosshairVoxel
-        // Check against basePos (BEFORE rotation) so crosshairs stay fixed in space
+        // WE ARE IN A 3D VOLUME. JUST DRAW 3 FUCKING LINES.
+        // volumePos is our current position in 3D space
+        // crosshairVoxel is where the lines intersect (256, 256, 26.5)
         
-        // Draw the three crosshair lines WITHIN the volume  
-        // Each line extends through the entire volume in one dimension
-        
-        // X-axis line (RED): Horizontal line through center
-        // Extends along X at Y=crosshair.y, Z=crosshair.z
-        if (abs(basePos.y - crosshairVoxel.y) < lineThickness && 
-            abs(basePos.z - crosshairVoxel.z) < lineThickness) {
-            // We're on the X-axis line - make it RED
+        // LINE 1 - RED - Runs along X axis through (ANY X, crosshair.y, crosshair.z)
+        if (abs(volumePos.y - crosshairVoxel.y) < lineThickness && 
+            abs(volumePos.z - crosshairVoxel.z) < lineThickness) {
             color = xAxisColor;
             alpha = 1.0;
         }
         
-        // Y-axis line (GREEN): Front-to-back line through center
-        // Extends along Y at X=crosshair.x, Z=crosshair.z  
-        if (abs(basePos.x - crosshairVoxel.x) < lineThickness && 
-            abs(basePos.z - crosshairVoxel.z) < lineThickness) {
-            // We're on the Y-axis line - make it GREEN
+        // LINE 2 - GREEN - Runs along Y axis through (crosshair.x, ANY Y, crosshair.z)
+        if (abs(volumePos.x - crosshairVoxel.x) < lineThickness && 
+            abs(volumePos.z - crosshairVoxel.z) < lineThickness) {
             color = yAxisColor;
             alpha = 1.0;
         }
         
-        // Z-axis line (BLUE): Vertical line through center
-        // Extends along Z at X=crosshair.x, Y=crosshair.y
-        if (abs(basePos.x - crosshairVoxel.x) < lineThickness && 
-            abs(basePos.y - crosshairVoxel.y) < lineThickness) {
-            // We're on the Z-axis line - make it BLUE
+        // LINE 3 - BLUE - Runs along Z axis through (crosshair.x, crosshair.y, ANY Z)
+        if (abs(volumePos.x - crosshairVoxel.x) < lineThickness && 
+            abs(volumePos.y - crosshairVoxel.y) < lineThickness) {
             color = zAxisColor;
             alpha = 1.0;
         }
         
-        // Center point (YELLOW): Where all three lines intersect
-        float distToCenter = length(basePos - crosshairVoxel);
-        if (distToCenter < lineThickness * 2.0) {
-            // At the intersection point - make it YELLOW and BRIGHT
+        // INTERSECTION POINT - YELLOW
+        if (abs(volumePos.x - crosshairVoxel.x) < lineThickness * 2.0 &&
+            abs(volumePos.y - crosshairVoxel.y) < lineThickness * 2.0 &&
+            abs(volumePos.z - crosshairVoxel.z) < lineThickness * 2.0) {
             color = float3(1.0, 1.0, 0.0);
             alpha = 1.0;
         }
