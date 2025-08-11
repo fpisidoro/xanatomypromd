@@ -408,8 +408,8 @@ kernel void volumeRender3D(
                 // Convert ROI Z position from world to voxel coordinates
                 float roiZVoxel = (sliceZ - volumeOrigin.z) / spacing.z;
                 
-                // Check if we're within 1 voxel of this contour's Z position
-                if (abs(volumePos.z - roiZVoxel) < 1.0) {
+                // Check if we're within 2 voxels of this contour's Z position (accounting for slice thickness)
+                if (abs(volumePos.z - roiZVoxel) < 2.0) {
                     // For 3D visualization, just check if we're near the contour boundary
                     // This is a simplified approach - in production we'd do proper 3D interpolation
                     for (int i = 0; i < pointCount && i < 50; i++) {
@@ -426,7 +426,7 @@ kernel void volumeRender3D(
                         float3 diff = volumePos - contourPointVoxel;
                         float dist = length(diff.xy);  // Distance in XY plane
                         
-                        if (dist < 3.0) {  // Within 3 voxels of contour
+                        if (dist < 5.0) {  // Within 5 voxels of contour
                             inROI = true;
                             break;
                         }
