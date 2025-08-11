@@ -163,20 +163,18 @@ kernel void volumeRender3D(
         letterboxScale.y = 1.0;
     }
     
-    // Apply letterboxing to NDC coordinates
-    // Check if we're in the letterboxed area first
+    // Check if we're outside the letterboxed area
+    // The letterbox restricts rendering to a smaller portion of screen
     if (abs(ndc.x) > letterboxScale.x || abs(ndc.y) > letterboxScale.y) {
         // Outside letterbox - render black
         outputTexture.write(float4(0.0, 0.0, 0.0, 1.0), gid);
         return;
     }
     
-    // Scale NDC to fill the volume space correctly
-    // We need to map the smaller letterboxed area to the full [-1,1] range
-    float2 scaledNdc = ndc / letterboxScale;
-    
-    // Apply zoom and pan
-    float2 viewNdc = scaledNdc / params.zoom - float2(params.panX, params.panY) / (params.zoom * 100.0);
+    // DO NOT expand the coordinates!
+    // Use NDC directly but map based on letterbox bounds
+    // The volume only fills the letterboxed area, not the full screen
+    float2 viewNdc = ndc / params.zoom - float2(params.panX, params.panY) / (params.zoom * 100.0);
     
     float3 accumulatedColor = float3(0.0);
     float accumulatedAlpha = 0.0;
@@ -195,11 +193,13 @@ kernel void volumeRender3D(
     int numSteps = int(float(volumeDim.y) * params.spacingY / stepSize);
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Map letterboxed NDC to volume space (no stretching!)
+        // Map NDC to volume space using letterbox bounds
+        // viewNdc ranges from [-letterboxScale, +letterboxScale]
+        // Map this to [0, volumeDim] for sampling
         float3 basePos = float3(
-            (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
+            (viewNdc.x / letterboxScale.x + 1.0) * 0.5 * float(volumeDim.x),
             float(step) * stepSize / params.spacingY,  // Convert physical step to voxel units
-            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z)
+            (viewNdc.y / letterboxScale.y + 1.0) * 0.5 * float(volumeDim.z)
         );
         
         // Apply rotation around Z-axis
