@@ -267,41 +267,41 @@ kernel void volumeRender3D(
         //ALTERNATIVE COLOR SCHEMES - Uncomment one to try:
         
         // SCHEME 1: Cool Blue Medical
-//        if (hounsfield > 300) {
-//            alpha = 0.15;
-//            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone
-//        } else if (hounsfield > 100) {
-//            alpha = 0.08;
-//            color = float3(0.8, 0.85, 0.95) * windowed;
-//        } else if (hounsfield > 40) {
-//            alpha = 0.25;
-//            color = float3(0.3, 0.5, 0.9) * windowed;  // Deep blue organs
-//        } else if (hounsfield > -10) {
-//            alpha = 0.15;
-//            color = float3(0.4, 0.6, 0.8) * windowed;  // Light blue tissue
-//        } else if (hounsfield > -100) {
-//            alpha = 0.05;
-//            color = float3(0.7, 0.8, 0.9) * windowed;
-//        }
-        
-        // SCHEME 1B: Hybrid Blue-Bone/Red-Tissue (with reduced opacity for ROI visibility)
         if (hounsfield > 300) {
-            alpha = 0.08;  // Reduced from 0.15 - less opaque bone
-            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone (from blue scheme)
+            alpha = 0.15;
+            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone
         } else if (hounsfield > 100) {
-            alpha = 0.05;  // Reduced from 0.08
-            color = float3(0.8, 0.85, 0.95) * windowed;  // Light blue bone cortex
+            alpha = 0.05;
+            color = float3(0.8, 0.85, 0.95) * windowed;
         } else if (hounsfield > 40) {
-            alpha = 0.15;  // Reduced from 0.25 - organs/brain more transparent
-            color = float3(0.9, 0.3, 0.3) * windowed;  // Reddish organs (from peach scheme)
+            alpha = 0.15;
+            color = float3(0.3, 0.5, 0.9) * windowed;  // Deep blue organs
         } else if (hounsfield > -10) {
-            alpha = 0.08;  // Reduced from 0.15
-            color = float3(0.8, 0.5, 0.4) * windowed;  // Peach soft tissue
+            alpha = 0.08;
+            color = float3(0.4, 0.6, 0.8) * windowed;  // Light blue tissue
         } else if (hounsfield > -100) {
-            alpha = 0.03;  // Reduced from 0.05
-            color = float3(0.9, 0.8, 0.6) * windowed;  // Light yellow fat
+            alpha = 0.03;
+            color = float3(0.7, 0.8, 0.9) * windowed;
         }
         
+        // SCHEME 1B: Hybrid Blue-Bone/Red-Tissue (with reduced opacity for ROI visibility)
+//        if (hounsfield > 300) {
+//            alpha = 0.08;  // Reduced from 0.15 - less opaque bone
+//            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone (from blue scheme)
+//        } else if (hounsfield > 100) {
+//            alpha = 0.05;  // Reduced from 0.08
+//            color = float3(0.8, 0.85, 0.95) * windowed;  // Light blue bone cortex
+//        } else if (hounsfield > 40) {
+//            alpha = 0.15;  // Reduced from 0.25 - organs/brain more transparent
+//            color = float3(0.9, 0.3, 0.3) * windowed;  // Reddish organs (from peach scheme)
+//        } else if (hounsfield > -10) {
+//            alpha = 0.08;  // Reduced from 0.15
+//            color = float3(0.8, 0.5, 0.4) * windowed;  // Peach soft tissue
+//        } else if (hounsfield > -100) {
+//            alpha = 0.03;  // Reduced from 0.05
+//            color = float3(0.9, 0.8, 0.6) * windowed;  // Light yellow fat
+//        }
+//        
           // SCHEME 2: X-Ray Classic (Cyan-Green)
 //        if (hounsfield > 300) {
 //            alpha = 0.15;
@@ -388,7 +388,7 @@ kernel void volumeRender3D(
             alpha = 0.8;
         }
         
-        // ROI visualization - draw contour outlines
+        // ROI visualization - outline with optional fill
         if (params.showROI > 0.5 && params.roiCount > 0 && roiData != nullptr) {
             // Read ROI metadata from buffer
             float3 roiColor = float3(roiData[0], roiData[1], roiData[2]);
@@ -400,6 +400,7 @@ kernel void volumeRender3D(
             float3 volumeOrigin = float3(params.originX, params.originY, params.originZ);
             
             bool nearROI = false;
+            bool insideROI = false;
             
             // Check all contours
             for (int c = 0; c < contourCount && c < 10; c++) {
@@ -411,11 +412,41 @@ kernel void volumeRender3D(
                 
                 // Check if we're at this contour's Z slice (within slice thickness)
                 if (abs(volumePos.z - roiZVoxel) < 1.0) {
-                    // Check if we're near any contour edge (outline only)
+                    // Simple inside test: check if we're within the bounding box
+                    // and do a simple distance check to center
+                    float2 minBounds = float2(1000000.0);
+                    float2 maxBounds = float2(-1000000.0);
+                    float2 center = float2(0.0);
+                    
+                    // Calculate bounds and center
+                    for (int i = 0; i < pointCount && i < 50; i++) {
+                        float3 pWorld = float3(
+                            roiData[dataOffset + 2 + i*3],
+                            roiData[dataOffset + 2 + i*3 + 1],
+                            roiData[dataOffset + 2 + i*3 + 2]
+                        );
+                        float3 pVoxel = (pWorld - volumeOrigin) / spacing;
+                        minBounds = min(minBounds, pVoxel.xy);
+                        maxBounds = max(maxBounds, pVoxel.xy);
+                        center += pVoxel.xy;
+                    }
+                    center /= float(min(pointCount, 50));
+                    
+                    // Check if inside bounding box
+                    float2 posxy = volumePos.xy;
+                    if (posxy.x >= minBounds.x && posxy.x <= maxBounds.x &&
+                        posxy.y >= minBounds.y && posxy.y <= maxBounds.y) {
+                        // Simple radial check from center
+                        float avgRadius = length(maxBounds - minBounds) * 0.35; // 70% of half diagonal
+                        if (length(posxy - center) < avgRadius) {
+                            insideROI = true;
+                        }
+                    }
+                    
+                    // Also check for outline
                     for (int i = 0; i < pointCount && i < 50; i++) {
                         int j = (i + 1) % pointCount;
                         
-                        // Get two consecutive points of the contour (edge)
                         float3 p1World = float3(
                             roiData[dataOffset + 2 + i*3],
                             roiData[dataOffset + 2 + i*3 + 1],
@@ -427,14 +458,11 @@ kernel void volumeRender3D(
                             roiData[dataOffset + 2 + j*3 + 2]
                         );
                         
-                        // Convert to voxel coordinates
                         float3 p1Voxel = (p1World - volumeOrigin) / spacing;
                         float3 p2Voxel = (p2World - volumeOrigin) / spacing;
                         
-                        // Calculate distance from volumePos to the line segment p1-p2
                         float2 p1xy = p1Voxel.xy;
                         float2 p2xy = p2Voxel.xy;
-                        float2 posxy = volumePos.xy;
                         
                         float2 edge = p2xy - p1xy;
                         float2 toPos = posxy - p1xy;
@@ -445,26 +473,29 @@ kernel void volumeRender3D(
                             float2 nearest = p1xy + t * edge;
                             float dist = length(posxy - nearest);
                             
-                            // If within 3 voxels of the edge, color it (increased from 2)
-                            if (dist < 3.0) {
+                            if (dist < 2.0) {  // Outline thickness
                                 nearROI = true;
                                 break;
                             }
                         }
                     }
                     
-                    if (nearROI) break;
+                    if (nearROI || insideROI) break;
                 }
                 
                 // Move to next contour in buffer
                 dataOffset += 2 + pointCount * 3;
             }
             
-            // Apply ROI coloring if near contour
+            // Apply ROI coloring
             if (nearROI) {
-                // Very strong color for outline visibility
+                // Strong outline
                 color = roiColor;
-                alpha = 1.0;  // Full opacity for maximum visibility
+                alpha = 1.0;
+            } else if (insideROI) {
+                // Semi-transparent fill
+                color = mix(color, roiColor, 0.3);  // 30% ROI color
+                alpha = max(alpha, 0.2);  // Ensure some visibility
             }
         }
         

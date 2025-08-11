@@ -342,17 +342,11 @@ class Metal3DVolumeRenderer: ObservableObject {
             roiCount: Float(roiCount)
         )
         
-        print("Swift struct size: \(MemoryLayout<Volume3DRenderParams>.size) bytes")
-        print("Swift struct stride: \(MemoryLayout<Volume3DRenderParams>.stride) bytes")
-        print("Swift struct alignment: \(MemoryLayout<Volume3DRenderParams>.alignment) bytes")
         encoder.setBytes(&params, length: MemoryLayout<Volume3DRenderParams>.size, index: 0)
         
         // Set ROI buffer if available
         if let roiBuffer = roiBuffer, showROI {
             encoder.setBuffer(roiBuffer, offset: 0, index: 1)
-            print("🎯 ROI buffer set: \(roiCount) contours, showROI=\(showROI)")
-        } else {
-            print("⚠️ ROI buffer NOT set: buffer=\(roiBuffer != nil), showROI=\(showROI)")
         }
         
         let threadsPerGroup = MTLSize(width: 8, height: 8, depth: 1)
