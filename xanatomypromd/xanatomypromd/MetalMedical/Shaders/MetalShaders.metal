@@ -201,12 +201,12 @@ kernel void volumeRender3D(
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
         // Map normalized NDC to volume space
-        // viewNdc now ranges from [-1, 1] after normalization
-        // Map to [0, volumeDim-1] since indices are 0-based
+        // viewNdc ranges from [-1, 1] after normalization
+        // Add 0.5 offset to sample voxel centers like texture sampling does
         float3 basePos = float3(
-            (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x - 1),
+            (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
             float(step) * stepSize / params.spacingY,
-            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z - 1)
+            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z)
         );
         
         // Apply rotation around Z-axis
@@ -218,10 +218,11 @@ kernel void volumeRender3D(
         );
         float3 volumePos = volumeCenter + rotatedOffset;
         
-        // Bounds checking
-        if (volumePos.x < 0 || volumePos.x >= float(volumeDim.x) ||
-            volumePos.y < 0 || volumePos.y >= float(volumeDim.y) ||
-            volumePos.z < 0 || volumePos.z >= float(volumeDim.z)) {
+        // Bounds checking - allow sampling up to but not including volumeDim
+        // This allows values like 52.9 which are valid for interpolation
+        if (volumePos.x < 0 || volumePos.x > float(volumeDim.x - 1) ||
+            volumePos.y < 0 || volumePos.y > float(volumeDim.y - 1) ||
+            volumePos.z < 0 || volumePos.z > float(volumeDim.z - 1)) {
             continue;
         }
         
