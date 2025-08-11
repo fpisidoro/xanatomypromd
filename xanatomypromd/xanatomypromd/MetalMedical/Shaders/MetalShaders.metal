@@ -164,17 +164,19 @@ kernel void volumeRender3D(
     }
     
     // Apply letterboxing to NDC coordinates
-    float2 letterboxedNdc = ndc / letterboxScale;
-    
-    // Check if we're outside the letterboxed area
-    if (abs(letterboxedNdc.x) > 1.0 || abs(letterboxedNdc.y) > 1.0) {
+    // Check if we're in the letterboxed area first
+    if (abs(ndc.x) > letterboxScale.x || abs(ndc.y) > letterboxScale.y) {
         // Outside letterbox - render black
         outputTexture.write(float4(0.0, 0.0, 0.0, 1.0), gid);
         return;
     }
     
-    // Apply zoom and pan to letterboxed coordinates
-    float2 viewNdc = letterboxedNdc / params.zoom - float2(params.panX, params.panY) / (params.zoom * 100.0);
+    // Scale NDC to fill the volume space correctly
+    // We need to map the smaller letterboxed area to the full [-1,1] range
+    float2 scaledNdc = ndc / letterboxScale;
+    
+    // Apply zoom and pan
+    float2 viewNdc = scaledNdc / params.zoom - float2(params.panX, params.panY) / (params.zoom * 100.0);
     
     float3 accumulatedColor = float3(0.0);
     float accumulatedAlpha = 0.0;
