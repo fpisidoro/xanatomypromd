@@ -261,41 +261,59 @@ kernel void volumeRender3D(
         //ALTERNATIVE COLOR SCHEMES - Uncomment one to try:
         
         // SCHEME 1: Cool Blue Medical
+        if (hounsfield > 300) {
+            alpha = 0.15;
+            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone
+        } else if (hounsfield > 100) {
+            alpha = 0.08;
+            color = float3(0.8, 0.85, 0.95) * windowed;
+        } else if (hounsfield > 40) {
+            alpha = 0.25;
+            color = float3(0.3, 0.5, 0.9) * windowed;  // Deep blue organs
+        } else if (hounsfield > -10) {
+            alpha = 0.15;
+            color = float3(0.4, 0.6, 0.8) * windowed;  // Light blue tissue
+        } else if (hounsfield > -100) {
+            alpha = 0.05;
+            color = float3(0.7, 0.8, 0.9) * windowed;
+        }
+        
+        // SCHEME 1B: Hybrid Blue-Bone/Red-Tissue (NEW - TRY THIS!)
 //        if (hounsfield > 300) {
 //            alpha = 0.15;
-//            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone
+//            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone (from blue scheme)
 //        } else if (hounsfield > 100) {
 //            alpha = 0.08;
-//            color = float3(0.8, 0.85, 0.95) * windowed;
+//            color = float3(0.8, 0.85, 0.95) * windowed;  // Light blue bone cortex
 //        } else if (hounsfield > 40) {
 //            alpha = 0.25;
-//            color = float3(0.3, 0.5, 0.9) * windowed;  // Deep blue organs
+//            color = float3(0.9, 0.3, 0.3) * windowed;  // Reddish organs (from peach scheme)
 //        } else if (hounsfield > -10) {
 //            alpha = 0.15;
-//            color = float3(0.4, 0.6, 0.8) * windowed;  // Light blue tissue
+//            color = float3(0.8, 0.5, 0.4) * windowed;  // Peach soft tissue
 //        } else if (hounsfield > -100) {
 //            alpha = 0.05;
-//            color = float3(0.7, 0.8, 0.9) * windowed;
+//            color = float3(0.9, 0.8, 0.6) * windowed;  // Light yellow fat
 //        }
         
           // SCHEME 2: X-Ray Classic (Cyan-Green)
-        if (hounsfield > 300) {
-            alpha = 0.15;
-            color = float3(0.8, 1.0, 1.0) * windowed;  // Cyan-white bone
-        } else if (hounsfield > 100) {
-            alpha = 0.08;
-            color = float3(0.6, 0.95, 0.9) * windowed;
-        } else if (hounsfield > 40) {
-            alpha = 0.25;
-            color = float3(0.2, 0.9, 0.7) * windowed;  // Teal organs
-        } else if (hounsfield > -10) {
-            alpha = 0.15;
-            color = float3(0.3, 0.7, 0.6) * windowed;  // Sea green tissue
-        } else if (hounsfield > -100) {
-            alpha = 0.05;
-            color = float3(0.5, 0.8, 0.7) * windowed;
-        }
-        
+//        if (hounsfield > 300) {
+//            alpha = 0.15;
+//            color = float3(0.8, 1.0, 1.0) * windowed;  // Cyan-white bone
+//        } else if (hounsfield > 100) {
+//            alpha = 0.08;
+//            color = float3(0.6, 0.95, 0.9) * windowed;
+//        } else if (hounsfield > 40) {
+//            alpha = 0.25;
+//            color = float3(0.2, 0.9, 0.7) * windowed;  // Teal organs
+//        } else if (hounsfield > -10) {
+//            alpha = 0.15;
+//            color = float3(0.3, 0.7, 0.6) * windowed;  // Sea green tissue
+//        } else if (hounsfield > -100) {
+//            alpha = 0.05;
+//            color = float3(0.5, 0.8, 0.7) * windowed;
+//        }
+//        
         /*        // SCHEME 3: Purple-Pink Vaporwave
         if (hounsfield > 300) {
             alpha = 0.15;
