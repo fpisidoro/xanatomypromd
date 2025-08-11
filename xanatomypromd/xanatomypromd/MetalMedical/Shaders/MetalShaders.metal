@@ -252,8 +252,8 @@ kernel void volumeRender3D(
         
         // Center intersection point - yellow sphere
         // Convert position difference to physical space for proper sphere shape
-        float3 offsetFromCenter = volumePos - volumeCenter;
-        float3 physicalOffset = offsetFromCenter * spacing;
+        float3 centerOffset = volumePos - volumeCenter;
+        float3 physicalOffset = centerOffset * spacing;
         float physicalDist = length(physicalOffset);  // Distance in mm
         
         if (physicalDist < 3.0) {  // 3mm radius sphere
