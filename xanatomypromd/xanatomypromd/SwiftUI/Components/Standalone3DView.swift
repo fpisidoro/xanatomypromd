@@ -15,11 +15,9 @@ struct Standalone3DView: View {
     let viewSize: CGSize
     let allowInteraction: Bool
     
-    // PERSISTENT 3D view state - maintains rotation/zoom when switching views
-    @State private var rotationZ: Float = 0.0
-    @State private var localZoom: CGFloat = 1.0
+    // Use persistent state from SharedViewingState
     @State private var lastZoom: CGFloat = 1.0
-    @State private var localPan: CGSize = .zero
+    @State private var dragStartRotation: Float = 0.0
     @StateObject private var renderer = Metal3DVolumeRenderer()
     
     // SYNC: Track crosshair changes for real-time updates
@@ -49,12 +47,12 @@ struct Standalone3DView: View {
                 Metal3DRenderView(
                     renderer: renderer,
                     volumeData: volumeData,
-                    rotationZ: rotationZ,
+                    rotationZ: sharedState.rotation3D,  // Use persistent rotation
                     crosshairPosition: coordinateSystem.currentWorldPosition,  // ALWAYS synced
                     coordinateSystem: coordinateSystem,
                     windowLevel: sharedState.windowLevel,
-                    zoom: localZoom,
-                    pan: localPan
+                    zoom: sharedState.zoom3D,  // Use persistent zoom
+                    pan: sharedState.pan3D  // Use persistent pan
                 )
                 .clipped()
                 .onReceive(coordinateSystem.$currentWorldPosition) { newPosition in
@@ -94,10 +92,13 @@ struct Standalone3DView: View {
             setupRenderer()
             // SYNC: Initialize with current crosshair position
             lastCrosshairPosition = coordinateSystem.currentWorldPosition
+            dragStartRotation = sharedState.rotation3D  // Initialize drag start rotation
             print("🎯 3D View appeared - synced to crosshair: \(coordinateSystem.currentWorldPosition)")
+            print("   Using persistent rotation: \(sharedState.rotation3D), zoom: \(sharedState.zoom3D)")
         }
         .onDisappear {
-            print("🎯 3D View disappeared - preserving rotation: \(rotationZ), zoom: \(localZoom)")
+            // State is automatically preserved in SharedViewingState
+            print("🎯 3D View disappeared - state preserved in SharedViewingState")
         }
     }
     
@@ -113,20 +114,22 @@ struct Standalone3DView: View {
         SimultaneousGesture(
             DragGesture()
                 .onChanged { value in
-                    // Only rotate with horizontal swipes
+                    // Horizontal drag rotates the 3D view
                     let rotationSensitivity: Float = 0.01
-                    rotationZ += Float(value.translation.width) * rotationSensitivity
-                    
-                    // Remove vertical zoom - that was the problem!
-                    // Vertical swipes should do nothing or could rotate on another axis
+                    let deltaRotation = Float(value.translation.width) * rotationSensitivity
+                    sharedState.update3DRotation(dragStartRotation + deltaRotation)
+                }
+                .onEnded { _ in
+                    // Save the final rotation as the new starting point
+                    dragStartRotation = sharedState.rotation3D
                 },
             
             MagnificationGesture()
                 .onChanged { value in
                     let delta = value / lastZoom
                     lastZoom = value
-                    let newZoom = localZoom * delta
-                    localZoom = max(0.5, min(3.0, newZoom))
+                    let newZoom = sharedState.zoom3D * delta
+                    sharedState.update3DZoom(max(0.5, min(3.0, newZoom)))
                 }
                 .onEnded { _ in
                     lastZoom = 1.0

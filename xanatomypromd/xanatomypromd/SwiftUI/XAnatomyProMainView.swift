@@ -10,12 +10,10 @@ struct XAnatomyProMainView: View {
     
     @StateObject var coordinateSystem = DICOMCoordinateSystem()
     @StateObject var dataManager = XAnatomyDataManager()
+    @StateObject var sharedViewingState = SharedViewingState()  // Shared across all views
     
     @State private var currentPlane: MPRPlane = .axial
     @State private var show3D: Bool = false
-    @State private var windowLevel: CTWindowLevel = CTWindowLevel.softTissue
-    @State private var crosshairSettings = CrosshairAppearance.default
-    @State var roiSettings = ROIDisplaySettings.default
     @State private var isLoading = true
     @State private var showingControls = true
     
@@ -80,7 +78,7 @@ struct XAnatomyProMainView: View {
                     .font(.caption)
                     .foregroundColor(.white)
                 
-                Text(windowLevel.name)
+                Text(sharedViewingState.windowLevel.name)
                     .font(.caption2)
                     .foregroundColor(.gray)
             }
@@ -107,7 +105,7 @@ struct XAnatomyProMainView: View {
                     if show3D {
                         Standalone3DView(
                             coordinateSystem: coordinateSystem,
-                            sharedState: SharedViewingState(),
+                            sharedState: sharedViewingState,  // Use the shared instance
                             volumeData: dataManager.volumeData,
                             roiData: dataManager.roiData,
                             viewSize: CGSize(
@@ -120,9 +118,9 @@ struct XAnatomyProMainView: View {
                         LayeredMPRView(
                             coordinateSystem: coordinateSystem,
                             plane: currentPlane,
-                            windowLevel: windowLevel,
-                            crosshairAppearance: crosshairSettings,
-                            roiSettings: roiSettings,
+                            windowLevel: sharedViewingState.windowLevel,
+                            crosshairAppearance: sharedViewingState.crosshairSettings,
+                            roiSettings: sharedViewingState.roiSettings,
                             volumeData: dataManager.volumeData,
                             roiData: dataManager.roiData,
                             viewSize: CGSize(
@@ -187,6 +185,7 @@ struct XAnatomyProMainView: View {
                 ForEach([MPRPlane.axial, MPRPlane.sagittal, MPRPlane.coronal], id: \.self) { plane in
                     Button(action: { 
                         currentPlane = plane
+                        sharedViewingState.lastActivePlane = plane
                         show3D = false
                     }) {
                         VStack(spacing: 4) {
@@ -236,7 +235,7 @@ struct XAnatomyProMainView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(CTWindowLevel.allPresets, id: \.name) { preset in
-                        Button(action: { windowLevel = preset }) {
+                        Button(action: { sharedViewingState.setWindowLevel(preset) }) {
                             VStack(spacing: 4) {
                                 Text(preset.name)
                                     .font(.caption)
@@ -249,7 +248,7 @@ struct XAnatomyProMainView: View {
                             }
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
-                            .background(windowLevel.name == preset.name ? Color.blue : Color.gray.opacity(0.3))
+                            .background(sharedViewingState.windowLevel.name == preset.name ? Color.blue : Color.gray.opacity(0.3))
                             .cornerRadius(8)
                         }
                     }
@@ -298,35 +297,16 @@ struct XAnatomyProMainView: View {
             
             HStack {
                 Toggle("Crosshairs", isOn: Binding(
-                    get: { crosshairSettings.isVisible },
-                    set: { isVisible in
-                        crosshairSettings = CrosshairAppearance(
-                            isVisible: isVisible,
-                            color: crosshairSettings.color,
-                            opacity: crosshairSettings.opacity,
-                            lineWidth: crosshairSettings.lineWidth,
-                            fadeDistance: crosshairSettings.fadeDistance
-                        )
-                    }
+                    get: { sharedViewingState.crosshairSettings.isVisible },
+                    set: { _ in sharedViewingState.toggleCrosshairs() }
                 ))
                 .toggleStyle(SwitchToggleStyle(tint: .blue))
                 
                 Spacer()
                 
                 Toggle("ROI Overlay", isOn: Binding(
-                    get: { roiSettings.isVisible },
-                    set: { isVisible in
-                        roiSettings = ROIDisplaySettings(
-                            isVisible: isVisible,
-                            globalOpacity: roiSettings.globalOpacity,
-                            showOutline: roiSettings.showOutline,
-                            showFilled: roiSettings.showFilled,
-                            outlineWidth: roiSettings.outlineWidth,
-                            outlineOpacity: roiSettings.outlineOpacity,
-                            fillOpacity: roiSettings.fillOpacity,
-                            sliceTolerance: roiSettings.sliceTolerance
-                        )
-                    }
+                    get: { sharedViewingState.roiSettings.isVisible },
+                    set: { _ in sharedViewingState.toggleROIOverlay() }
                 ))
                 .toggleStyle(SwitchToggleStyle(tint: .blue))
             }
