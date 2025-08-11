@@ -388,7 +388,7 @@ kernel void volumeRender3D(
             alpha = 0.8;
         }
         
-        // ROI visualization - outline with optional fill
+        // ROI visualization - outline with proper filled polygon
         if (params.showROI > 0.5 && params.roiCount > 0 && roiData != nullptr) {
             // Read ROI metadata from buffer
             float3 roiColor = float3(roiData[0], roiData[1], roiData[2]);
@@ -412,38 +412,12 @@ kernel void volumeRender3D(
                 
                 // Check if we're at this contour's Z slice (within slice thickness)
                 if (abs(volumePos.z - roiZVoxel) < 1.0) {
-                    // Simple inside test: check if we're within the bounding box
-                    // and do a simple distance check to center
-                    float2 minBounds = float2(1000000.0);
-                    float2 maxBounds = float2(-1000000.0);
-                    float2 center = float2(0.0);
-                    
-                    // Calculate bounds and center
-                    for (int i = 0; i < pointCount && i < 50; i++) {
-                        float3 pWorld = float3(
-                            roiData[dataOffset + 2 + i*3],
-                            roiData[dataOffset + 2 + i*3 + 1],
-                            roiData[dataOffset + 2 + i*3 + 2]
-                        );
-                        float3 pVoxel = (pWorld - volumeOrigin) / spacing;
-                        minBounds = min(minBounds, pVoxel.xy);
-                        maxBounds = max(maxBounds, pVoxel.xy);
-                        center += pVoxel.xy;
-                    }
-                    center /= float(min(pointCount, 50));
-                    
-                    // Check if inside bounding box
                     float2 posxy = volumePos.xy;
-                    if (posxy.x >= minBounds.x && posxy.x <= maxBounds.x &&
-                        posxy.y >= minBounds.y && posxy.y <= maxBounds.y) {
-                        // Simple radial check from center
-                        float avgRadius = length(maxBounds - minBounds) * 0.35; // 70% of half diagonal
-                        if (length(posxy - center) < avgRadius) {
-                            insideROI = true;
-                        }
-                    }
                     
-                    // Also check for outline
+                    // Point-in-polygon test using ray casting algorithm
+                    // Cast a ray from the point to the right and count intersections
+                    int intersections = 0;
+                    
                     for (int i = 0; i < pointCount && i < 50; i++) {
                         int j = (i + 1) % pointCount;
                         
@@ -464,6 +438,17 @@ kernel void volumeRender3D(
                         float2 p1xy = p1Voxel.xy;
                         float2 p2xy = p2Voxel.xy;
                         
+                        // Check if edge crosses horizontal ray from posxy
+                        if ((p1xy.y <= posxy.y && p2xy.y > posxy.y) ||
+                            (p2xy.y <= posxy.y && p1xy.y > posxy.y)) {
+                            // Calculate X coordinate of intersection
+                            float xIntersect = p1xy.x + (posxy.y - p1xy.y) / (p2xy.y - p1xy.y) * (p2xy.x - p1xy.x);
+                            if (posxy.x < xIntersect) {
+                                intersections++;
+                            }
+                        }
+                        
+                        // Also check for outline (distance to edge)
                         float2 edge = p2xy - p1xy;
                         float2 toPos = posxy - p1xy;
                         float edgeLength = length(edge);
@@ -475,9 +460,13 @@ kernel void volumeRender3D(
                             
                             if (dist < 2.0) {  // Outline thickness
                                 nearROI = true;
-                                break;
                             }
                         }
+                    }
+                    
+                    // Odd number of intersections means inside polygon
+                    if (intersections % 2 == 1) {
+                        insideROI = true;
                     }
                     
                     if (nearROI || insideROI) break;
@@ -493,9 +482,9 @@ kernel void volumeRender3D(
                 color = roiColor;
                 alpha = 1.0;
             } else if (insideROI) {
-                // Semi-transparent fill
-                color = mix(color, roiColor, 0.3);  // 30% ROI color
-                alpha = max(alpha, 0.2);  // Ensure some visibility
+                // More visible fill - increased from 0.3 to 0.6
+                color = mix(color, roiColor, 0.6);  // 60% ROI color
+                alpha = max(alpha, 0.4);  // Increased from 0.2
             }
         }
         
