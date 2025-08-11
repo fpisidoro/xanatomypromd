@@ -241,44 +241,44 @@ kernel void volumeRender3D(
         float alpha = 0.0;
         float3 color = float3(0.0);
         
-        if (hounsfield > 300) {  // Dense bone
-            alpha = 0.15;
-            color = float3(1.0, 1.0, 0.95) * windowed;  // Bright white
-        } else if (hounsfield > 100) {  // Bone cortex  
-            alpha = 0.08;
-            color = float3(1.0, 0.9, 0.8) * windowed;  // Off-white
-        } else if (hounsfield > 40) {  // Muscle/organs
-            alpha = 0.25;
-            color = float3(0.9, 0.3, 0.3) * windowed;  // Reddish
-        } else if (hounsfield > -10) {  // Soft tissue  
-            alpha = 0.15;
-            color = float3(0.8, 0.5, 0.4) * windowed;  // Peach
-        } else if (hounsfield > -100) {  // Fat
-            alpha = 0.05;
-            color = float3(0.9, 0.8, 0.6) * windowed;  // Light yellow
-        }
+//        if (hounsfield > 300) {  // Dense bone
+//            alpha = 0.15;
+//            color = float3(1.0, 1.0, 0.95) * windowed;  // Bright white
+//        } else if (hounsfield > 100) {  // Bone cortex  
+//            alpha = 0.08;
+//            color = float3(1.0, 0.9, 0.8) * windowed;  // Off-white
+//        } else if (hounsfield > 40) {  // Muscle/organs
+//            alpha = 0.25;
+//            color = float3(0.9, 0.3, 0.3) * windowed;  // Reddish
+//        } else if (hounsfield > -10) {  // Soft tissue  
+//            alpha = 0.15;
+//            color = float3(0.8, 0.5, 0.4) * windowed;  // Peach
+//        } else if (hounsfield > -100) {  // Fat
+//            alpha = 0.05;
+//            color = float3(0.9, 0.8, 0.6) * windowed;  // Light yellow
+//        }
         
-        /* ALTERNATIVE COLOR SCHEMES - Uncomment one to try:
+        //ALTERNATIVE COLOR SCHEMES - Uncomment one to try:
         
         // SCHEME 1: Cool Blue Medical
-        if (hounsfield > 300) {
-            alpha = 0.15;
-            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone
-        } else if (hounsfield > 100) {
-            alpha = 0.08;
-            color = float3(0.8, 0.85, 0.95) * windowed;
-        } else if (hounsfield > 40) {
-            alpha = 0.25;
-            color = float3(0.3, 0.5, 0.9) * windowed;  // Deep blue organs
-        } else if (hounsfield > -10) {
-            alpha = 0.15;
-            color = float3(0.4, 0.6, 0.8) * windowed;  // Light blue tissue
-        } else if (hounsfield > -100) {
-            alpha = 0.05;
-            color = float3(0.7, 0.8, 0.9) * windowed;
-        }
+//        if (hounsfield > 300) {
+//            alpha = 0.15;
+//            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone
+//        } else if (hounsfield > 100) {
+//            alpha = 0.08;
+//            color = float3(0.8, 0.85, 0.95) * windowed;
+//        } else if (hounsfield > 40) {
+//            alpha = 0.25;
+//            color = float3(0.3, 0.5, 0.9) * windowed;  // Deep blue organs
+//        } else if (hounsfield > -10) {
+//            alpha = 0.15;
+//            color = float3(0.4, 0.6, 0.8) * windowed;  // Light blue tissue
+//        } else if (hounsfield > -100) {
+//            alpha = 0.05;
+//            color = float3(0.7, 0.8, 0.9) * windowed;
+//        }
         
-        // SCHEME 2: X-Ray Classic (Cyan-Green)
+          // SCHEME 2: X-Ray Classic (Cyan-Green)
         if (hounsfield > 300) {
             alpha = 0.15;
             color = float3(0.8, 1.0, 1.0) * windowed;  // Cyan-white bone
@@ -296,7 +296,7 @@ kernel void volumeRender3D(
             color = float3(0.5, 0.8, 0.7) * windowed;
         }
         
-        // SCHEME 3: Purple-Pink Vaporwave
+        /*        // SCHEME 3: Purple-Pink Vaporwave
         if (hounsfield > 300) {
             alpha = 0.15;
             color = float3(1.0, 0.9, 1.0) * windowed;  // Bright purple-white
@@ -315,7 +315,7 @@ kernel void volumeRender3D(
         }
         */
         
-        // Crosshair axes - bright colored lines through actual crosshair position
+        // Crosshair axes - subtle single color at actual crosshair position
         // Use the crosshair position from MPR views (already in voxel coordinates)
         float3 crosshairPos = float3(params.crosshairX, params.crosshairY, params.crosshairZ);
         
@@ -323,41 +323,45 @@ kernel void volumeRender3D(
         float3 spacing = float3(params.spacingX, params.spacingY, params.spacingZ);
         
         // Line thickness in physical mm (not voxels)
-        float physicalLineThickness = 2.0;  // 2mm thick lines
+        float physicalLineThickness = 1.5;  // Thinner lines - was 2.0
         
         // Convert to voxel units for each axis
         float3 lineThicknessVoxels = physicalLineThickness / spacing;
         
-        // X-axis (bright red) - runs along X at crosshair Y and Z
+        // Subtle green crosshair color (matches MPR views)
+        float3 crosshairColor = float3(0.0, 1.0, 0.0);  // Green
+        float crosshairAlpha = 0.6;  // Semi-transparent
+        
+        // X-axis line - runs along X at crosshair Y and Z
         if (abs(volumePos.y - crosshairPos.y) < lineThicknessVoxels.y && 
             abs(volumePos.z - crosshairPos.z) < lineThicknessVoxels.z) {
-            color = float3(1.0, 0.2, 0.2);  // Bright red
-            alpha = 1.0;
+            color = crosshairColor;
+            alpha = crosshairAlpha;
         }
         
-        // Y-axis (bright green) - runs along Y at crosshair X and Z
+        // Y-axis line - runs along Y at crosshair X and Z
         if (abs(volumePos.x - crosshairPos.x) < lineThicknessVoxels.x && 
             abs(volumePos.z - crosshairPos.z) < lineThicknessVoxels.z) {
-            color = float3(0.2, 1.0, 0.2);  // Bright green
-            alpha = 1.0;
+            color = crosshairColor;
+            alpha = crosshairAlpha;
         }
         
-        // Z-axis (bright blue) - runs along Z at crosshair X and Y
+        // Z-axis line - runs along Z at crosshair X and Y
         if (abs(volumePos.x - crosshairPos.x) < lineThicknessVoxels.x && 
             abs(volumePos.y - crosshairPos.y) < lineThicknessVoxels.y) {
-            color = float3(0.2, 0.2, 1.0);  // Bright blue
-            alpha = 1.0;
+            color = crosshairColor;
+            alpha = crosshairAlpha;
         }
         
-        // Center intersection point - yellow sphere at actual crosshair
+        // Center intersection point - small bright dot
         // Convert position difference to physical space for proper sphere shape
         float3 centerOffset = volumePos - crosshairPos;
         float3 physicalOffset = centerOffset * spacing;
         float physicalDist = length(physicalOffset);  // Distance in mm
         
-        if (physicalDist < 3.0) {  // 3mm radius sphere
-            color = float3(1.0, 1.0, 0.0);  // Yellow center
-            alpha = 1.0;
+        if (physicalDist < 2.0) {  // Smaller center dot - was 3.0mm
+            color = float3(1.0, 1.0, 0.0);  // Yellow center for visibility
+            alpha = 0.8;
         }
         
         // Front-to-back compositing with adjusted visibility
