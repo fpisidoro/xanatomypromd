@@ -54,7 +54,8 @@ struct Standalone3DView: View {
                     coordinateSystem: coordinateSystem,
                     windowLevel: sharedState.windowLevel,
                     zoom: sharedState.zoom3D,  // Use persistent zoom
-                    pan: sharedState.pan3D  // Use persistent pan
+                    pan: sharedState.pan3D,  // Use persistent pan
+                    showROI: sharedState.showROIOverlay  // Pass ROI toggle state
                 )
                 .clipped()
                 .onReceive(coordinateSystem.$currentWorldPosition) { newPosition in
@@ -152,6 +153,11 @@ class Metal3DVolumeRenderer: ObservableObject {
     private var volumeTexture: MTLTexture?
     private var hasLoggedFirstRender = false
     
+    // ROI data storage
+    private var roiBuffer: MTLBuffer?
+    private var roiCount: Int = 0
+    private var roiData: MinimalRTStructParser.SimpleRTStructData?
+    
     init() {
         setupMetal()
     }
@@ -228,7 +234,52 @@ class Metal3DVolumeRenderer: ObservableObject {
     }
     
     func setupROI(_ roiData: MinimalRTStructParser.SimpleRTStructData) {
-        // ROI setup placeholder
+        guard let device = device else { return }
+        self.roiData = roiData
+        
+        // For now, we'll handle the first ROI and its first contour
+        // In production, we'd create a more complex buffer structure for multiple ROIs
+        guard let firstROI = roiData.roiStructures.first,
+              !firstROI.contours.isEmpty else {
+            print("⚠️ No ROI contours to setup")
+            return
+        }
+        
+        // Create a buffer with contour points for the shader
+        // We'll pack all contour points into a buffer with metadata
+        var roiBufferData: [Float] = []
+        
+        // Add ROI metadata: color and contour count
+        roiBufferData.append(firstROI.displayColor.x)
+        roiBufferData.append(firstROI.displayColor.y)
+        roiBufferData.append(firstROI.displayColor.z)
+        roiBufferData.append(Float(firstROI.contours.count))
+        
+        // Add each contour's data
+        for contour in firstROI.contours {
+            // Add contour metadata: slice position and point count
+            roiBufferData.append(contour.slicePosition)
+            roiBufferData.append(Float(contour.points.count))
+            
+            // Add contour points (in world coordinates)
+            for point in contour.points {
+                roiBufferData.append(point.x)
+                roiBufferData.append(point.y)
+                roiBufferData.append(point.z)
+            }
+        }
+        
+        // Create Metal buffer
+        let bufferSize = roiBufferData.count * MemoryLayout<Float>.size
+        roiBuffer = device.makeBuffer(bytes: roiBufferData, length: bufferSize, options: [])
+        roiCount = firstROI.contours.count
+        
+        print("✅ ROI setup complete:")
+        print("   - ROI: \(firstROI.roiName)")
+        print("   - Color: \(firstROI.displayColor)")
+        print("   - Contours: \(firstROI.contours.count)")
+        print("   - Total points: \(firstROI.contours.reduce(0) { $0 + $1.points.count })")
+        print("   - Buffer size: \(bufferSize) bytes")
     }
     
     func render(to texture: MTLTexture, 
@@ -238,7 +289,8 @@ class Metal3DVolumeRenderer: ObservableObject {
                 volumeSpacing: SIMD3<Float>,
                 windowLevel: CTWindowLevel,
                 zoom: CGFloat,
-                pan: CGSize) {
+                pan: CGSize,
+                showROI: Bool = false) {
         
         // Only log first render to avoid spam
         if !hasLoggedFirstRender {
@@ -285,13 +337,20 @@ class Metal3DVolumeRenderer: ObservableObject {
             zoom: Float(zoom),
             panX: Float(pan.width),
             panY: Float(pan.height),
-            displaySize: CGSize(width: texture.width, height: texture.height)
+            displaySize: CGSize(width: texture.width, height: texture.height),
+            showROI: showROI ? 1.0 : 0.0,
+            roiCount: Float(roiCount)
         )
         
         print("Swift struct size: \(MemoryLayout<Volume3DRenderParams>.size) bytes")
         print("Swift struct stride: \(MemoryLayout<Volume3DRenderParams>.stride) bytes")
         print("Swift struct alignment: \(MemoryLayout<Volume3DRenderParams>.alignment) bytes")
         encoder.setBytes(&params, length: MemoryLayout<Volume3DRenderParams>.size, index: 0)
+        
+        // Set ROI buffer if available
+        if let roiBuffer = roiBuffer, showROI {
+            encoder.setBuffer(roiBuffer, offset: 0, index: 1)
+        }
         
         let threadsPerGroup = MTLSize(width: 8, height: 8, depth: 1)
         let groupsCount = MTLSize(
@@ -351,8 +410,10 @@ struct Volume3DRenderParams {
     let spacingZ: Float
     let displayWidth: Float
     let displayHeight: Float
+    let showROI: Float  // 1.0 if ROI should be shown, 0.0 otherwise
+    let roiCount: Float  // Number of ROI contours
     
-    init(rotationZ: Float, crosshairPosition: SIMD3<Float>, volumeOrigin: SIMD3<Float>, volumeSpacing: SIMD3<Float>, windowCenter: Float, windowWidth: Float, zoom: Float, panX: Float, panY: Float, displaySize: CGSize) {
+    init(rotationZ: Float, crosshairPosition: SIMD3<Float>, volumeOrigin: SIMD3<Float>, volumeSpacing: SIMD3<Float>, windowCenter: Float, windowWidth: Float, zoom: Float, panX: Float, panY: Float, displaySize: CGSize, showROI: Float = 0.0, roiCount: Float = 0.0) {
         self.rotationZ = rotationZ
         self.windowCenter = windowCenter
         self.windowWidth = windowWidth
@@ -368,6 +429,8 @@ struct Volume3DRenderParams {
         self.spacingZ = volumeSpacing.z
         self.displayWidth = Float(displaySize.width)
         self.displayHeight = Float(displaySize.height)
+        self.showROI = showROI
+        self.roiCount = roiCount
     }
 }
 
@@ -380,6 +443,7 @@ struct Metal3DRenderView: UIViewRepresentable {
     let windowLevel: CTWindowLevel
     let zoom: CGFloat
     let pan: CGSize
+    let showROI: Bool
     
     func makeUIView(context: Context) -> MTKView {
         let mtkView = MTKView()
@@ -400,7 +464,8 @@ struct Metal3DRenderView: UIViewRepresentable {
             volumeSpacing: coordinateSystem.volumeSpacing,
             windowLevel: windowLevel,
             zoom: zoom,
-            pan: pan
+            pan: pan,
+            showROI: showROI
         )
         uiView.setNeedsDisplay()  // Trigger single render
     }
@@ -418,13 +483,14 @@ struct Metal3DRenderView: UIViewRepresentable {
         private var windowLevel: CTWindowLevel = .softTissue
         private var zoom: CGFloat = 1.0
         private var pan: CGSize = .zero
+        private var showROI: Bool = false
         private var lastRenderTime: CFTimeInterval = 0
         
         init(renderer: Metal3DVolumeRenderer) {
             self.renderer = renderer
         }
         
-        func updateParams(rotationZ: Float, crosshairPosition: SIMD3<Float>, volumeOrigin: SIMD3<Float>, volumeSpacing: SIMD3<Float>, windowLevel: CTWindowLevel, zoom: CGFloat, pan: CGSize) {
+        func updateParams(rotationZ: Float, crosshairPosition: SIMD3<Float>, volumeOrigin: SIMD3<Float>, volumeSpacing: SIMD3<Float>, windowLevel: CTWindowLevel, zoom: CGFloat, pan: CGSize, showROI: Bool) {
             self.rotationZ = rotationZ
             self.crosshairPosition = crosshairPosition
             self.volumeOrigin = volumeOrigin
@@ -432,6 +498,7 @@ struct Metal3DRenderView: UIViewRepresentable {
             self.windowLevel = windowLevel
             self.zoom = zoom
             self.pan = pan
+            self.showROI = showROI
         }
         
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
@@ -454,7 +521,8 @@ struct Metal3DRenderView: UIViewRepresentable {
                 volumeSpacing: volumeSpacing,
                 windowLevel: windowLevel,
                 zoom: zoom,
-                pan: pan
+                pan: pan,
+                showROI: showROI
             )
             
             drawable.present()

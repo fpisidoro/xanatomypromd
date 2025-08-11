@@ -94,6 +94,8 @@ struct Volume3DRenderParams {
     float spacingZ;
     float displayWidth;   // Actual display dimensions
     float displayHeight;  // Actual display dimensions
+    float showROI;       // 1.0 if ROI should be shown
+    float roiCount;      // Number of ROI contours
 };
 
 // Alpha transfer function for volume rendering - balanced visibility
@@ -136,6 +138,7 @@ kernel void volumeRender3D(
     texture3d<short, access::read> volumeTexture [[texture(0)]],
     texture2d<float, access::write> outputTexture [[texture(1)]],
     constant Volume3DRenderParams& params [[buffer(0)]],
+    constant float* roiData [[buffer(1)]],
     uint2 gid [[thread_position_in_grid]]
 ) {
     if (gid.x >= outputTexture.get_width() || gid.y >= outputTexture.get_height()) {
@@ -261,40 +264,40 @@ kernel void volumeRender3D(
         //ALTERNATIVE COLOR SCHEMES - Uncomment one to try:
         
         // SCHEME 1: Cool Blue Medical
-        if (hounsfield > 300) {
-            alpha = 0.15;
-            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone
-        } else if (hounsfield > 100) {
-            alpha = 0.08;
-            color = float3(0.8, 0.85, 0.95) * windowed;
-        } else if (hounsfield > 40) {
-            alpha = 0.25;
-            color = float3(0.3, 0.5, 0.9) * windowed;  // Deep blue organs
-        } else if (hounsfield > -10) {
-            alpha = 0.15;
-            color = float3(0.4, 0.6, 0.8) * windowed;  // Light blue tissue
-        } else if (hounsfield > -100) {
-            alpha = 0.05;
-            color = float3(0.7, 0.8, 0.9) * windowed;
-        }
-        
-        // SCHEME 1B: Hybrid Blue-Bone/Red-Tissue (NEW - TRY THIS!)
 //        if (hounsfield > 300) {
 //            alpha = 0.15;
-//            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone (from blue scheme)
+//            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone
 //        } else if (hounsfield > 100) {
 //            alpha = 0.08;
-//            color = float3(0.8, 0.85, 0.95) * windowed;  // Light blue bone cortex
+//            color = float3(0.8, 0.85, 0.95) * windowed;
 //        } else if (hounsfield > 40) {
 //            alpha = 0.25;
-//            color = float3(0.9, 0.3, 0.3) * windowed;  // Reddish organs (from peach scheme)
+//            color = float3(0.3, 0.5, 0.9) * windowed;  // Deep blue organs
 //        } else if (hounsfield > -10) {
 //            alpha = 0.15;
-//            color = float3(0.8, 0.5, 0.4) * windowed;  // Peach soft tissue
+//            color = float3(0.4, 0.6, 0.8) * windowed;  // Light blue tissue
 //        } else if (hounsfield > -100) {
 //            alpha = 0.05;
-//            color = float3(0.9, 0.8, 0.6) * windowed;  // Light yellow fat
+//            color = float3(0.7, 0.8, 0.9) * windowed;
 //        }
+        
+        // SCHEME 1B: Hybrid Blue-Bone/Red-Tissue (NEW - TRY THIS!)
+        if (hounsfield > 300) {
+            alpha = 0.15;
+            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone (from blue scheme)
+        } else if (hounsfield > 100) {
+            alpha = 0.08;
+            color = float3(0.8, 0.85, 0.95) * windowed;  // Light blue bone cortex
+        } else if (hounsfield > 40) {
+            alpha = 0.25;
+            color = float3(0.9, 0.3, 0.3) * windowed;  // Reddish organs (from peach scheme)
+        } else if (hounsfield > -10) {
+            alpha = 0.15;
+            color = float3(0.8, 0.5, 0.4) * windowed;  // Peach soft tissue
+        } else if (hounsfield > -100) {
+            alpha = 0.05;
+            color = float3(0.9, 0.8, 0.6) * windowed;  // Light yellow fat
+        }
         
           // SCHEME 2: X-Ray Classic (Cyan-Green)
 //        if (hounsfield > 300) {
@@ -380,6 +383,58 @@ kernel void volumeRender3D(
         if (physicalDist < 2.0) {  // Smaller center dot - was 3.0mm
             color = float3(1.0, 1.0, 0.0);  // Yellow center for visibility
             alpha = 0.8;
+        }
+        
+        // ROI visualization - simple approach for single ROI
+        if (params.showROI > 0.5 && params.roiCount > 0 && roiData != nullptr) {
+            // Read ROI metadata from buffer
+            float3 roiColor = float3(roiData[0], roiData[1], roiData[2]);
+            int contourCount = int(roiData[3]);
+            int dataOffset = 4;  // Start after metadata
+            
+            // Convert current voxel position to world coordinates for ROI checking
+            float3 worldPos = volumePos * spacing + float3(-250.0, -250.0, -135.0);  // Approximate origin based on typical CT
+            
+            // Check if we're near any contour's Z slice
+            bool inROI = false;
+            for (int c = 0; c < contourCount && c < 10; c++) {  // Limit for performance
+                float sliceZ = roiData[dataOffset];
+                int pointCount = int(roiData[dataOffset + 1]);
+                
+                // Check if we're within 3mm of this contour's Z position
+                if (abs(worldPos.z - sliceZ) < 3.0) {
+                    // For 3D visualization, just check if we're near the contour boundary
+                    // This is a simplified approach - in production we'd do proper 3D interpolation
+                    for (int i = 0; i < pointCount && i < 50; i++) {
+                        float3 contourPoint = float3(
+                            roiData[dataOffset + 2 + i*3],
+                            roiData[dataOffset + 2 + i*3 + 1],
+                            roiData[dataOffset + 2 + i*3 + 2]
+                        );
+                        
+                        // Check distance to contour point
+                        float3 diff = worldPos - contourPoint;
+                        float dist = length(diff.xy);  // Distance in XY plane
+                        
+                        if (dist < 5.0) {  // Within 5mm of contour
+                            inROI = true;
+                            break;
+                        }
+                    }
+                }
+                
+                // Move to next contour in buffer
+                dataOffset += 2 + pointCount * 3;
+                
+                if (inROI) break;
+            }
+            
+            // Apply ROI coloring if inside
+            if (inROI) {
+                // Blend ROI color with existing color
+                color = mix(color, roiColor, 0.6);  // 60% ROI color
+                alpha = max(alpha, 0.4);  // Ensure ROI is visible
+            }
         }
         
         // Front-to-back compositing with adjusted visibility
