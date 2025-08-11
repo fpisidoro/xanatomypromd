@@ -388,7 +388,7 @@ kernel void volumeRender3D(
             alpha = 0.8;
         }
         
-        // ROI visualization - proper contour rendering
+        // ROI visualization - draw contour outlines
         if (params.showROI > 0.5 && params.roiCount > 0 && roiData != nullptr) {
             // Read ROI metadata from buffer
             float3 roiColor = float3(roiData[0], roiData[1], roiData[2]);
@@ -399,7 +399,7 @@ kernel void volumeRender3D(
             // ROI points are in world coordinates, so convert them to voxel space
             float3 volumeOrigin = float3(params.originX, params.originY, params.originZ);
             
-            bool inROI = false;
+            bool nearROI = false;
             
             // Check all contours
             for (int c = 0; c < contourCount && c < 10; c++) {
@@ -410,15 +410,12 @@ kernel void volumeRender3D(
                 float roiZVoxel = (sliceZ - volumeOrigin.z) / spacing.z;
                 
                 // Check if we're at this contour's Z slice (within slice thickness)
-                if (abs(volumePos.z - roiZVoxel) < 1.5) {
-                    // Simple point-in-polygon test for 2D contour
-                    // Using ray casting algorithm
-                    int intersections = 0;
-                    
+                if (abs(volumePos.z - roiZVoxel) < 1.0) {
+                    // Check if we're near any contour edge (outline only)
                     for (int i = 0; i < pointCount && i < 50; i++) {
                         int j = (i + 1) % pointCount;
                         
-                        // Get two consecutive points of the contour
+                        // Get two consecutive points of the contour (edge)
                         float3 p1World = float3(
                             roiData[dataOffset + 2 + i*3],
                             roiData[dataOffset + 2 + i*3 + 1],
@@ -434,34 +431,40 @@ kernel void volumeRender3D(
                         float3 p1Voxel = (p1World - volumeOrigin) / spacing;
                         float3 p2Voxel = (p2World - volumeOrigin) / spacing;
                         
-                        // Ray casting test in XY plane
-                        // Cast ray from volumePos to the right (+X direction)
-                        // Count how many edges it crosses
-                        if ((p1Voxel.y > volumePos.y) != (p2Voxel.y > volumePos.y)) {
-                            // Edge crosses the Y coordinate of volumePos
-                            float xIntersect = p1Voxel.x + (volumePos.y - p1Voxel.y) * (p2Voxel.x - p1Voxel.x) / (p2Voxel.y - p1Voxel.y);
-                            if (volumePos.x < xIntersect) {
-                                intersections++;
+                        // Calculate distance from volumePos to the line segment p1-p2
+                        float2 p1xy = p1Voxel.xy;
+                        float2 p2xy = p2Voxel.xy;
+                        float2 posxy = volumePos.xy;
+                        
+                        float2 edge = p2xy - p1xy;
+                        float2 toPos = posxy - p1xy;
+                        float edgeLength = length(edge);
+                        
+                        if (edgeLength > 0.01) {
+                            float t = clamp(dot(toPos, edge) / (edgeLength * edgeLength), 0.0, 1.0);
+                            float2 nearest = p1xy + t * edge;
+                            float dist = length(posxy - nearest);
+                            
+                            // If within 2 voxels of the edge, color it
+                            if (dist < 2.0) {
+                                nearROI = true;
+                                break;
                             }
                         }
                     }
                     
-                    // Odd number of intersections means we're inside the polygon
-                    if (intersections % 2 == 1) {
-                        inROI = true;
-                        break;
-                    }
+                    if (nearROI) break;
                 }
                 
                 // Move to next contour in buffer
                 dataOffset += 2 + pointCount * 3;
             }
             
-            // Apply ROI coloring if inside
-            if (inROI) {
-                // Mix ROI color with existing color
-                color = mix(color, roiColor, 0.5);  // 50% blend
-                alpha = max(alpha, 0.3);  // Ensure ROI is visible
+            // Apply ROI coloring if near contour
+            if (nearROI) {
+                // Strong color for outline
+                color = roiColor;
+                alpha = 0.8;  // High visibility
             }
         }
         
