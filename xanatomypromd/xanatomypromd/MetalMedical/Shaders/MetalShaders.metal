@@ -202,10 +202,11 @@ kernel void volumeRender3D(
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
         // Map normalized NDC to volume space
         // viewNdc now ranges from [-1, 1] after normalization
+        // Map to [0, volumeDim-1] since indices are 0-based
         float3 basePos = float3(
-            (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
+            (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x - 1),
             float(step) * stepSize / params.spacingY,
-            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z)
+            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z - 1)
         );
         
         // Apply rotation around Z-axis
