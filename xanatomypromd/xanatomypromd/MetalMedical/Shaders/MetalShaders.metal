@@ -96,6 +96,9 @@ struct Volume3DRenderParams {
     float displayHeight;  // Actual display dimensions
     float showROI;       // 1.0 if ROI should be shown
     float roiCount;      // Number of ROI contours
+    float originX;       // Volume origin in world coordinates
+    float originY;
+    float originZ;
 };
 
 // Alpha transfer function for volume rendering - balanced visibility
@@ -393,7 +396,9 @@ kernel void volumeRender3D(
             int dataOffset = 4;  // Start after metadata
             
             // Convert current voxel position to world coordinates for ROI checking
-            float3 worldPos = volumePos * spacing + float3(-250.0, -250.0, -135.0);  // Approximate origin based on typical CT
+            // Use actual volume origin from params instead of hardcoded values
+            float3 volumeOrigin = float3(params.originX, params.originY, params.originZ);
+            float3 worldPos = volumePos * spacing + volumeOrigin;
             
             // Check if we're near any contour's Z slice
             bool inROI = false;

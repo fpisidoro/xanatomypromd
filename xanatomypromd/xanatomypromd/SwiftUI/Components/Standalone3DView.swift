@@ -412,6 +412,9 @@ struct Volume3DRenderParams {
     let displayHeight: Float
     let showROI: Float  // 1.0 if ROI should be shown, 0.0 otherwise
     let roiCount: Float  // Number of ROI contours
+    let originX: Float  // Volume origin in world coordinates
+    let originY: Float
+    let originZ: Float
     
     init(rotationZ: Float, crosshairPosition: SIMD3<Float>, volumeOrigin: SIMD3<Float>, volumeSpacing: SIMD3<Float>, windowCenter: Float, windowWidth: Float, zoom: Float, panX: Float, panY: Float, displaySize: CGSize, showROI: Float = 0.0, roiCount: Float = 0.0) {
         self.rotationZ = rotationZ
@@ -431,6 +434,9 @@ struct Volume3DRenderParams {
         self.displayHeight = Float(displaySize.height)
         self.showROI = showROI
         self.roiCount = roiCount
+        self.originX = volumeOrigin.x
+        self.originY = volumeOrigin.y
+        self.originZ = volumeOrigin.z
     }
 }
 
