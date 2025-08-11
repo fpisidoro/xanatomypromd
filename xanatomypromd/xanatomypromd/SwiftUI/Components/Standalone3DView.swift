@@ -55,7 +55,7 @@ struct Standalone3DView: View {
                     windowLevel: sharedState.windowLevel,
                     zoom: sharedState.zoom3D,  // Use persistent zoom
                     pan: sharedState.pan3D,  // Use persistent pan
-                    showROI: sharedState.showROIOverlay  // Pass ROI toggle state
+                    showROI: sharedState.roiSettings.isVisible  // Pass ROI toggle state
                 )
                 .clipped()
                 .onReceive(coordinateSystem.$currentWorldPosition) { newPosition in
