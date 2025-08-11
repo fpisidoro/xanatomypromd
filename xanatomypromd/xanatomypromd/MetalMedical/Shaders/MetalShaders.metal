@@ -193,13 +193,14 @@ kernel void volumeRender3D(
     int numSteps = int(float(volumeDim.y) * params.spacingY / stepSize);
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Map NDC to volume space using letterbox bounds
-        // viewNdc ranges from [-letterboxScale, +letterboxScale]
-        // Map this to [0, volumeDim] for sampling
+        // Map NDC directly to volume space
+        // The entire volume should fit within the letterbox bounds
+        // viewNdc already ranges from [-letterboxScale, +letterboxScale]
+        // Simply map this smaller range to [0, volumeDim]
         float3 basePos = float3(
-            (viewNdc.x / letterboxScale.x + 1.0) * 0.5 * float(volumeDim.x),
+            (viewNdc.x + letterboxScale.x) / (2.0 * letterboxScale.x) * float(volumeDim.x),
             float(step) * stepSize / params.spacingY,  // Convert physical step to voxel units
-            (viewNdc.y / letterboxScale.y + 1.0) * 0.5 * float(volumeDim.z)
+            (viewNdc.y + letterboxScale.y) / (2.0 * letterboxScale.y) * float(volumeDim.z)
         );
         
         // Apply rotation around Z-axis
