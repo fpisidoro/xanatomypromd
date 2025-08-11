@@ -18,6 +18,8 @@ struct Standalone3DView: View {
     // Use persistent state from SharedViewingState
     @State private var lastZoom: CGFloat = 1.0
     @State private var dragStartRotation: Float = 0.0
+    @State private var dragStartLocation: CGPoint = .zero
+    @State private var isDragging: Bool = false
     @StateObject private var renderer = Metal3DVolumeRenderer()
     
     // SYNC: Track crosshair changes for real-time updates
@@ -111,30 +113,31 @@ struct Standalone3DView: View {
     }
     
     private func createGestureRecognizer() -> some Gesture {
-        SimultaneousGesture(
-            DragGesture()
-                .onChanged { value in
-                    // Horizontal drag rotates the 3D view
-                    let rotationSensitivity: Float = 0.01
-                    let deltaRotation = Float(value.translation.width) * rotationSensitivity
-                    sharedState.update3DRotation(dragStartRotation + deltaRotation)
-                }
-                .onEnded { _ in
-                    // Save the final rotation as the new starting point
+        let dragGesture = DragGesture()
+            .onChanged { value in
+                if !isDragging {
+                    isDragging = true
+                    dragStartLocation = value.startLocation
                     dragStartRotation = sharedState.rotation3D
-                },
-            
-            MagnificationGesture()
-                .onChanged { value in
-                    let delta = value / lastZoom
-                    lastZoom = value
-                    let newZoom = sharedState.zoom3D * delta
-                    sharedState.update3DZoom(max(0.5, min(3.0, newZoom)))
                 }
-                .onEnded { _ in
-                    lastZoom = 1.0
-                }
-        )
+                
+                // Calculate rotation based on total drag distance from start
+                let rotationSensitivity: Float = 0.01
+                let deltaX = Float(value.location.x - dragStartLocation.x)
+                let newRotation = dragStartRotation + deltaX * rotationSensitivity
+                sharedState.update3DRotation(newRotation)
+            }
+            .onEnded { _ in
+                isDragging = false
+            }
+        
+        let magnificationGesture = MagnificationGesture()
+            .onChanged { value in
+                let newZoom = max(0.5, min(3.0, value))
+                sharedState.update3DZoom(newZoom)
+            }
+        
+        return dragGesture.simultaneously(with: magnificationGesture)
     }
 }
 
@@ -339,6 +342,10 @@ struct Volume3DRenderParams {
     let zoom: Float
     let panX: Float
     let panY: Float
+    // Crosshair position (for syncing with MPR views)
+    let crosshairX: Float
+    let crosshairY: Float
+    let crosshairZ: Float
     // Add spacing as individual floats to avoid SIMD alignment issues
     let spacingX: Float
     let spacingY: Float
@@ -353,6 +360,9 @@ struct Volume3DRenderParams {
         self.zoom = zoom
         self.panX = panX
         self.panY = panY
+        self.crosshairX = crosshairPosition.x
+        self.crosshairY = crosshairPosition.y
+        self.crosshairZ = crosshairPosition.z
         self.spacingX = volumeSpacing.x
         self.spacingY = volumeSpacing.y
         self.spacingZ = volumeSpacing.z
