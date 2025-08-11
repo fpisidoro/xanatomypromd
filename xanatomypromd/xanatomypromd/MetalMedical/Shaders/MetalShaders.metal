@@ -242,10 +242,10 @@ kernel void volumeRender3D(
         float3 color = float3(0.0);
         
         if (hounsfield > 300) {  // Dense bone (was 200)
-            alpha = 0.4;  // Reduced from 0.8 - less opaque bone
+            alpha = 0.15;  // Much more transparent - was 0.4
             color = float3(1.0, 1.0, 0.95) * windowed;
         } else if (hounsfield > 100) {  // Bone cortex (was 50)
-            alpha = 0.2;  // Reduced from 0.3
+            alpha = 0.08;  // Much more transparent - was 0.2
             color = float3(1.0, 0.9, 0.8) * windowed;
         } else if (hounsfield > 40) {  // Muscle/organs
             alpha = 0.15;  // Increased visibility
