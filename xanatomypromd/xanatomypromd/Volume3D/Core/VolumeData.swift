@@ -338,10 +338,23 @@ public class VolumeData {
         // Calculate Z spacing from slice positions
         let zSpacing: Float
         if sliceInfos.count > 1 {
+            // CRITICAL: Use only Z-axis difference, not Euclidean distance
+            // Slices are sorted superior to inferior (high Z to low Z)
             let firstPos = sliceInfos[0].position
             let lastPos = sliceInfos[sliceInfos.count - 1].position
-            let distance = simd_length(lastPos - firstPos)
-            zSpacing = distance / Float(sliceInfos.count - 1)
+            
+            // Calculate Z-axis distance only (should be negative since sorted high to low)
+            let zDistance = abs(lastPos.z - firstPos.z)
+            
+            // Divide by number of GAPS between slices (not number of slices)
+            zSpacing = zDistance / Float(sliceInfos.count - 1)
+            
+            print("   📏 Z-spacing calculation:")
+            print("      First slice Z: \(firstPos.z)mm")
+            print("      Last slice Z: \(lastPos.z)mm")
+            print("      Z distance: \(zDistance)mm")
+            print("      Number of gaps: \(sliceInfos.count - 1)")
+            print("      Z-spacing: \(zSpacing)mm")
         } else {
             zSpacing = sliceInfos[0].sliceThickness
         }

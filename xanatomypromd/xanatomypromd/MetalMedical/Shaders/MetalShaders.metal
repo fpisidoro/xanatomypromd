@@ -161,14 +161,21 @@ kernel void volumeRender3D(
     float sinZ = sin(params.rotationZ);
     
     // Ray march through volume along Y-axis (anterior-posterior)
-    // Adjust step size based on spacing to sample uniformly in physical space
-    float stepSize = params.spacingY / params.spacingX;  // How many voxel units per physical mm
-    int numSteps = int(float(volumeDim.y) / stepSize);  // Fewer steps needed
+    // Sample uniformly in physical space by adjusting step size
+    float minSpacing = min(min(params.spacingX, params.spacingY), params.spacingZ);
+    float stepSize = minSpacing;  // Step size in physical mm
+    int numSteps = int(float(volumeDim.y) * params.spacingY / stepSize);
+    
+    // Calculate physical aspect ratio to correct for anisotropic voxels
+    float physicalWidthX = float(volumeDim.x) * params.spacingX;
+    float physicalHeightZ = float(volumeDim.z) * params.spacingZ;
+    float aspectRatio = physicalWidthX / physicalHeightZ;
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
+        // Map NDC to volume space accounting for physical dimensions
         float3 basePos = float3(
             (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
-            float(step) * stepSize,  // Step through Y using physical step size
+            float(step) * stepSize / params.spacingY,  // Convert physical step to voxel units
             (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z)
         );
         
@@ -213,32 +220,43 @@ kernel void volumeRender3D(
         }
         
         // Crosshair axes - bright colored lines through volume center
-        float lineThickness = 2.5;  // Thicker lines
+        // Account for anisotropic voxel spacing when checking line thickness
+        float3 spacing = float3(params.spacingX, params.spacingY, params.spacingZ);
+        
+        // Line thickness in physical mm (not voxels)
+        float physicalLineThickness = 2.0;  // 2mm thick lines
+        
+        // Convert to voxel units for each axis
+        float3 lineThicknessVoxels = physicalLineThickness / spacing;
         
         // X-axis (bright red) - runs along X at center Y and Z
-        if (abs(volumePos.y - volumeCenter.y) < lineThickness && 
-            abs(volumePos.z - volumeCenter.z) < lineThickness) {
+        if (abs(volumePos.y - volumeCenter.y) < lineThicknessVoxels.y && 
+            abs(volumePos.z - volumeCenter.z) < lineThicknessVoxels.z) {
             color = float3(1.0, 0.2, 0.2);  // Bright red
             alpha = 1.0;
         }
         
         // Y-axis (bright green) - runs along Y at center X and Z
-        if (abs(volumePos.x - volumeCenter.x) < lineThickness && 
-            abs(volumePos.z - volumeCenter.z) < lineThickness) {
+        if (abs(volumePos.x - volumeCenter.x) < lineThicknessVoxels.x && 
+            abs(volumePos.z - volumeCenter.z) < lineThicknessVoxels.z) {
             color = float3(0.2, 1.0, 0.2);  // Bright green
             alpha = 1.0;
         }
         
         // Z-axis (bright blue) - runs along Z at center X and Y
-        if (abs(volumePos.x - volumeCenter.x) < lineThickness && 
-            abs(volumePos.y - volumeCenter.y) < lineThickness) {
+        if (abs(volumePos.x - volumeCenter.x) < lineThicknessVoxels.x && 
+            abs(volumePos.y - volumeCenter.y) < lineThicknessVoxels.y) {
             color = float3(0.2, 0.2, 1.0);  // Bright blue
             alpha = 1.0;
         }
         
-        // Center intersection point - white sphere
-        float centerDist = length(volumePos - volumeCenter);
-        if (centerDist < 3.0) {
+        // Center intersection point - yellow sphere
+        // Convert position difference to physical space for proper sphere shape
+        float3 offsetFromCenter = volumePos - volumeCenter;
+        float3 physicalOffset = offsetFromCenter * spacing;
+        float physicalDist = length(physicalOffset);  // Distance in mm
+        
+        if (physicalDist < 3.0) {  // 3mm radius sphere
             color = float3(1.0, 1.0, 0.0);  // Yellow center
             alpha = 1.0;
         }
