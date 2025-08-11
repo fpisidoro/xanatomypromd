@@ -122,7 +122,8 @@ struct Standalone3DView: View {
                 }
                 
                 // Calculate rotation based on total drag distance from start
-                let rotationSensitivity: Float = 0.01
+                // REVERSED: Negative rotation for more intuitive control
+                let rotationSensitivity: Float = -0.01  // Negative to reverse direction
                 let deltaX = Float(value.location.x - dragStartLocation.x)
                 let newRotation = dragStartRotation + deltaX * rotationSensitivity
                 sharedState.update3DRotation(newRotation)

@@ -237,19 +237,27 @@ kernel void volumeRender3D(
         float windowed = clamp((hounsfield - windowMin) / (windowMax - windowMin), 0.0, 1.0);
         
         // Get alpha and color based on tissue type
+        // Tweaked for better soft tissue visibility, less skin
         float alpha = 0.0;
         float3 color = float3(0.0);
         
-        if (hounsfield > 200) {  // Bone
-            alpha = 0.8;
-            color = float3(1.0, 1.0, 1.0) * windowed;
-        } else if (hounsfield > 50) {  // Dense tissue
-            alpha = 0.3;
-            color = float3(1.0, 0.2, 0.2) * windowed;
-        } else if (hounsfield > -100) {  // Soft tissue
-            alpha = 0.1;
-            color = float3(0.8, 0.4, 0.4) * windowed;
+        if (hounsfield > 300) {  // Dense bone (was 200)
+            alpha = 0.4;  // Reduced from 0.8 - less opaque bone
+            color = float3(1.0, 1.0, 0.95) * windowed;
+        } else if (hounsfield > 100) {  // Bone cortex (was 50)
+            alpha = 0.2;  // Reduced from 0.3
+            color = float3(1.0, 0.9, 0.8) * windowed;
+        } else if (hounsfield > 40) {  // Muscle/organs
+            alpha = 0.15;  // Increased visibility
+            color = float3(0.9, 0.3, 0.3) * windowed;  // Reddish
+        } else if (hounsfield > -10) {  // Soft tissue  
+            alpha = 0.08;  // Visible but translucent
+            color = float3(0.8, 0.5, 0.4) * windowed;
+        } else if (hounsfield > -100) {  // Fat
+            alpha = 0.02;  // Very faint
+            color = float3(0.9, 0.8, 0.6) * windowed;
         }
+        // Skip skin/air (hounsfield <= -100) completely
         
         // Crosshair axes - bright colored lines through actual crosshair position
         // Use the crosshair position from MPR views (already in voxel coordinates)
@@ -296,8 +304,8 @@ kernel void volumeRender3D(
             alpha = 1.0;
         }
         
-        // Front-to-back compositing with higher visibility
-        float stepAlpha = alpha / float(numSteps) * 80.0;  // Increased from 50
+        // Front-to-back compositing with adjusted visibility
+        float stepAlpha = alpha / float(numSteps) * 60.0;  // Reduced from 80 for better balance
         accumulatedColor += color * stepAlpha * (1.0 - accumulatedAlpha);
         accumulatedAlpha += stepAlpha * (1.0 - accumulatedAlpha);
     }
