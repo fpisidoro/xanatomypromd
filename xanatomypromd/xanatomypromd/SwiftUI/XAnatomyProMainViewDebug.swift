@@ -58,10 +58,10 @@ extension XAnatomyProMainView {
         
         // 4. Check ROI settings
         print("\n4️⃣ ROI DISPLAY SETTINGS:")
-        print("   Is visible: \(roiSettings.isVisible)")
-        print("   Global opacity: \(roiSettings.globalOpacity)")
-        print("   Show outline: \(roiSettings.showOutline)")
-        print("   Show filled: \(roiSettings.showFilled)")
+        print("   Is visible: \(sharedViewingState.roiSettings.isVisible)")
+        print("   Global opacity: \(sharedViewingState.roiSettings.globalOpacity)")
+        print("   Show outline: \(sharedViewingState.roiSettings.showOutline)")
+        print("   Show filled: \(sharedViewingState.roiSettings.showFilled)")
         
         // 5. Check Z-coordinate alignment
         print("\n5️⃣ Z-COORDINATE ALIGNMENT CHECK:")
