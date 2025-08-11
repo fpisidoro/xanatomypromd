@@ -388,10 +388,10 @@ kernel void volumeRender3D(
             alpha = 0.8;
         }
         
-        // ROI visualization - using same coordinate system as crosshairs
+        // ROI visualization - SIMPLIFIED for debugging
         if (params.showROI > 0.5 && params.roiCount > 0 && roiData != nullptr) {
             // Read ROI metadata from buffer
-            float3 roiColor = float3(roiData[0], roiData[1], roiData[2]);
+            float3 roiColor = float3(1.0, 0.0, 1.0);  // Bright magenta for visibility
             int contourCount = int(roiData[3]);
             int dataOffset = 4;  // Start after metadata
             
@@ -399,51 +399,38 @@ kernel void volumeRender3D(
             // ROI points are in world coordinates, so convert them to voxel space
             float3 volumeOrigin = float3(params.originX, params.originY, params.originZ);
             
-            // Check if we're near any contour's Z slice
-            bool inROI = false;
-            for (int c = 0; c < contourCount && c < 10; c++) {  // Limit for performance
+            // Check first contour only for debugging
+            if (contourCount > 0) {
                 float sliceZ = roiData[dataOffset];
                 int pointCount = int(roiData[dataOffset + 1]);
                 
                 // Convert ROI Z position from world to voxel coordinates
                 float roiZVoxel = (sliceZ - volumeOrigin.z) / spacing.z;
                 
-                // Check if we're within 2 voxels of this contour's Z position (accounting for slice thickness)
-                if (abs(volumePos.z - roiZVoxel) < 2.0) {
-                    // For 3D visualization, just check if we're near the contour boundary
-                    // This is a simplified approach - in production we'd do proper 3D interpolation
-                    for (int i = 0; i < pointCount && i < 50; i++) {
+                // Very broad Z check - within 10 voxels
+                if (abs(volumePos.z - roiZVoxel) < 10.0) {
+                    // Just check first point for debugging
+                    if (pointCount > 0) {
                         float3 contourPointWorld = float3(
-                            roiData[dataOffset + 2 + i*3],
-                            roiData[dataOffset + 2 + i*3 + 1],
-                            roiData[dataOffset + 2 + i*3 + 2]
+                            roiData[dataOffset + 2],
+                            roiData[dataOffset + 3],
+                            roiData[dataOffset + 4]
                         );
                         
                         // Convert contour point from world to voxel coordinates
                         float3 contourPointVoxel = (contourPointWorld - volumeOrigin) / spacing;
                         
-                        // Check distance in voxel space
+                        // Check distance in voxel space - very broad
                         float3 diff = volumePos - contourPointVoxel;
                         float dist = length(diff.xy);  // Distance in XY plane
                         
-                        if (dist < 5.0) {  // Within 5 voxels of contour
-                            inROI = true;
-                            break;
+                        if (dist < 20.0) {  // Within 20 voxels - very broad
+                            // Make it bright magenta
+                            color = roiColor;
+                            alpha = 1.0;  // Full opacity
                         }
                     }
                 }
-                
-                // Move to next contour in buffer
-                dataOffset += 2 + pointCount * 3;
-                
-                if (inROI) break;
-            }
-            
-            // Apply ROI coloring if inside
-            if (inROI) {
-                // Blend ROI color with existing color
-                color = mix(color, roiColor, 0.6);  // 60% ROI color
-                alpha = max(alpha, 0.4);  // Ensure ROI is visible
             }
         }
         

@@ -350,6 +350,9 @@ class Metal3DVolumeRenderer: ObservableObject {
         // Set ROI buffer if available
         if let roiBuffer = roiBuffer, showROI {
             encoder.setBuffer(roiBuffer, offset: 0, index: 1)
+            print("🎯 ROI buffer set: \(roiCount) contours, showROI=\(showROI)")
+        } else {
+            print("⚠️ ROI buffer NOT set: buffer=\(roiBuffer != nil), showROI=\(showROI)")
         }
         
         let threadsPerGroup = MTLSize(width: 8, height: 8, depth: 1)
