@@ -237,27 +237,83 @@ kernel void volumeRender3D(
         float windowed = clamp((hounsfield - windowMin) / (windowMax - windowMin), 0.0, 1.0);
         
         // Get alpha and color based on tissue type
-        // Tweaked for better soft tissue visibility, less skin
+        // Current: Peach/warm medical theme
         float alpha = 0.0;
         float3 color = float3(0.0);
         
-        if (hounsfield > 300) {  // Dense bone (was 200)
-            alpha = 0.15;  // Much more transparent - was 0.4
-            color = float3(1.0, 1.0, 0.95) * windowed;
-        } else if (hounsfield > 100) {  // Bone cortex (was 50)
-            alpha = 0.08;  // Much more transparent - was 0.2
-            color = float3(1.0, 0.9, 0.8) * windowed;
+        if (hounsfield > 300) {  // Dense bone
+            alpha = 0.15;
+            color = float3(1.0, 1.0, 0.95) * windowed;  // Bright white
+        } else if (hounsfield > 100) {  // Bone cortex  
+            alpha = 0.08;
+            color = float3(1.0, 0.9, 0.8) * windowed;  // Off-white
         } else if (hounsfield > 40) {  // Muscle/organs
-            alpha = 0.15;  // Increased visibility
+            alpha = 0.25;
             color = float3(0.9, 0.3, 0.3) * windowed;  // Reddish
         } else if (hounsfield > -10) {  // Soft tissue  
-            alpha = 0.08;  // Visible but translucent
-            color = float3(0.8, 0.5, 0.4) * windowed;
+            alpha = 0.15;
+            color = float3(0.8, 0.5, 0.4) * windowed;  // Peach
         } else if (hounsfield > -100) {  // Fat
-            alpha = 0.02;  // Very faint
-            color = float3(0.9, 0.8, 0.6) * windowed;
+            alpha = 0.05;
+            color = float3(0.9, 0.8, 0.6) * windowed;  // Light yellow
         }
-        // Skip skin/air (hounsfield <= -100) completely
+        
+        /* ALTERNATIVE COLOR SCHEMES - Uncomment one to try:
+        
+        // SCHEME 1: Cool Blue Medical
+        if (hounsfield > 300) {
+            alpha = 0.15;
+            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone
+        } else if (hounsfield > 100) {
+            alpha = 0.08;
+            color = float3(0.8, 0.85, 0.95) * windowed;
+        } else if (hounsfield > 40) {
+            alpha = 0.25;
+            color = float3(0.3, 0.5, 0.9) * windowed;  // Deep blue organs
+        } else if (hounsfield > -10) {
+            alpha = 0.15;
+            color = float3(0.4, 0.6, 0.8) * windowed;  // Light blue tissue
+        } else if (hounsfield > -100) {
+            alpha = 0.05;
+            color = float3(0.7, 0.8, 0.9) * windowed;
+        }
+        
+        // SCHEME 2: X-Ray Classic (Cyan-Green)
+        if (hounsfield > 300) {
+            alpha = 0.15;
+            color = float3(0.8, 1.0, 1.0) * windowed;  // Cyan-white bone
+        } else if (hounsfield > 100) {
+            alpha = 0.08;
+            color = float3(0.6, 0.95, 0.9) * windowed;
+        } else if (hounsfield > 40) {
+            alpha = 0.25;
+            color = float3(0.2, 0.9, 0.7) * windowed;  // Teal organs
+        } else if (hounsfield > -10) {
+            alpha = 0.15;
+            color = float3(0.3, 0.7, 0.6) * windowed;  // Sea green tissue
+        } else if (hounsfield > -100) {
+            alpha = 0.05;
+            color = float3(0.5, 0.8, 0.7) * windowed;
+        }
+        
+        // SCHEME 3: Purple-Pink Vaporwave
+        if (hounsfield > 300) {
+            alpha = 0.15;
+            color = float3(1.0, 0.9, 1.0) * windowed;  // Bright purple-white
+        } else if (hounsfield > 100) {
+            alpha = 0.08;
+            color = float3(0.9, 0.7, 0.95) * windowed;
+        } else if (hounsfield > 40) {
+            alpha = 0.25;
+            color = float3(0.9, 0.3, 0.7) * windowed;  // Hot pink organs
+        } else if (hounsfield > -10) {
+            alpha = 0.15;
+            color = float3(0.7, 0.4, 0.8) * windowed;  // Purple tissue
+        } else if (hounsfield > -100) {
+            alpha = 0.05;
+            color = float3(0.8, 0.6, 0.9) * windowed;
+        }
+        */
         
         // Crosshair axes - bright colored lines through actual crosshair position
         // Use the crosshair position from MPR views (already in voxel coordinates)
