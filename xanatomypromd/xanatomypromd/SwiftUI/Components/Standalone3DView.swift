@@ -277,7 +277,8 @@ class Metal3DVolumeRenderer: ObservableObject {
             windowWidth: windowLevel.width,
             zoom: Float(zoom),
             panX: Float(pan.width),
-            panY: Float(pan.height)
+            panY: Float(pan.height),
+            displaySize: CGSize(width: texture.width, height: texture.height)
         )
         
         print("Swift struct size: \(MemoryLayout<Volume3DRenderParams>.size) bytes")
@@ -339,8 +340,10 @@ struct Volume3DRenderParams {
     let spacingX: Float
     let spacingY: Float
     let spacingZ: Float
+    let displayWidth: Float
+    let displayHeight: Float
     
-    init(rotationZ: Float, crosshairPosition: SIMD3<Float>, volumeOrigin: SIMD3<Float>, volumeSpacing: SIMD3<Float>, windowCenter: Float, windowWidth: Float, zoom: Float, panX: Float, panY: Float) {
+    init(rotationZ: Float, crosshairPosition: SIMD3<Float>, volumeOrigin: SIMD3<Float>, volumeSpacing: SIMD3<Float>, windowCenter: Float, windowWidth: Float, zoom: Float, panX: Float, panY: Float, displaySize: CGSize) {
         self.rotationZ = rotationZ
         self.windowCenter = windowCenter
         self.windowWidth = windowWidth
@@ -350,6 +353,8 @@ struct Volume3DRenderParams {
         self.spacingX = volumeSpacing.x
         self.spacingY = volumeSpacing.y
         self.spacingZ = volumeSpacing.z
+        self.displayWidth = Float(displaySize.width)
+        self.displayHeight = Float(displaySize.height)
     }
 }
 

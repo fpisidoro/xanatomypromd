@@ -89,6 +89,8 @@ struct Volume3DRenderParams {
     float spacingX;
     float spacingY;
     float spacingZ;
+    float displayWidth;   // Actual display dimensions
+    float displayHeight;  // Actual display dimensions
 };
 
 // Alpha transfer function for volume rendering - balanced visibility
@@ -148,15 +150,15 @@ kernel void volumeRender3D(
     float physicalHeightZ = float(volumeDim.z) * params.spacingZ;  // e.g., 53 * 3.0 = 159mm
     float physicalAspectRatio = physicalWidthX / physicalHeightZ;  // e.g., 512/159 = 3.22
     
-    // Assume square display (aspect = 1.0)
-    float displayAspectRatio = 1.0;
+    // Use ACTUAL display aspect ratio from display dimensions
+    float displayAspectRatio = params.displayWidth / params.displayHeight;
     
     // Calculate letterboxing to preserve medical accuracy
     float2 letterboxScale;
     if (physicalAspectRatio > displayAspectRatio) {
         // Volume is wider than display - add letterbox top/bottom
         letterboxScale.x = 1.0;
-        letterboxScale.y = displayAspectRatio / physicalAspectRatio;  // e.g., 1.0/3.22 = 0.31
+        letterboxScale.y = displayAspectRatio / physicalAspectRatio;
     } else {
         // Volume is taller than display - add letterbox left/right  
         letterboxScale.x = physicalAspectRatio / displayAspectRatio;
@@ -164,21 +166,17 @@ kernel void volumeRender3D(
     }
     
     // Check if we're outside the letterboxed area
-    // letterboxScale represents the quad size (1.0 for width, 0.31 for height)
-    // For Y: 0.31 height means render from -0.155 to +0.155
-    // For X: 1.0 width means render from -0.5 to +0.5 (but NDC is already -1 to 1)
-    if (abs(ndc.x) > letterboxScale.x || abs(ndc.y) > letterboxScale.y * 0.5) {
+    // letterboxScale represents the actual quad size like in MPR view
+    if (abs(ndc.x) > letterboxScale.x || abs(ndc.y) > letterboxScale.y) {
         // Outside letterbox - render black
         outputTexture.write(float4(0.0, 0.0, 0.0, 1.0), gid);
         return;
     }
     
     // Map the letterboxed area to normalized volume coordinates
-    // X uses full width (letterboxScale.x = 1.0)
-    // Y uses partial height (letterboxScale.y = 0.31, so divide by 0.155)
     float2 normalizedNdc;
-    normalizedNdc.x = ndc.x / letterboxScale.x;  // ndc.x / 1.0 = ndc.x
-    normalizedNdc.y = ndc.y / (letterboxScale.y * 0.5);  // ndc.y / 0.155
+    normalizedNdc.x = ndc.x / letterboxScale.x;
+    normalizedNdc.y = ndc.y / letterboxScale.y;
     
     // Apply zoom and pan
     float2 viewNdc = normalizedNdc / params.zoom - float2(params.panX, params.panY) / (params.zoom * 100.0);
