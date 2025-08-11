@@ -139,13 +139,42 @@ kernel void volumeRender3D(
     
     // Screen coordinates to normalized device coordinates [-1, 1]
     float2 ndc = (float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height())) * 2.0 - 1.0;
-    // Don't flip Y - keep image right-side up
     
     // Volume dimensions and setup
     uint3 volumeDim = uint3(volumeTexture.get_width(), volumeTexture.get_height(), volumeTexture.get_depth());
     
-    // Apply zoom and pan
-    float2 viewNdc = ndc / params.zoom - float2(params.panX, params.panY) / (params.zoom * 100.0);
+    // CRITICAL: Calculate physical dimensions and aspect ratio
+    float physicalWidthX = float(volumeDim.x) * params.spacingX;   // e.g., 512 * 1.0 = 512mm
+    float physicalHeightZ = float(volumeDim.z) * params.spacingZ;  // e.g., 53 * 3.0 = 159mm
+    float physicalAspectRatio = physicalWidthX / physicalHeightZ;  // e.g., 512/159 = 3.22
+    
+    // Assume square display (aspect = 1.0)
+    float displayAspectRatio = 1.0;
+    
+    // Calculate letterboxing to preserve medical accuracy
+    float2 letterboxScale;
+    if (physicalAspectRatio > displayAspectRatio) {
+        // Volume is wider than display - add letterbox top/bottom
+        letterboxScale.x = 1.0;
+        letterboxScale.y = displayAspectRatio / physicalAspectRatio;  // e.g., 1.0/3.22 = 0.31
+    } else {
+        // Volume is taller than display - add letterbox left/right  
+        letterboxScale.x = physicalAspectRatio / displayAspectRatio;
+        letterboxScale.y = 1.0;
+    }
+    
+    // Apply letterboxing to NDC coordinates
+    float2 letterboxedNdc = ndc / letterboxScale;
+    
+    // Check if we're outside the letterboxed area
+    if (abs(letterboxedNdc.x) > 1.0 || abs(letterboxedNdc.y) > 1.0) {
+        // Outside letterbox - render black
+        outputTexture.write(float4(0.0, 0.0, 0.0, 1.0), gid);
+        return;
+    }
+    
+    // Apply zoom and pan to letterboxed coordinates
+    float2 viewNdc = letterboxedNdc / params.zoom - float2(params.panX, params.panY) / (params.zoom * 100.0);
     
     float3 accumulatedColor = float3(0.0);
     float accumulatedAlpha = 0.0;
@@ -153,26 +182,18 @@ kernel void volumeRender3D(
     // Volume center for rotation - in voxel space
     float3 volumeCenter = float3(volumeDim) * 0.5;
     
-    // Physical volume dimensions in mm
-    float3 physicalDimensions = float3(volumeDim) * float3(params.spacingX, params.spacingY, params.spacingZ);
-    
     // Apply Z-axis rotation to viewing direction (calculate once)
     float cosZ = cos(params.rotationZ);
     float sinZ = sin(params.rotationZ);
     
     // Ray march through volume along Y-axis (anterior-posterior)
-    // Sample uniformly in physical space by adjusting step size
+    // Sample uniformly in physical space
     float minSpacing = min(min(params.spacingX, params.spacingY), params.spacingZ);
     float stepSize = minSpacing;  // Step size in physical mm
     int numSteps = int(float(volumeDim.y) * params.spacingY / stepSize);
     
-    // Calculate physical aspect ratio to correct for anisotropic voxels
-    float physicalWidthX = float(volumeDim.x) * params.spacingX;
-    float physicalHeightZ = float(volumeDim.z) * params.spacingZ;
-    float aspectRatio = physicalWidthX / physicalHeightZ;
-    
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Map NDC to volume space accounting for physical dimensions
+        // Map letterboxed NDC to volume space (no stretching!)
         float3 basePos = float3(
             (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
             float(step) * stepSize / params.spacingY,  // Convert physical step to voxel units
