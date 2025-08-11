@@ -388,17 +388,16 @@ kernel void volumeRender3D(
             alpha = 0.8;
         }
         
-        // ROI visualization - simple approach for single ROI
+        // ROI visualization - using same coordinate system as crosshairs
         if (params.showROI > 0.5 && params.roiCount > 0 && roiData != nullptr) {
             // Read ROI metadata from buffer
             float3 roiColor = float3(roiData[0], roiData[1], roiData[2]);
             int contourCount = int(roiData[3]);
             int dataOffset = 4;  // Start after metadata
             
-            // Convert current voxel position to world coordinates for ROI checking
-            // Use actual volume origin from params instead of hardcoded values
+            // volumePos is in voxel coordinates, same as crosshairPos
+            // ROI points are in world coordinates, so convert them to voxel space
             float3 volumeOrigin = float3(params.originX, params.originY, params.originZ);
-            float3 worldPos = volumePos * spacing + volumeOrigin;
             
             // Check if we're near any contour's Z slice
             bool inROI = false;
@@ -406,22 +405,28 @@ kernel void volumeRender3D(
                 float sliceZ = roiData[dataOffset];
                 int pointCount = int(roiData[dataOffset + 1]);
                 
-                // Check if we're within 3mm of this contour's Z position
-                if (abs(worldPos.z - sliceZ) < 3.0) {
+                // Convert ROI Z position from world to voxel coordinates
+                float roiZVoxel = (sliceZ - volumeOrigin.z) / spacing.z;
+                
+                // Check if we're within 1 voxel of this contour's Z position
+                if (abs(volumePos.z - roiZVoxel) < 1.0) {
                     // For 3D visualization, just check if we're near the contour boundary
                     // This is a simplified approach - in production we'd do proper 3D interpolation
                     for (int i = 0; i < pointCount && i < 50; i++) {
-                        float3 contourPoint = float3(
+                        float3 contourPointWorld = float3(
                             roiData[dataOffset + 2 + i*3],
                             roiData[dataOffset + 2 + i*3 + 1],
                             roiData[dataOffset + 2 + i*3 + 2]
                         );
                         
-                        // Check distance to contour point
-                        float3 diff = worldPos - contourPoint;
+                        // Convert contour point from world to voxel coordinates
+                        float3 contourPointVoxel = (contourPointWorld - volumeOrigin) / spacing;
+                        
+                        // Check distance in voxel space
+                        float3 diff = volumePos - contourPointVoxel;
                         float dist = length(diff.xy);  // Distance in XY plane
                         
-                        if (dist < 5.0) {  // Within 5mm of contour
+                        if (dist < 3.0) {  // Within 3 voxels of contour
                             inROI = true;
                             break;
                         }
