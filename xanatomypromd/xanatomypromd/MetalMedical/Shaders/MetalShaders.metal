@@ -284,21 +284,21 @@ kernel void volumeRender3D(
 //            color = float3(0.7, 0.8, 0.9) * windowed;
 //        }
         
-        // SCHEME 1B: Hybrid Blue-Bone/Red-Tissue (NEW - TRY THIS!)
+        // SCHEME 1B: Hybrid Blue-Bone/Red-Tissue (with reduced opacity for ROI visibility)
         if (hounsfield > 300) {
-            alpha = 0.15;
+            alpha = 0.08;  // Reduced from 0.15 - less opaque bone
             color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone (from blue scheme)
         } else if (hounsfield > 100) {
-            alpha = 0.08;
+            alpha = 0.05;  // Reduced from 0.08
             color = float3(0.8, 0.85, 0.95) * windowed;  // Light blue bone cortex
         } else if (hounsfield > 40) {
-            alpha = 0.25;
+            alpha = 0.15;  // Reduced from 0.25 - organs/brain more transparent
             color = float3(0.9, 0.3, 0.3) * windowed;  // Reddish organs (from peach scheme)
         } else if (hounsfield > -10) {
-            alpha = 0.15;
+            alpha = 0.08;  // Reduced from 0.15
             color = float3(0.8, 0.5, 0.4) * windowed;  // Peach soft tissue
         } else if (hounsfield > -100) {
-            alpha = 0.05;
+            alpha = 0.03;  // Reduced from 0.05
             color = float3(0.9, 0.8, 0.6) * windowed;  // Light yellow fat
         }
         
@@ -445,8 +445,8 @@ kernel void volumeRender3D(
                             float2 nearest = p1xy + t * edge;
                             float dist = length(posxy - nearest);
                             
-                            // If within 2 voxels of the edge, color it
-                            if (dist < 2.0) {
+                            // If within 3 voxels of the edge, color it (increased from 2)
+                            if (dist < 3.0) {
                                 nearROI = true;
                                 break;
                             }
@@ -462,9 +462,9 @@ kernel void volumeRender3D(
             
             // Apply ROI coloring if near contour
             if (nearROI) {
-                // Strong color for outline
+                // Very strong color for outline visibility
                 color = roiColor;
-                alpha = 0.8;  // High visibility
+                alpha = 1.0;  // Full opacity for maximum visibility
             }
         }
         
