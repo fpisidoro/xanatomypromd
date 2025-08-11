@@ -342,11 +342,6 @@ struct Volume3DRenderParams {
     let zoom: Float
     let panX: Float
     let panY: Float
-    // Crosshair position (for syncing with MPR views)
-    let crosshairX: Float
-    let crosshairY: Float
-    let crosshairZ: Float
-    // Add spacing as individual floats to avoid SIMD alignment issues
     let spacingX: Float
     let spacingY: Float
     let spacingZ: Float
@@ -360,9 +355,8 @@ struct Volume3DRenderParams {
         self.zoom = zoom
         self.panX = panX
         self.panY = panY
-        self.crosshairX = crosshairPosition.x
-        self.crosshairY = crosshairPosition.y
-        self.crosshairZ = crosshairPosition.z
+        // Note: crosshairPosition is not used in the current shader
+        // The shader uses volumeCenter for crosshair display
         self.spacingX = volumeSpacing.x
         self.spacingY = volumeSpacing.y
         self.spacingZ = volumeSpacing.z
