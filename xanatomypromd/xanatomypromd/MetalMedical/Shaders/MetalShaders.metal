@@ -86,6 +86,9 @@ struct Volume3DRenderParams {
     float zoom;
     float panX;
     float panY;
+    float crosshairX;    // Crosshair position in voxel coordinates
+    float crosshairY;
+    float crosshairZ;
     float spacingX;
     float spacingY;
     float spacingZ;
@@ -248,7 +251,10 @@ kernel void volumeRender3D(
             color = float3(0.8, 0.4, 0.4) * windowed;
         }
         
-        // Crosshair axes - bright colored lines through volume center
+        // Crosshair axes - bright colored lines through actual crosshair position
+        // Use the crosshair position from MPR views (already in voxel coordinates)
+        float3 crosshairPos = float3(params.crosshairX, params.crosshairY, params.crosshairZ);
+        
         // Account for anisotropic voxel spacing when checking line thickness
         float3 spacing = float3(params.spacingX, params.spacingY, params.spacingZ);
         
@@ -258,30 +264,30 @@ kernel void volumeRender3D(
         // Convert to voxel units for each axis
         float3 lineThicknessVoxels = physicalLineThickness / spacing;
         
-        // X-axis (bright red) - runs along X at center Y and Z
-        if (abs(volumePos.y - volumeCenter.y) < lineThicknessVoxels.y && 
-            abs(volumePos.z - volumeCenter.z) < lineThicknessVoxels.z) {
+        // X-axis (bright red) - runs along X at crosshair Y and Z
+        if (abs(volumePos.y - crosshairPos.y) < lineThicknessVoxels.y && 
+            abs(volumePos.z - crosshairPos.z) < lineThicknessVoxels.z) {
             color = float3(1.0, 0.2, 0.2);  // Bright red
             alpha = 1.0;
         }
         
-        // Y-axis (bright green) - runs along Y at center X and Z
-        if (abs(volumePos.x - volumeCenter.x) < lineThicknessVoxels.x && 
-            abs(volumePos.z - volumeCenter.z) < lineThicknessVoxels.z) {
+        // Y-axis (bright green) - runs along Y at crosshair X and Z
+        if (abs(volumePos.x - crosshairPos.x) < lineThicknessVoxels.x && 
+            abs(volumePos.z - crosshairPos.z) < lineThicknessVoxels.z) {
             color = float3(0.2, 1.0, 0.2);  // Bright green
             alpha = 1.0;
         }
         
-        // Z-axis (bright blue) - runs along Z at center X and Y
-        if (abs(volumePos.x - volumeCenter.x) < lineThicknessVoxels.x && 
-            abs(volumePos.y - volumeCenter.y) < lineThicknessVoxels.y) {
+        // Z-axis (bright blue) - runs along Z at crosshair X and Y
+        if (abs(volumePos.x - crosshairPos.x) < lineThicknessVoxels.x && 
+            abs(volumePos.y - crosshairPos.y) < lineThicknessVoxels.y) {
             color = float3(0.2, 0.2, 1.0);  // Bright blue
             alpha = 1.0;
         }
         
-        // Center intersection point - yellow sphere
+        // Center intersection point - yellow sphere at actual crosshair
         // Convert position difference to physical space for proper sphere shape
-        float3 centerOffset = volumePos - volumeCenter;
+        float3 centerOffset = volumePos - crosshairPos;
         float3 physicalOffset = centerOffset * spacing;
         float physicalDist = length(physicalOffset);  // Distance in mm
         

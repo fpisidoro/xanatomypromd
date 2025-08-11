@@ -342,6 +342,9 @@ struct Volume3DRenderParams {
     let zoom: Float
     let panX: Float
     let panY: Float
+    let crosshairX: Float  // Actual crosshair position from MPR
+    let crosshairY: Float
+    let crosshairZ: Float
     let spacingX: Float
     let spacingY: Float
     let spacingZ: Float
@@ -355,8 +358,10 @@ struct Volume3DRenderParams {
         self.zoom = zoom
         self.panX = panX
         self.panY = panY
-        // Note: crosshairPosition is not used in the current shader
-        // The shader uses volumeCenter for crosshair display
+        // Convert world position to voxel coordinates for shader
+        self.crosshairX = (crosshairPosition.x - volumeOrigin.x) / volumeSpacing.x
+        self.crosshairY = (crosshairPosition.y - volumeOrigin.y) / volumeSpacing.y
+        self.crosshairZ = (crosshairPosition.z - volumeOrigin.z) / volumeSpacing.z
         self.spacingX = volumeSpacing.x
         self.spacingY = volumeSpacing.y
         self.spacingZ = volumeSpacing.z
