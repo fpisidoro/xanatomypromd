@@ -164,17 +164,22 @@ kernel void volumeRender3D(
     }
     
     // Check if we're outside the letterboxed area
-    // The letterbox restricts rendering to a smaller portion of screen
-    if (abs(ndc.x) > letterboxScale.x || abs(ndc.y) > letterboxScale.y) {
+    // letterboxScale.y = 0.31 means 31% of screen height TOTAL
+    // So we render from -0.155 to +0.155, not -0.31 to +0.31!
+    float2 halfLetterbox = letterboxScale * 0.5;
+    if (abs(ndc.x) > halfLetterbox.x || abs(ndc.y) > halfLetterbox.y) {
         // Outside letterbox - render black
         outputTexture.write(float4(0.0, 0.0, 0.0, 1.0), gid);
         return;
     }
     
-    // DO NOT expand the coordinates!
-    // Use NDC directly but map based on letterbox bounds
-    // The volume only fills the letterboxed area, not the full screen
-    float2 viewNdc = ndc / params.zoom - float2(params.panX, params.panY) / (params.zoom * 100.0);
+    // Map the half-letterbox range to full volume
+    // ndc ranges from [-halfLetterbox, +halfLetterbox]
+    // Map to [-1, 1] for volume sampling
+    float2 normalizedNdc = ndc / halfLetterbox;
+    
+    // Apply zoom and pan
+    float2 viewNdc = normalizedNdc / params.zoom - float2(params.panX, params.panY) / (params.zoom * 100.0);
     
     float3 accumulatedColor = float3(0.0);
     float accumulatedAlpha = 0.0;
@@ -193,14 +198,12 @@ kernel void volumeRender3D(
     int numSteps = int(float(volumeDim.y) * params.spacingY / stepSize);
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Map NDC directly to volume space
-        // The entire volume should fit within the letterbox bounds
-        // viewNdc already ranges from [-letterboxScale, +letterboxScale]
-        // Simply map this smaller range to [0, volumeDim]
+        // Map normalized NDC to volume space
+        // viewNdc now ranges from [-1, 1] after normalization
         float3 basePos = float3(
-            (viewNdc.x + letterboxScale.x) / (2.0 * letterboxScale.x) * float(volumeDim.x),
-            float(step) * stepSize / params.spacingY,  // Convert physical step to voxel units
-            (viewNdc.y + letterboxScale.y) / (2.0 * letterboxScale.y) * float(volumeDim.z)
+            (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
+            float(step) * stepSize / params.spacingY,
+            (viewNdc.y + 1.0) * 0.5 * float(volumeDim.z)
         );
         
         // Apply rotation around Z-axis
