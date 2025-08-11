@@ -164,19 +164,21 @@ kernel void volumeRender3D(
     }
     
     // Check if we're outside the letterboxed area
-    // letterboxScale.y = 0.31 means 31% of screen height TOTAL
-    // So we render from -0.155 to +0.155, not -0.31 to +0.31!
-    float2 halfLetterbox = letterboxScale * 0.5;
-    if (abs(ndc.x) > halfLetterbox.x || abs(ndc.y) > halfLetterbox.y) {
+    // letterboxScale represents the quad size (1.0 for width, 0.31 for height)
+    // For Y: 0.31 height means render from -0.155 to +0.155
+    // For X: 1.0 width means render from -0.5 to +0.5 (but NDC is already -1 to 1)
+    if (abs(ndc.x) > letterboxScale.x || abs(ndc.y) > letterboxScale.y * 0.5) {
         // Outside letterbox - render black
         outputTexture.write(float4(0.0, 0.0, 0.0, 1.0), gid);
         return;
     }
     
-    // Map the half-letterbox range to full volume
-    // ndc ranges from [-halfLetterbox, +halfLetterbox]
-    // Map to [-1, 1] for volume sampling
-    float2 normalizedNdc = ndc / halfLetterbox;
+    // Map the letterboxed area to normalized volume coordinates
+    // X uses full width (letterboxScale.x = 1.0)
+    // Y uses partial height (letterboxScale.y = 0.31, so divide by 0.155)
+    float2 normalizedNdc;
+    normalizedNdc.x = ndc.x / letterboxScale.x;  // ndc.x / 1.0 = ndc.x
+    normalizedNdc.y = ndc.y / (letterboxScale.y * 0.5);  // ndc.y / 0.155
     
     // Apply zoom and pan
     float2 viewNdc = normalizedNdc / params.zoom - float2(params.panX, params.panY) / (params.zoom * 100.0);
