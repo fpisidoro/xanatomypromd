@@ -31,6 +31,9 @@ struct LayeredMPRView: View {
     let viewSize: CGSize
     let allowInteraction: Bool
     
+    /// Scroll velocity for adaptive quality
+    let scrollVelocity: Float
+    
     // MARK: - Initialization
     
     init(
@@ -42,11 +45,13 @@ struct LayeredMPRView: View {
         volumeData: VolumeData? = nil,
         roiData: MinimalRTStructParser.SimpleRTStructData? = nil,
         viewSize: CGSize = CGSize(width: 512, height: 512),
-        allowInteraction: Bool = true
+        allowInteraction: Bool = true,
+        scrollVelocity: Float = 0.0
     ) {
         self.coordinateSystem = coordinateSystem
         self.plane = plane
         self.windowLevel = windowLevel
+        self.scrollVelocity = scrollVelocity
         self.crosshairAppearance = crosshairAppearance
         self.roiSettings = roiSettings
         self.volumeData = volumeData
@@ -64,7 +69,8 @@ struct LayeredMPRView: View {
                 coordinateSystem: coordinateSystem,
                 plane: plane,
                 windowLevel: windowLevel,
-                volumeData: volumeData
+                volumeData: volumeData,
+                scrollVelocity: scrollVelocity
             )
             
             // Layer 3: ROI Overlay (Anatomical Structures) - MIDDLE

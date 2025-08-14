@@ -22,6 +22,9 @@ struct CTDisplayLayer: UIViewRepresentable {
     /// Volume data source
     let volumeData: VolumeData?
     
+    /// Scroll velocity for adaptive quality (NEW)
+    let scrollVelocity: Float
+    
     // MARK: - UIViewRepresentable Implementation
     
     func makeUIView(context: Context) -> MTKView {
@@ -43,7 +46,8 @@ struct CTDisplayLayer: UIViewRepresentable {
             coordinateSystem: coordinateSystem,
             plane: plane,
             windowLevel: windowLevel,
-            volumeData: volumeData
+            volumeData: volumeData,
+            scrollVelocity: scrollVelocity
         )
         uiView.setNeedsDisplay()
     }
@@ -71,10 +75,16 @@ struct CTDisplayLayer: UIViewRepresentable {
         private var currentPlane: MPRPlane = .axial
         private var currentWindowLevel: CTWindowLevel = CTWindowLevel.softTissue
         private var currentVolumeData: VolumeData?
+        private var currentScrollVelocity: Float = 0.0
         
         // Texture caching for performance
         private var cachedTexture: MTLTexture?
         private var cacheKey: String = ""
+        
+        // Quality management
+        private var currentQuality: MetalVolumeRenderer.RenderQuality = .full
+        private var qualityTimer: Timer?
+        private var lastSliceChangeTime: Date = Date()
         
         override init() {
             super.init()
@@ -209,7 +219,8 @@ struct CTDisplayLayer: UIViewRepresentable {
             coordinateSystem: DICOMCoordinateSystem,
             plane: MPRPlane,
             windowLevel: CTWindowLevel,
-            volumeData: VolumeData?
+            volumeData: VolumeData?,
+            scrollVelocity: Float
         ) {
             print("🔍 CT Medical Display: updateRenderingParameters called")
             print("   Plane: \(plane), VolumeData: \(volumeData != nil ? "present" : "nil")")
@@ -217,6 +228,25 @@ struct CTDisplayLayer: UIViewRepresentable {
             self.currentCoordinateSystem = coordinateSystem
             self.currentPlane = plane
             self.currentWindowLevel = windowLevel
+            self.currentScrollVelocity = scrollVelocity
+            
+            // Determine quality based on scroll velocity
+            let newQuality = determineQuality(from: scrollVelocity)
+            if newQuality != currentQuality {
+                currentQuality = newQuality
+                print("🎯 Quality: \(currentQuality) at \(String(format: "%.1f", scrollVelocity)) slices/sec")
+                cachedTexture = nil  // Force regeneration at new quality
+                cacheKey = ""  // Clear cache key
+            }
+            
+            // Reset quality timer
+            qualityTimer?.invalidate()
+            if scrollVelocity > 0.1 {
+                // Set timer to restore quality after scrolling stops
+                qualityTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in
+                    self?.restoreFullQuality()
+                }
+            }
             
             // Load volume data into renderer if provided
             if let volumeData = volumeData {
@@ -277,8 +307,8 @@ struct CTDisplayLayer: UIViewRepresentable {
             
             let currentSliceIndex = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
             
-            // Create cache key for texture caching
-            let newCacheKey = "\(currentPlane.rawValue)-\(currentSliceIndex)-\(currentWindowLevel.name)"
+            // Create cache key including quality level
+            let newCacheKey = "\(currentPlane.rawValue)-\(currentSliceIndex)-\(currentWindowLevel.name)-\(currentQuality)"
             
             // Generate new MPR slice if cache key changed
             if cacheKey != newCacheKey {
@@ -298,10 +328,10 @@ struct CTDisplayLayer: UIViewRepresentable {
                     plane: currentPlane,
                     sliceIndex: normalizedSliceIndex,
                     windowCenter: currentWindowLevel.center,
-                    windowWidth: currentWindowLevel.width
+                    windowWidth: currentWindowLevel.width,
+                    quality: currentQuality  // Use adaptive quality
                 )
                 
-                // Generate MPR slice with hardware acceleration
                 volumeRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
                     guard let self = self else { return }
                     self.cachedTexture = mprTexture
@@ -311,7 +341,6 @@ struct CTDisplayLayer: UIViewRepresentable {
                         let newTextureSize = CGSize(width: texture.width, height: texture.height)
                         if newTextureSize != self.lastTextureSize {
                             self.vertexBuffer = nil
-                            print("🔍 CT Medical: Texture size changed, forcing vertex buffer regeneration")
                         }
                     }
                     
@@ -416,6 +445,42 @@ struct CTDisplayLayer: UIViewRepresentable {
             }
             commandBuffer?.present(drawable)
             commandBuffer?.commit()
+        }
+        
+        // MARK: - Adaptive Quality Methods
+        
+        private func determineQuality(from velocity: Float) -> MetalVolumeRenderer.RenderQuality {
+            // Velocity is in slices per second
+            let absVelocity = abs(velocity)
+            
+            // More aggressive quality reduction for better performance
+            if absVelocity < 0.5 {
+                return .full  // Very slow or stopped: full quality
+            } else if absVelocity < 2.0 {
+                return .half  // Slow: half quality
+            } else if absVelocity < 5.0 {
+                return .quarter  // Medium: quarter quality
+            } else {
+                return .eighth  // Fast: minimum quality
+            }
+        }
+        
+        private func restoreFullQuality() {
+            guard currentQuality != .full else { return }
+            
+            print("🎯 Restoring full quality after scroll stop")
+            currentQuality = .full
+            cachedTexture = nil
+            cacheKey = ""
+            
+            // Trigger redraw
+            if let coordinateSystem = currentCoordinateSystem {
+                DispatchQueue.main.async { [weak self] in
+                    // Force a refresh by clearing cache
+                    self?.cachedTexture = nil
+                    self?.cacheKey = ""
+                }
+            }
         }
     }
 }

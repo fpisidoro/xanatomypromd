@@ -22,6 +22,24 @@ struct XAnatomyProMainView: View {
     @State private var lastScale: CGFloat = 1.0
     @State private var dragOffset: CGSize = .zero
     
+    // Adaptive Quality for Performance
+    @State private var scrollVelocity: Float = 0.0
+    @State private var lastSliceChange: Date = Date()
+    @State private var qualityTimer: Timer?
+    @State private var currentQuality: ScrollQuality = .full
+    
+    enum ScrollQuality {
+        case full, half, quarter
+        
+        var description: String {
+            switch self {
+            case .full: return "Full"
+            case .half: return "Half" 
+            case .quarter: return "Quarter"
+            }
+        }
+    }
+    
     var body: some View {
         NavigationView {
             GeometryReader { geometry in
@@ -127,16 +145,22 @@ struct XAnatomyProMainView: View {
                                 width: geometry.size.width,
                                 height: geometry.size.height * 0.7
                             ),
-                            allowInteraction: true
+                            allowInteraction: true,
+                            scrollVelocity: scrollVelocity
                         )
                     }
                 }
                 .scaleEffect(scale)
                 .offset(dragOffset)
                 .clipped()
-                .gesture(panGesture)
-                .gesture(zoomGesture)
-                .overlay(sliceNavigationOverlay(geometry: geometry))
+                .onTwoFingerSwipe { translation, velocity in
+                    handleTwoFingerScroll(translation: translation, velocity: velocity)
+                }
+                .gesture(panGesture)  // Single finger pan
+                .gesture(zoomGesture)  // Pinch to zoom
+                .onScrollWheel { delta in
+                    handleScrollWheel(delta: delta)
+                }
                 .onAppear {
                     // Initialize coordinate system when volume data is loaded
                     if let volumeData = dataManager.volumeData {
@@ -144,7 +168,7 @@ struct XAnatomyProMainView: View {
                         print("✅ Coordinate system initialized with volume dimensions: \(volumeData.dimensions)")
                     }
                 }
-                .onChange(of: dataManager.isVolumeLoaded) { isLoaded in
+                .onChange(of: dataManager.isVolumeLoaded) { _, isLoaded in
                     // Update coordinate system when volume data becomes available
                     if isLoaded, let volumeData = dataManager.volumeData {
                         coordinateSystem.initializeFromVolumeData(volumeData)
@@ -393,10 +417,36 @@ struct XAnatomyProMainView: View {
     
     // MARK: - Gesture Handlers
     
+    // Single finger pan for view movement
     private var panGesture: some Gesture {
-        DragGesture()
-            .onChanged { value in dragOffset = value.translation }
-            .onEnded { _ in withAnimation(.spring()) { dragOffset = .zero } }
+        DragGesture(minimumDistance: 10)
+            .onChanged { value in
+                dragOffset = value.translation
+            }
+            .onEnded { _ in
+                withAnimation(.spring()) {
+                    dragOffset = .zero
+                }
+            }
+    }
+    
+    // MARK: - Two-Finger Scroll Handler
+    
+    private func handleTwoFingerScroll(translation: CGFloat, velocity: CGFloat) {
+        // Calculate slice delta from translation
+        let sensitivity: CGFloat = 5.0  // Pixels per slice
+        let sliceDelta = Int(translation / sensitivity)
+        
+        if sliceDelta != 0 {
+            let currentSlice = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
+            let newSlice = currentSlice - sliceDelta  // Negative for natural scrolling
+            let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
+            let clampedSlice = max(0, min(newSlice, maxSlices - 1))
+            
+            if clampedSlice != currentSlice {
+                coordinateSystem.updateFromSliceScroll(plane: currentPlane, sliceIndex: clampedSlice)
+            }
+        }
     }
     
     private var zoomGesture: some Gesture {
@@ -427,6 +477,8 @@ struct XAnatomyProMainView: View {
             coordinateSystem.updateFromSliceScroll(plane: currentPlane, sliceIndex: currentSlice + 1)
         }
     }
+    
+
     
     private func canNavigateToPreviousSlice() -> Bool {
         return coordinateSystem.getCurrentSliceIndex(for: currentPlane) > 0
@@ -466,6 +518,25 @@ struct XAnatomyProMainView: View {
         case .axial: return "Top-Down"
         case .sagittal: return "Side View"
         case .coronal: return "Front View"
+        }
+    }
+    
+    // MARK: - Scroll Wheel Support
+    
+    private func handleScrollWheel(delta: CGFloat) {
+        // Scroll wheel delta: positive = scroll up = next slice
+        let sensitivity: CGFloat = 10.0  // Adjust for scroll wheel sensitivity
+        let sliceDelta = Int(delta / sensitivity)
+        
+        if sliceDelta != 0 {
+            let currentSlice = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
+            let newSlice = currentSlice + sliceDelta
+            let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
+            let clampedSlice = max(0, min(newSlice, maxSlices - 1))
+            
+            if clampedSlice != currentSlice {
+                coordinateSystem.updateFromSliceScroll(plane: currentPlane, sliceIndex: clampedSlice)
+            }
         }
     }
     
@@ -752,6 +823,118 @@ class XAnatomyDataManager: ObservableObject {
     
     func getVolumeRenderer() -> MetalVolumeRenderer? {
         return volumeRenderer
+    }
+    
+    // MARK: - Gesture Handlers
+    
+    private func handleTwoFingerScroll(translation: CGFloat, velocity: CGFloat) {
+        updateScrollVelocity(Float(velocity))
+        handleSliceNavigation(delta: translation)
+    }
+    
+    private func handleScrollWheel(delta: CGFloat) {
+        // Calculate velocity from delta magnitude
+        let wheelVelocity = abs(delta) / 10.0  // Scale wheel sensitivity
+        updateScrollVelocity(Float(wheelVelocity))
+        handleSliceNavigation(delta: delta)
+    }
+    
+    private func handleSliceNavigation(delta: CGFloat) {
+        let sliceChange = Int(delta / 10.0)  // Sensitivity adjustment
+        
+        if sliceChange != 0 {
+            let currentSliceIndex = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
+            let newSliceIndex = currentSliceIndex + sliceChange
+            coordinateSystem.updateFromSliceScroll(plane: currentPlane, sliceIndex: newSliceIndex)
+            lastSliceChange = Date()
+            
+            // Reset quality timer
+            qualityTimer?.invalidate()
+            qualityTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
+                // Restore full quality after scroll stops
+                withAnimation(.easeOut(duration: 0.2)) {
+                    scrollVelocity = 0.0
+                    currentQuality = .full
+                }
+            }
+        }
+    }
+    
+    private func updateScrollVelocity(_ velocity: Float) {
+        scrollVelocity = velocity
+        
+        // Determine quality based on velocity
+        if velocity < 2.0 {
+            currentQuality = .full
+        } else if velocity < 5.0 {
+            currentQuality = .half
+        } else {
+            currentQuality = .quarter
+        }
+        
+        if currentQuality != .full {
+            print("🎯 Adaptive Quality: \(currentQuality.description) (velocity: \(velocity))")
+        }
+    }
+    
+    // MARK: - Gesture Properties
+    
+    private var panGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                dragOffset = value.translation
+            }
+    }
+    
+    private var zoomGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                let delta = value / lastScale
+                lastScale = value
+                scale *= delta
+            }
+            .onEnded { _ in
+                lastScale = 1.0
+                if scale < 0.5 { scale = 0.5 }
+                if scale > 3.0 { scale = 3.0 }
+            }
+    }
+    
+    // MARK: - View Components (Simplified for now)
+    
+    private var loadingView: some View {
+        VStack(spacing: 20) {
+            ProgressView()
+                .scaleEffect(1.5)
+            Text("Loading Medical Data...")
+                .foregroundColor(.white)
+        }
+    }
+    
+    private var controlsArea: some View {
+        VStack(spacing: 16) {
+            // Simplified controls
+            HStack {
+                Button("Axial") { currentPlane = .axial }
+                    .foregroundColor(currentPlane == .axial ? .blue : .white)
+                Button("Sagittal") { currentPlane = .sagittal }
+                    .foregroundColor(currentPlane == .sagittal ? .blue : .white)
+                Button("Coronal") { currentPlane = .coronal }
+                    .foregroundColor(currentPlane == .coronal ? .blue : .white)
+            }
+            
+            HStack {
+                Text("Quality: \(currentQuality.description)")
+                    .foregroundColor(.gray)
+                    .font(.caption)
+                Spacer()
+                Text("Velocity: \(String(format: "%.1f", scrollVelocity))")
+                    .foregroundColor(.gray)
+                    .font(.caption)
+            }
+        }
+        .padding()
+        .background(Color.gray.opacity(0.1))
     }
 }
 
