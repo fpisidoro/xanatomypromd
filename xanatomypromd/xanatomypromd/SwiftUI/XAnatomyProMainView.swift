@@ -567,12 +567,12 @@ struct XAnatomyProMainView: View {
         
         // Reset quality timer
         qualityTimer?.invalidate()
-        qualityTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
+        qualityTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
             // Restore full quality after scroll stops
             DispatchQueue.main.async {
                 withAnimation(.easeOut(duration: 0.2)) {
-                    self?.scrollVelocity = 0.0
-                    self?.currentQuality = .full
+                    self.scrollVelocity = 0.0
+                    self.currentQuality = .full
                 }
             }
         }
