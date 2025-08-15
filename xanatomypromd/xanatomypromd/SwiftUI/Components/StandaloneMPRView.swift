@@ -72,14 +72,14 @@ struct StandaloneMPRView: View {
             .scaleEffect(localZoom)  // Local zoom per view
             .offset(localPan)  // Local pan per view
             
-            // Gesture overlay for pan/zoom
+            // Gesture overlay for pan/zoom (ON TOP to receive touches first)
             if allowInteraction {
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(createCompositeGesture())
             }
             
-            // 2-finger scroll handler for this specific plane (ON TOP)
+            // 2-finger scroll handler underneath (only gets touches SwiftUI doesn't want)
             if allowInteraction {
                 TwoFingerScrollHandler { direction, velocity in
                     handleTwoFingerScroll(direction: direction, velocity: velocity)
@@ -103,7 +103,8 @@ struct StandaloneMPRView: View {
                 handleTap()
             }
         
-        let dragGesture = DragGesture()
+        // Only create drag gesture for 1-finger (pan) - let 2-finger fall through
+        let dragGesture = DragGesture(minimumDistance: 10)
             .onChanged { value in
                 handleDrag(value)
             }
@@ -119,7 +120,7 @@ struct StandaloneMPRView: View {
                 handleZoomEnd(value)
             }
         
-        // Combine gestures
+        // Combine gestures - pinch and 1-finger drag only
         return tapGesture.simultaneously(with: dragGesture).simultaneously(with: zoomGesture)
     }
     
@@ -133,19 +134,12 @@ struct StandaloneMPRView: View {
             isDragging = true
         }
         
-        // Determine if this is a pan or slice navigation
-        let velocity = abs(value.translation.height)
-        
-        if velocity > 10 && !isDragging {
-            // Vertical drag = slice navigation
-            handleSliceNavigation(value.translation)
-        } else {
-            // Small movement = pan
-            localPan = CGSize(
-                width: value.translation.width,
-                height: value.translation.height
-            )
-        }
+        // Only handle 1-finger drag for panning
+        // Let 2-finger vertical drags fall through to UIKit handler
+        localPan = CGSize(
+            width: value.translation.width,
+            height: value.translation.height
+        )
     }
     
     private func handleDragEnd(_ value: DragGesture.Value) {
