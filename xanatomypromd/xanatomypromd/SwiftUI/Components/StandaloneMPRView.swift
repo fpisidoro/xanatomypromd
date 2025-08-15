@@ -72,17 +72,10 @@ struct StandaloneMPRView: View {
             .scaleEffect(localZoom)  // Local zoom per view
             .offset(localPan)  // Local pan per view
             
-            // Gesture overlay for pan/zoom (ON TOP to receive touches first)
+            // All gesture handling in UIKit for proper coordination
             if allowInteraction {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .gesture(createCompositeGesture())
-            }
-            
-            // 2-finger scroll handler underneath (only gets touches SwiftUI doesn't want)
-            if allowInteraction {
-                TwoFingerScrollHandler { direction, velocity in
-                    handleTwoFingerScroll(direction: direction, velocity: velocity)
+                UnifiedGestureHandler { gestureType, data in
+                    handleUnifiedGesture(type: gestureType, data: data)
                 }
             }
             
@@ -182,7 +175,35 @@ struct StandaloneMPRView: View {
         }
     }
     
-    // MARK: - 2-Finger Scroll Handler
+    // MARK: - Unified Gesture Handler
+    
+    private func handleUnifiedGesture(type: UnifiedGestureHandler.GestureType, data: UnifiedGestureHandler.GestureData) {
+        switch type {
+        case .pan:
+            handlePanGesture(data)
+        case .pinch:
+            handlePinchGesture(data)
+        case .twoFingerScroll:
+            handleTwoFingerScroll(direction: data.direction, velocity: data.speed)
+        }
+    }
+    
+    private func handlePanGesture(_ data: UnifiedGestureHandler.GestureData) {
+        localPan = data.translation
+    }
+    
+    private func handlePinchGesture(_ data: UnifiedGestureHandler.GestureData) {
+        localZoom = lastZoom * data.scale
+        
+        // Constrain zoom on gesture end
+        if data.scale == 1.0 {  // Gesture ended
+            lastZoom = localZoom
+            withAnimation(.spring()) {
+                localZoom = max(0.5, min(localZoom, 4.0))
+                lastZoom = localZoom
+            }
+        }
+    }
     
     private func handleTwoFingerScroll(direction: Int, velocity: CGFloat) {
         // Update quality based on velocity for this view's rendering
