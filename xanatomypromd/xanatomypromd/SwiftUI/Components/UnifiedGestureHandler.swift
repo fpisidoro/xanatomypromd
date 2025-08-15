@@ -12,8 +12,8 @@ struct UnifiedGestureHandler: UIViewRepresentable {
     }
     
     struct GestureData {
-        let translation: CGSize
-        let velocity: CGSize
+        let translation: CGPoint
+        let velocity: CGPoint
         let scale: CGFloat
         let direction: Int
         let speed: CGFloat

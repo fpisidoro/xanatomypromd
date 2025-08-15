@@ -189,7 +189,7 @@ struct StandaloneMPRView: View {
     }
     
     private func handlePanGesture(_ data: UnifiedGestureHandler.GestureData) {
-        localPan = data.translation
+        localPan = CGSize(width: data.translation.x, height: data.translation.y)
     }
     
     private func handlePinchGesture(_ data: UnifiedGestureHandler.GestureData) {
