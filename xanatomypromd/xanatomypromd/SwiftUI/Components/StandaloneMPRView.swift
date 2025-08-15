@@ -72,18 +72,18 @@ struct StandaloneMPRView: View {
             .scaleEffect(localZoom)  // Local zoom per view
             .offset(localPan)  // Local pan per view
             
-            // 2-finger scroll handler for this specific plane
-            if allowInteraction {
-                TwoFingerScrollHandler { direction, velocity in
-                    handleTwoFingerScroll(direction: direction, velocity: velocity)
-                }
-            }
-            
             // Gesture overlay for pan/zoom
             if allowInteraction {
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(createCompositeGesture())
+            }
+            
+            // 2-finger scroll handler for this specific plane (ON TOP)
+            if allowInteraction {
+                TwoFingerScrollHandler { direction, velocity in
+                    handleTwoFingerScroll(direction: direction, velocity: velocity)
+                }
             }
             
             // View label overlay

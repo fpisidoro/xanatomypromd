@@ -153,14 +153,8 @@ struct XAnatomyProMainView: View {
                 .scaleEffect(scale)
                 .offset(dragOffset)
                 .clipped()
-                .onTwoFingerSwipe { translation, velocity in
-                    handleTwoFingerScroll(translation: translation, velocity: velocity)
-                }
                 .gesture(panGesture)  // Single finger pan
                 .gesture(zoomGesture)  // Pinch to zoom
-                .onScrollWheel { delta in
-                    handleScrollWheel(delta: delta)
-                }
                 .onAppear {
                     // Initialize coordinate system when volume data is loaded
                     if let volumeData = dataManager.volumeData {
