@@ -18,6 +18,83 @@ struct XAnatomyProV2MainView: View {
     @State private var isLoading = true
     @State private var showControls = true
     
+    // Adaptive Quality for Performance
+    @State private var scrollVelocity: Float = 0.0
+    @State private var lastSliceChange: Date = Date()
+    @State private var qualityTimer: Timer?
+    @State private var currentQuality: ScrollQuality = .full
+    
+    // 2-finger gesture tracking
+    @GestureState private var twoFingerDrag = CGSize.zero
+    @State private var lastDragPosition = CGSize.zero
+    
+    enum ScrollQuality: Int {
+        case full = 1, half = 2, quarter = 4
+        
+        var description: String {
+            switch self {
+            case .full: return "Full"
+            case .half: return "Half" 
+            case .quarter: return "Quarter"
+            }
+
+// MARK: - UIKit 2-Finger Gesture Handler
+
+struct TwoFingerScrollHandler: UIViewRepresentable {
+    let onScroll: (Int, CGFloat) -> Void
+    
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        
+        let panGesture = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        panGesture.minimumNumberOfTouches = 2
+        panGesture.maximumNumberOfTouches = 2
+        view.addGestureRecognizer(panGesture)
+        
+        return view
+    }
+    
+    func updateUIView(_ uiView: UIView, context: Context) {}
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onScroll: onScroll)
+    }
+    
+    class Coordinator: NSObject {
+        let onScroll: (Int, CGFloat) -> Void
+        private var lastTranslation: CGFloat = 0
+        
+        init(onScroll: @escaping (Int, CGFloat) -> Void) {
+            self.onScroll = onScroll
+        }
+        
+        @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+            let translation = gesture.translation(in: gesture.view)
+            let velocity = gesture.velocity(in: gesture.view)
+            
+            switch gesture.state {
+            case .began:
+                lastTranslation = translation.y
+            case .changed:
+                let deltaY = translation.y - lastTranslation
+                if abs(deltaY) > 8 {
+                    let direction = deltaY > 0 ? 1 : -1
+                    let speed = abs(velocity.y)
+                    onScroll(direction, speed)
+                    lastTranslation = translation.y
+                }
+            case .ended, .cancelled:
+                lastTranslation = 0
+            default:
+                break
+            }
+        }
+    }
+}
+        }
+    }
+    
     enum ViewType {
         case axial
         case sagittal
@@ -84,8 +161,20 @@ struct XAnatomyProV2MainView: View {
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        // MPR Views
-                        mprViewsLayout(in: geometry)
+                        // MPR Views with navigation overlay
+                        ZStack {
+                            mprViewsLayout(in: geometry)
+                                .background(
+                                    TwoFingerScrollHandler(
+                                        onScroll: { direction, velocity in
+                                            handleTwoFingerScroll(direction: direction, velocity: velocity)
+                                        }
+                                    )
+                                )
+                            
+                            // PERSISTENT slice navigation overlay
+                            sliceNavigationOverlay(in: geometry)
+                        }
                     }
                     
                     // Bottom controls
@@ -93,6 +182,9 @@ struct XAnatomyProV2MainView: View {
                         bottomControls
                     }
                 }
+                
+                // PERSISTENT controls - always visible
+                persistentControls
             }
         }
         .preferredColorScheme(.dark)
@@ -100,6 +192,126 @@ struct XAnatomyProV2MainView: View {
             startLoading()
             determineOptimalLayout()
         }
+    }
+    
+    // MARK: - Persistent Controls (Always Visible)
+    
+    private var persistentControls: some View {
+        VStack {
+            HStack {
+                Spacer()
+                
+                // ALWAYS-visible toggle button (never hidden)
+                Button(action: { withAnimation { showControls.toggle() } }) {
+                    Image(systemName: showControls ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.white)
+                        .padding(8)
+                        .background(Color.black.opacity(0.8))
+                        .clipShape(Circle())
+                }
+                .padding(.trailing, 16)
+                .padding(.top, 8)
+                .zIndex(1000) // Ensure it's on top
+            }
+            
+            Spacer()
+            
+            // Persistent slice indicator (bottom-left)
+            if !isLoading && !showControls {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(selectedSingleViewPlane.displayName)
+                            .font(.caption)
+                            .foregroundColor(.white)
+                        
+                        if let plane = selectedSingleViewPlane.mprPlane {
+                            let currentSlice = coordinateSystem.getCurrentSliceIndex(for: plane)
+                            let totalSlices = coordinateSystem.getMaxSlices(for: plane)
+                            
+                            Text("\(currentSlice + 1)/\(totalSlices)")
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    .padding(8)
+                    .background(Color.black.opacity(0.7))
+                    .cornerRadius(6)
+                    
+                    Spacer()
+                }
+                .padding(.leading, 16)
+                .padding(.bottom, 16)
+            }
+        }
+    }
+    
+    // MARK: - Slice Navigation Overlay
+    
+    private func sliceNavigationOverlay(in geometry: GeometryProxy) -> some View {
+        HStack {
+            // Left navigation area
+            Button(action: previousSlice) {
+                Image(systemName: "chevron.left")
+                    .font(.title)
+                    .foregroundColor(.white.opacity(0.6))
+            }
+            .frame(width: 60, height: geometry.size.height * 0.8)
+            .contentShape(Rectangle())
+            .disabled(!canNavigatePrevious())
+            
+            Spacer()
+            
+            // Right navigation area  
+            Button(action: nextSlice) {
+                Image(systemName: "chevron.right")
+                    .font(.title)
+                    .foregroundColor(.white.opacity(0.6))
+            }
+            .frame(width: 60, height: geometry.size.height * 0.8)
+            .contentShape(Rectangle())
+            .disabled(!canNavigateNext())
+        }
+        .background(Color.clear)
+    }
+    
+    // MARK: - Navigation Helpers
+    
+    private func previousSlice() {
+        guard let plane = selectedSingleViewPlane.mprPlane else { return }
+        let currentSlice = coordinateSystem.getCurrentSliceIndex(for: plane)
+        if currentSlice > 0 {
+            // Update world position to move to previous slice
+            var newPos = coordinateSystem.currentWorldPosition
+            let axis = plane.sliceAxis
+            newPos[axis] -= coordinateSystem.volumeSpacing[axis]
+            coordinateSystem.currentWorldPosition = newPos
+        }
+    }
+    
+    private func nextSlice() {
+        guard let plane = selectedSingleViewPlane.mprPlane else { return }
+        let currentSlice = coordinateSystem.getCurrentSliceIndex(for: plane)
+        let totalSlices = coordinateSystem.getMaxSlices(for: plane)
+        if currentSlice < totalSlices - 1 {
+            // Update world position to move to next slice
+            var newPos = coordinateSystem.currentWorldPosition
+            let axis = plane.sliceAxis
+            newPos[axis] += coordinateSystem.volumeSpacing[axis]
+            coordinateSystem.currentWorldPosition = newPos
+        }
+    }
+    
+    private func canNavigatePrevious() -> Bool {
+        guard let plane = selectedSingleViewPlane.mprPlane else { return false }
+        return coordinateSystem.getCurrentSliceIndex(for: plane) > 0
+    }
+    
+    private func canNavigateNext() -> Bool {
+        guard let plane = selectedSingleViewPlane.mprPlane else { return false }
+        let currentSlice = coordinateSystem.getCurrentSliceIndex(for: plane)
+        let totalSlices = coordinateSystem.getMaxSlices(for: plane)
+        return currentSlice < totalSlices - 1
     }
     
     // MARK: - Layout Selection
@@ -300,12 +512,6 @@ struct XAnatomyProV2MainView: View {
                     }
                 }
             }
-            
-            // Toggle controls visibility
-            Button(action: { withAnimation { showControls.toggle() } }) {
-                Image(systemName: showControls ? "chevron.up" : "chevron.down")
-                    .foregroundColor(.white)
-            }
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
@@ -313,60 +519,94 @@ struct XAnatomyProV2MainView: View {
     }
     
     private var bottomControls: some View {
-        HStack(spacing: 20) {
-            // Window level
-            Menu {
-                ForEach(CTWindowLevel.allPresets, id: \.name) { preset in
-                    Button(preset.name) {
-                        sharedState.setWindowLevel(preset)
+        VStack(spacing: 8) {
+            // Slice slider when controls are visible
+            if let plane = selectedSingleViewPlane.mprPlane {
+                HStack {
+                    Text("Slice")
+                        .font(.caption)
+                        .foregroundColor(.white)
+                    
+                    Slider(
+                        value: Binding(
+                            get: { Double(coordinateSystem.getCurrentSliceIndex(for: plane)) },
+                            set: { newValue in
+                                let targetSlice = Int(newValue)
+                                let currentSlice = coordinateSystem.getCurrentSliceIndex(for: plane)
+                                let sliceDiff = targetSlice - currentSlice
+                                var newPos = coordinateSystem.currentWorldPosition
+                                let axis = plane.sliceAxis
+                                newPos[axis] += Float(sliceDiff) * coordinateSystem.volumeSpacing[axis]
+                                coordinateSystem.currentWorldPosition = newPos
+                            }
+                        ),
+                        in: 0...Double(coordinateSystem.getMaxSlices(for: plane) - 1),
+                        step: 1
+                    )
+                    .accentColor(.cyan)
+                    
+                    Text("\(coordinateSystem.getCurrentSliceIndex(for: plane) + 1)/\(coordinateSystem.getMaxSlices(for: plane))")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                        .frame(width: 60)
+                }
+            }
+            
+            HStack(spacing: 20) {
+                // Window level
+                Menu {
+                    ForEach(CTWindowLevel.allPresets, id: \.name) { preset in
+                        Button(preset.name) {
+                            sharedState.setWindowLevel(preset)
+                        }
                     }
+                } label: {
+                    HStack {
+                        Image(systemName: "slider.horizontal.3")
+                        Text(sharedState.windowLevel.name)
+                            .font(.caption)
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.blue.opacity(0.3))
+                    .cornerRadius(6)
                 }
-            } label: {
-                HStack {
-                    Image(systemName: "slider.horizontal.3")
-                    Text(sharedState.windowLevel.name)
-                        .font(.caption)
+                
+                // Crosshairs
+                Button(action: { sharedState.toggleCrosshairs() }) {
+                    HStack {
+                        Image(systemName: sharedState.crosshairSettings.isVisible ? "plus.circle.fill" : "plus.circle")
+                        Text("Crosshairs")
+                            .font(.caption)
+                    }
+                    .foregroundColor(sharedState.crosshairSettings.isVisible ? .cyan : .gray)
                 }
-                .foregroundColor(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color.blue.opacity(0.3))
-                .cornerRadius(6)
-            }
-            
-            // Crosshairs
-            Button(action: { sharedState.toggleCrosshairs() }) {
-                HStack {
-                    Image(systemName: sharedState.crosshairSettings.isVisible ? "plus.circle.fill" : "plus.circle")
-                    Text("Crosshairs")
-                        .font(.caption)
+                
+                // ROI
+                Button(action: { sharedState.toggleROIOverlay() }) {
+                    HStack {
+                        Image(systemName: sharedState.roiSettings.isVisible ? "square.stack.3d.up.fill" : "square.stack.3d.up")
+                        Text("ROI")
+                            .font(.caption)
+                    }
+                    .foregroundColor(sharedState.roiSettings.isVisible ? .green : .gray)
                 }
-                .foregroundColor(sharedState.crosshairSettings.isVisible ? .cyan : .gray)
-            }
-            
-            // ROI
-            Button(action: { sharedState.toggleROIOverlay() }) {
-                HStack {
-                    Image(systemName: sharedState.roiSettings.isVisible ? "square.stack.3d.up.fill" : "square.stack.3d.up")
-                    Text("ROI")
-                        .font(.caption)
-                }
-                .foregroundColor(sharedState.roiSettings.isVisible ? .green : .gray)
-            }
-            
-            Spacer()
-            
-            // Status
-            HStack(spacing: 8) {
-                if dataManager.isVolumeLoaded {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                        .font(.caption)
-                }
-                if dataManager.isROILoaded {
-                    Image(systemName: "brain.head.profile")
-                        .foregroundColor(.green)
-                        .font(.caption)
+                
+                Spacer()
+                
+                // Status
+                HStack(spacing: 8) {
+                    if dataManager.isVolumeLoaded {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                    }
+                    if dataManager.isROILoaded {
+                        Image(systemName: "brain.head.profile")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                    }
                 }
             }
         }
@@ -432,6 +672,66 @@ struct XAnatomyProV2MainView: View {
             }
             
             isLoading = false
+        }
+    }
+    
+    // MARK: - Adaptive Quality Methods
+    
+    private func updateScrollVelocity(_ velocity: CGFloat) {
+        scrollVelocity = Float(velocity)
+        lastSliceChange = Date()
+        
+        // Update quality based on velocity  
+        let newQuality: ScrollQuality
+        if scrollVelocity > 0.5 {
+            newQuality = .quarter
+        } else if scrollVelocity > 0.25 {
+            newQuality = .half
+        } else {
+            newQuality = .full
+        }
+        
+        if newQuality != currentQuality {
+            currentQuality = newQuality
+            // Pass quality to shared state for renderer
+            Task { @MainActor in
+                sharedState.renderQuality = newQuality.rawValue
+            }
+        }
+        
+        // Reset timer
+        qualityTimer?.invalidate()
+        qualityTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
+            Task { @MainActor in
+                if currentQuality != .full {
+                    currentQuality = .full
+                    sharedState.renderQuality = ScrollQuality.full.rawValue
+                }
+            }
+        }
+    }
+    
+    private func handleTwoFingerScroll(direction: Int, velocity: CGFloat) {
+        updateScrollVelocity(velocity)
+        
+        switch layoutMode {
+        case .single:
+            if let plane = selectedSingleViewPlane.mprPlane {
+                navigateSlice(plane: plane, direction: direction)
+            }
+        default:
+            // Multi-view: update axial
+            navigateSlice(plane: .axial, direction: direction)
+        }
+    }
+    
+    private func navigateSlice(plane: MPRPlane, direction: Int) {
+        let currentSlice = coordinateSystem.getCurrentSliceIndex(for: plane)
+        let totalSlices = coordinateSystem.getMaxSlices(for: plane)
+        let newSlice = max(0, min(totalSlices - 1, currentSlice + direction))
+        
+        if newSlice != currentSlice {
+            coordinateSystem.updateFromSliceScroll(plane: plane, sliceIndex: newSlice)
         }
     }
 }
