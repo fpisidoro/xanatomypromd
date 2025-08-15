@@ -217,8 +217,17 @@ struct CrosshairInteractionLayer: View {
                             imageBounds: imageBounds
                         )
                         
+                        // Calculate slice index from the new position for velocity tracking
+                        let oldSliceIndex = coordinateSystem.getCurrentSliceIndex(for: plane)
+                        
                         // Update coordinate system - broadcasts to all layers
                         coordinateSystem.updateWorldPosition(newWorldPosition)
+                        
+                        // Update via slice scroll to trigger velocity calculation
+                        let newSliceIndex = coordinateSystem.getCurrentSliceIndex(for: plane)
+                        if newSliceIndex != oldSliceIndex {
+                            coordinateSystem.updateFromSliceScroll(plane: plane, sliceIndex: newSliceIndex)
+                        }
                         
                         print("🎯 Touch interaction: \(value.location) → \(newWorldPosition) mm")
                     }

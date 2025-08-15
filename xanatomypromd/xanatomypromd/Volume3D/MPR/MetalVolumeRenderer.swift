@@ -23,17 +23,44 @@ public class MetalVolumeRenderer {
     
     // MARK: - Configuration for MPR Generation
     
+    public enum RenderQuality {
+        case full      // 512×512 or native resolution
+        case half      // 256×256 or half resolution
+        case quarter   // 128×128 or quarter resolution
+        case eighth    // 64×64 for very fast scrolling
+        
+        var scaleFactor: Float {
+            switch self {
+            case .full: return 1.0
+            case .half: return 0.5
+            case .quarter: return 0.25
+            case .eighth: return 0.125
+            }
+        }
+        
+        var description: String {
+            switch self {
+            case .full: return "Full"
+            case .half: return "Half"
+            case .quarter: return "Quarter"
+            case .eighth: return "Eighth"
+            }
+        }
+    }
+    
     public struct MPRConfig {
         public let plane: MPRPlane
         public let sliceIndex: Float        // 0.0 to 1.0 normalized position
         public let windowCenter: Float
         public let windowWidth: Float
+        public let quality: RenderQuality   // NEW: Adaptive quality level
         
-        public init(plane: MPRPlane, sliceIndex: Float, windowCenter: Float = 0.0, windowWidth: Float = 2000.0) {
+        public init(plane: MPRPlane, sliceIndex: Float, windowCenter: Float = 0.0, windowWidth: Float = 2000.0, quality: RenderQuality = .full) {
             self.plane = plane
             self.sliceIndex = sliceIndex
             self.windowCenter = windowCenter
             self.windowWidth = windowWidth
+            self.quality = quality
         }
     }
     
@@ -116,7 +143,7 @@ public class MetalVolumeRenderer {
     
     // MARK: - MPR Slice Generation (Hardware Accelerated - Fixed)
     
-    /// Generate MPR slice from 3D volume using hardware sampling
+    /// Generate MPR slice from 3D volume using hardware sampling with adaptive quality
     public func generateMPRSlice(
         config: MPRConfig,
         completion: @escaping (MTLTexture?) -> Void
@@ -127,14 +154,23 @@ public class MetalVolumeRenderer {
             return
         }
         
-        // Calculate output dimensions based on plane
-        let outputSize = getOutputDimensions(for: config.plane)
+        // Calculate output dimensions based on plane and quality
+        let baseSize = getOutputDimensions(for: config.plane)
         
-        // Create output texture
+        // Apply quality scaling
+        let scaledWidth = max(32, Int(Float(baseSize.width) * config.quality.scaleFactor))
+        let scaledHeight = max(32, Int(Float(baseSize.height) * config.quality.scaleFactor))
+        
+        // Log quality adjustment if not full
+        if config.quality != .full {
+            print("🎯 Adaptive Quality: \(config.quality.description) - \(scaledWidth)×\(scaledHeight) (from \(baseSize.width)×\(baseSize.height))")
+        }
+        
+        // Create output texture at adjusted resolution
         let outputDescriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .rgba8Unorm,
-            width: outputSize.width,
-            height: outputSize.height,
+            width: scaledWidth,
+            height: scaledHeight,
             mipmapped: false
         )
         outputDescriptor.usage = [.shaderWrite, .shaderRead]

@@ -17,6 +17,14 @@ class DICOMCoordinateSystem: ObservableObject {
     /// Current 3D world position in DICOM patient coordinates (mm)
     @Published var currentWorldPosition: SIMD3<Float>
     
+    /// Current scroll velocity in slices per second
+    @Published var scrollVelocity: Float = 0.0
+    
+    /// Last slice update time for velocity calculation
+    private var lastSliceUpdateTime: Date = Date()
+    private var lastSliceIndex: [MPRPlane: Int] = [:]
+    private var velocityTimer: Timer?
+    
     // MARK: - Computed Properties (Always Current)
     
     /// Volume origin in patient coordinates (mm) - dynamic based on loaded scan
@@ -329,6 +337,34 @@ class DICOMCoordinateSystem: ObservableObject {
     func updateFromSliceScroll(plane: MPRPlane, sliceIndex: Int) {
         let maxSlice = getMaxSlices(for: plane) - 1
         let clampedIndex = max(0, min(sliceIndex, maxSlice))
+        
+        // Calculate velocity
+        let now = Date()
+        let timeDelta = now.timeIntervalSince(lastSliceUpdateTime)
+        
+        if timeDelta > 0.001 {  // Avoid division by near-zero
+            if let lastIndex = lastSliceIndex[plane] {
+                let sliceDelta = abs(clampedIndex - lastIndex)
+                let velocity = Float(sliceDelta) / Float(timeDelta)
+                
+                // Update velocity if significant change
+                if abs(velocity - scrollVelocity) > 0.1 || velocity < 0.1 {
+                    scrollVelocity = velocity
+                    print("🎯 Scroll velocity: \(String(format: "%.1f", velocity)) slices/sec")
+                }
+            }
+        }
+        
+        // Update tracking
+        lastSliceUpdateTime = now
+        lastSliceIndex[plane] = clampedIndex
+        
+        // Reset velocity after scroll stops
+        velocityTimer?.invalidate()
+        velocityTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in
+            self?.scrollVelocity = 0.0
+            print("🎯 Scroll stopped, velocity reset")
+        }
         
         // Convert slice index to voxel coordinate
         let voxelCoord = Float(clampedIndex)
