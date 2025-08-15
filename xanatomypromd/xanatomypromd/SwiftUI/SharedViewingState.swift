@@ -18,6 +18,9 @@ class SharedViewingState: ObservableObject {
     /// ROI overlay display settings
     @Published var roiSettings = ROIDisplaySettings.default
     
+    /// Render quality for adaptive performance (1=full, 2=half, 4=quarter)
+    @Published var renderQuality: Int = 1
+    
     // MARK: - 3D View State (Persistent)
     
     /// 3D view rotation around Z-axis (preserved when switching views)
