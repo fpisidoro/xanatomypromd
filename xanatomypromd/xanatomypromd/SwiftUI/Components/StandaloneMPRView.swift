@@ -72,7 +72,14 @@ struct StandaloneMPRView: View {
             .scaleEffect(localZoom)  // Local zoom per view
             .offset(localPan)  // Local pan per view
             
-            // Gesture overlay
+            // 2-finger scroll handler for this specific plane
+            if allowInteraction {
+                TwoFingerScrollHandler { direction, velocity in
+                    handleTwoFingerScroll(direction: direction, velocity: velocity)
+                }
+            }
+            
+            // Gesture overlay for pan/zoom
             if allowInteraction {
                 Color.clear
                     .contentShape(Rectangle())
@@ -178,6 +185,46 @@ struct StandaloneMPRView: View {
         withAnimation(.spring()) {
             localZoom = max(0.5, min(localZoom, 4.0))
             lastZoom = localZoom
+        }
+    }
+    
+    // MARK: - 2-Finger Scroll Handler
+    
+    private func handleTwoFingerScroll(direction: Int, velocity: CGFloat) {
+        // Update quality based on velocity for this view's rendering
+        updateScrollQuality(velocity: velocity)
+        
+        // Navigate slices for this specific plane
+        let currentSlice = coordinateSystem.getCurrentSliceIndex(for: plane)
+        let totalSlices = coordinateSystem.getMaxSlices(for: plane)
+        let newSlice = max(0, min(totalSlices - 1, currentSlice + direction))
+        
+        if newSlice != currentSlice {
+            coordinateSystem.updateFromSliceScroll(plane: plane, sliceIndex: newSlice)
+        }
+    }
+    
+    private func updateScrollQuality(velocity: CGFloat) {
+        // Update shared state quality based on scroll velocity
+        let newQuality: Int
+        if velocity > 500 {
+            newQuality = 4  // Quarter quality
+        } else if velocity > 250 {
+            newQuality = 2  // Half quality  
+        } else {
+            newQuality = 1  // Full quality
+        }
+        
+        // Update shared quality for this view's rendering
+        if newQuality != sharedState.renderQuality {
+            sharedState.renderQuality = newQuality
+            
+            // Reset to full quality after short delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                if sharedState.renderQuality != 1 {
+                    sharedState.renderQuality = 1
+                }
+            }
         }
     }
     
