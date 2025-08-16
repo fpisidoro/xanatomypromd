@@ -52,7 +52,10 @@ struct UnifiedGestureHandler: UIViewRepresentable {
         return view
     }
     
-    func updateUIView(_ uiView: UIView, context: Context) {}
+    func updateUIView(_ uiView: UIView, context: Context) {
+        // Update the coordinator with the current zoom level
+        context.coordinator.updateZoom(currentZoom)
+    }
     
     func makeCoordinator() -> Coordinator {
         Coordinator(onGesture: onGesture, currentZoom: currentZoom)
@@ -82,6 +85,14 @@ struct UnifiedGestureHandler: UIViewRepresentable {
         
         // Update zoom level for gesture routing decisions
         func updateZoom(_ zoom: CGFloat) {
+            if abs(self.currentZoom - zoom) > 0.01 {  // Only log significant changes
+                let oldBehavior = self.currentZoom <= zoomThresholdForPan ? "scroll" : "pan"
+                let newBehavior = zoom <= zoomThresholdForPan ? "scroll" : "pan"
+                
+                if oldBehavior != newBehavior {
+                    print("🔄 1-finger behavior: \(oldBehavior) → \(newBehavior) (zoom: \(String(format: "%.1f", zoom))x)")
+                }
+            }
             self.currentZoom = zoom
         }
         
@@ -100,9 +111,15 @@ struct UnifiedGestureHandler: UIViewRepresentable {
             // Determine behavior based on zoom level
             if currentZoom <= zoomThresholdForPan {
                 // At default zoom (1.0x to 1.5x): 1-finger scroll
+                if gesture.state == .began {
+                    print("🖱️ 1-finger @ \(String(format: "%.1f", currentZoom))x → SCROLL mode")
+                }
                 handleOneFingerScroll(gesture: gesture, translation: translation, velocity: velocity)
             } else {
                 // Zoomed in (>1.5x): 1-finger pan
+                if gesture.state == .began {
+                    print("🖱️ 1-finger @ \(String(format: "%.1f", currentZoom))x → PAN mode")
+                }
                 let data = GestureData(
                     translation: translation,
                     velocity: velocity,
