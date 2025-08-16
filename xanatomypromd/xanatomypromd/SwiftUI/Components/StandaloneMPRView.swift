@@ -33,6 +33,7 @@ struct StandaloneMPRView: View {
     @State private var lastZoom: CGFloat = 1.0
     @State private var localPan: CGSize = .zero
     @State private var isDragging = false
+    @State private var isPinching = false  // NEW: Track pinch gesture state
     
     // MARK: - Initialization
     
@@ -215,28 +216,36 @@ struct StandaloneMPRView: View {
     }
     
     private func handlePinchGesture(_ data: UnifiedGestureHandler.GestureData) {
-        let newZoom = lastZoom * data.scale
-        
-        // Apply zoom with smooth constraint handling
+        // Handle gesture state transitions
         if data.scale == 1.0 {  // Gesture ended
+            isPinching = false
             lastZoom = localZoom
             // Final constraint with animation
             withAnimation(.spring()) {
                 localZoom = max(1.0, min(localZoom, 4.0))
                 lastZoom = localZoom
             }
+            return
+        }
+        
+        // Start of gesture: sync lastZoom to prevent jumps
+        if !isPinching {
+            isPinching = true
+            lastZoom = localZoom
+        }
+        
+        let newZoom = lastZoom * data.scale
+        
+        // During gesture: allow temporary values below 1.0 for smooth feel
+        // but apply resistance as we approach the limit
+        if newZoom < 1.0 {
+            // Apply exponential resistance below 1.0x
+            let overshoot = 1.0 - newZoom
+            let resistance = 0.3 // Resistance factor
+            localZoom = 1.0 - (overshoot * resistance)
         } else {
-            // During gesture: allow temporary values below 1.0 for smooth feel
-            // but apply resistance as we approach the limit
-            if newZoom < 1.0 {
-                // Apply exponential resistance below 1.0x
-                let overshoot = 1.0 - newZoom
-                let resistance = 0.3 // Resistance factor
-                localZoom = 1.0 - (overshoot * resistance)
-            } else {
-                // Normal zoom above 1.0x
-                localZoom = min(newZoom, 4.0)
-            }
+            // Normal zoom above 1.0x
+            localZoom = min(newZoom, 4.0)
         }
     }
     
