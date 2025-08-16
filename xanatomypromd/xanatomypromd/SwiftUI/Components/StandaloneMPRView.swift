@@ -172,14 +172,21 @@ struct StandaloneMPRView: View {
     
     private func handleZoom(_ value: CGFloat) {
         let newZoom = lastZoom * value
-        // CONSTRAINT: Never zoom below 1.0x
-        localZoom = max(1.0, newZoom)
+        
+        // Apply smooth resistance below 1.0x during gesture
+        if newZoom < 1.0 {
+            let overshoot = 1.0 - newZoom
+            let resistance = 0.3
+            localZoom = 1.0 - (overshoot * resistance)
+        } else {
+            localZoom = min(newZoom, 4.0)
+        }
     }
     
     private func handleZoomEnd(_ value: CGFloat) {
         lastZoom = localZoom
         
-        // Constrain zoom levels: minimum 1.0x, maximum 4.0x
+        // Smooth final constraint with animation
         withAnimation(.spring()) {
             localZoom = max(1.0, min(localZoom, 4.0))
             lastZoom = localZoom
@@ -209,15 +216,26 @@ struct StandaloneMPRView: View {
     
     private func handlePinchGesture(_ data: UnifiedGestureHandler.GestureData) {
         let newZoom = lastZoom * data.scale
-        // CONSTRAINT: Never zoom below 1.0x during gesture
-        localZoom = max(1.0, newZoom)
         
-        // Constrain zoom on gesture end
+        // Apply zoom with smooth constraint handling
         if data.scale == 1.0 {  // Gesture ended
             lastZoom = localZoom
+            // Final constraint with animation
             withAnimation(.spring()) {
                 localZoom = max(1.0, min(localZoom, 4.0))
                 lastZoom = localZoom
+            }
+        } else {
+            // During gesture: allow temporary values below 1.0 for smooth feel
+            // but apply resistance as we approach the limit
+            if newZoom < 1.0 {
+                // Apply exponential resistance below 1.0x
+                let overshoot = 1.0 - newZoom
+                let resistance = 0.3 // Resistance factor
+                localZoom = 1.0 - (overshoot * resistance)
+            } else {
+                // Normal zoom above 1.0x
+                localZoom = min(newZoom, 4.0)
             }
         }
     }
