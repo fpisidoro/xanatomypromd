@@ -45,15 +45,17 @@ struct CTDisplayLayer: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: MTKView, context: Context) {
-        context.coordinator.updateRenderingParameters(
-            coordinateSystem: coordinateSystem,
-            plane: plane,
-            windowLevel: windowLevel,
-            volumeData: volumeData,
-            scrollVelocity: scrollVelocity,
-            sharedState: sharedState
-        )
-        uiView.setNeedsDisplay()
+        Task { @MainActor in
+            context.coordinator.updateRenderingParameters(
+                coordinateSystem: coordinateSystem,
+                plane: plane,
+                windowLevel: windowLevel,
+                volumeData: volumeData,
+                scrollVelocity: scrollVelocity,
+                sharedState: sharedState
+            )
+            uiView.setNeedsDisplay()
+        }
     }
     
     func makeCoordinator() -> Coordinator {
@@ -219,6 +221,7 @@ struct CTDisplayLayer: UIViewRepresentable {
             }
         }
         
+        @MainActor
         func updateRenderingParameters(
             coordinateSystem: DICOMCoordinateSystem,
             plane: MPRPlane,
@@ -238,8 +241,10 @@ struct CTDisplayLayer: UIViewRepresentable {
             // Use shared state quality if available, otherwise calculate from velocity
             let newQuality: MetalVolumeRenderer.RenderQuality
             if let sharedState = sharedState {
+                // Access @MainActor property safely
+                let currentRenderQuality = sharedState.renderQuality
                 // Convert SharedViewingState quality to MetalVolumeRenderer quality
-                switch sharedState.renderQuality {
+                switch currentRenderQuality {
                 case 1:
                     newQuality = .full
                 case 2:
