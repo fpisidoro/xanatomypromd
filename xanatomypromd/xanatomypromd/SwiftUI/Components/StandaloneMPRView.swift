@@ -174,20 +174,14 @@ struct StandaloneMPRView: View {
     private func handleZoom(_ value: CGFloat) {
         let newZoom = lastZoom * value
         
-        // Apply smooth resistance below 1.0x during gesture
-        if newZoom < 1.0 {
-            let overshoot = 1.0 - newZoom
-            let resistance = 0.3
-            localZoom = 1.0 - (overshoot * resistance)
-        } else {
-            localZoom = min(newZoom, 4.0)
-        }
+        // HARD LIMIT: Never go below 1.0x
+        localZoom = max(1.0, min(newZoom, 4.0))
     }
     
     private func handleZoomEnd(_ value: CGFloat) {
         lastZoom = localZoom
         
-        // Smooth final constraint with animation
+        // Ensure constraints are applied
         withAnimation(.spring()) {
             localZoom = max(1.0, min(localZoom, 4.0))
             lastZoom = localZoom
@@ -236,17 +230,8 @@ struct StandaloneMPRView: View {
         
         let newZoom = lastZoom * data.scale
         
-        // During gesture: allow temporary values below 1.0 for smooth feel
-        // but apply resistance as we approach the limit
-        if newZoom < 1.0 {
-            // Apply exponential resistance below 1.0x
-            let overshoot = 1.0 - newZoom
-            let resistance = 0.3 // Resistance factor
-            localZoom = 1.0 - (overshoot * resistance)
-        } else {
-            // Normal zoom above 1.0x
-            localZoom = min(newZoom, 4.0)
-        }
+        // HARD LIMIT: Never go below 1.0x, but make it smooth by clamping
+        localZoom = max(1.0, min(newZoom, 4.0))
     }
     
     // MARK: - Enhanced 2-Finger Scrolling with Quality Control
