@@ -25,6 +25,9 @@ struct CTDisplayLayer: UIViewRepresentable {
     /// Scroll velocity for adaptive quality (NEW)
     let scrollVelocity: Float
     
+    /// Shared viewing state for quality control
+    let sharedState: SharedViewingState?
+    
     // MARK: - UIViewRepresentable Implementation
     
     func makeUIView(context: Context) -> MTKView {
@@ -47,7 +50,8 @@ struct CTDisplayLayer: UIViewRepresentable {
             plane: plane,
             windowLevel: windowLevel,
             volumeData: volumeData,
-            scrollVelocity: scrollVelocity
+            scrollVelocity: scrollVelocity,
+            sharedState: sharedState
         )
         uiView.setNeedsDisplay()
     }
@@ -220,7 +224,8 @@ struct CTDisplayLayer: UIViewRepresentable {
             plane: MPRPlane,
             windowLevel: CTWindowLevel,
             volumeData: VolumeData?,
-            scrollVelocity: Float
+            scrollVelocity: Float,
+            sharedState: SharedViewingState?
         ) {
             print("🔍 CT Medical Display: updateRenderingParameters called")
             print("   Plane: \(plane), VolumeData: \(volumeData != nil ? "present" : "nil")")
@@ -230,11 +235,28 @@ struct CTDisplayLayer: UIViewRepresentable {
             self.currentWindowLevel = windowLevel
             self.currentScrollVelocity = scrollVelocity
             
-            // Determine quality based on scroll velocity
-            let newQuality = determineQuality(from: scrollVelocity)
+            // Use shared state quality if available, otherwise calculate from velocity
+            let newQuality: MetalVolumeRenderer.RenderQuality
+            if let sharedState = sharedState {
+                // Convert SharedViewingState quality to MetalVolumeRenderer quality
+                switch sharedState.renderQuality {
+                case 1:
+                    newQuality = .full
+                case 2:
+                    newQuality = .half
+                case 4:
+                    newQuality = .quarter
+                default:
+                    newQuality = .full
+                }
+            } else {
+                // Fallback to velocity-based quality
+                newQuality = determineQuality(from: scrollVelocity)
+            }
+            
             if newQuality != currentQuality {
                 currentQuality = newQuality
-                print("🎯 Quality: \(currentQuality) at \(String(format: "%.1f", scrollVelocity)) slices/sec")
+                print("🎯 Quality: \(currentQuality) from shared state")
                 cachedTexture = nil  // Force regeneration at new quality
                 cacheKey = ""  // Clear cache key
             }

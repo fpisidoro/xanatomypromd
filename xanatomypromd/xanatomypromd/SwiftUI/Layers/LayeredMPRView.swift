@@ -34,6 +34,9 @@ struct LayeredMPRView: View {
     /// Scroll velocity for adaptive quality
     let scrollVelocity: Float
     
+    /// Shared viewing state for quality control
+    let sharedState: SharedViewingState?
+    
     // MARK: - Initialization
     
     init(
@@ -46,7 +49,8 @@ struct LayeredMPRView: View {
         roiData: MinimalRTStructParser.SimpleRTStructData? = nil,
         viewSize: CGSize = CGSize(width: 512, height: 512),
         allowInteraction: Bool = true,
-        scrollVelocity: Float = 0.0
+        scrollVelocity: Float = 0.0,
+        sharedState: SharedViewingState? = nil
     ) {
         self.coordinateSystem = coordinateSystem
         self.plane = plane
@@ -58,6 +62,7 @@ struct LayeredMPRView: View {
         self.roiData = roiData
         self.viewSize = viewSize
         self.allowInteraction = allowInteraction
+        self.sharedState = sharedState
     }
     
     // MARK: - Body
@@ -70,7 +75,8 @@ struct LayeredMPRView: View {
                 plane: plane,
                 windowLevel: windowLevel,
                 volumeData: volumeData,
-                scrollVelocity: scrollVelocity
+                scrollVelocity: scrollVelocity,
+                sharedState: sharedState
             )
             
             // Layer 3: ROI Overlay (Anatomical Structures) - MIDDLE

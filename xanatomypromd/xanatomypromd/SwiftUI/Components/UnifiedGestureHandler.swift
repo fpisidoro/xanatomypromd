@@ -1,14 +1,14 @@
 import SwiftUI
 import UIKit
 
-// MARK: - Unified Gesture Handler
-// Handles all gestures (1-finger, 2-finger, pinch) in UIKit for proper coordination
+// MARK: - Unified Gesture Handler with Smooth Scrolling
+// Fixed: Distance-based thresholds, velocity damping, proper gesture state tracking
 
 struct UnifiedGestureHandler: UIViewRepresentable {
     let onGesture: (GestureType, GestureData) -> Void
     
     enum GestureType {
-        case pan, pinch, twoFingerScroll
+        case pan, pinch, twoFingerScroll, scrollEnd
     }
     
     struct GestureData {
@@ -17,8 +17,9 @@ struct UnifiedGestureHandler: UIViewRepresentable {
         let scale: CGFloat
         let direction: Int
         let speed: CGFloat
+        let accumulatedDistance: CGFloat
         
-        static let zero = GestureData(translation: .zero, velocity: .zero, scale: 1.0, direction: 0, speed: 0)
+        static let zero = GestureData(translation: .zero, velocity: .zero, scale: 1.0, direction: 0, speed: 0, accumulatedDistance: 0)
     }
     
     func makeUIView(context: Context) -> UIView {
@@ -59,6 +60,14 @@ struct UnifiedGestureHandler: UIViewRepresentable {
     class Coordinator: NSObject, UIGestureRecognizerDelegate {
         let onGesture: (GestureType, GestureData) -> Void
         
+        // 2-finger scroll state tracking
+        private var scrollAccumulator: CGFloat = 0
+        private var lastScrollTranslation: CGFloat = 0
+        private var isScrolling = false
+        
+        // Distance thresholds for different slice counts
+        private let baseScrollThreshold: CGFloat = 15  // pixels needed to trigger slice change
+        
         init(onGesture: @escaping (GestureType, GestureData) -> Void) {
             self.onGesture = onGesture
         }
@@ -80,7 +89,8 @@ struct UnifiedGestureHandler: UIViewRepresentable {
                 velocity: velocity,
                 scale: 1.0,
                 direction: 0,
-                speed: 0
+                speed: 0,
+                accumulatedDistance: 0
             )
             
             onGesture(.pan, data)
@@ -94,18 +104,51 @@ struct UnifiedGestureHandler: UIViewRepresentable {
             let isVerticalGesture = abs(translation.y) > abs(translation.x) * 0.7
             
             if isVerticalGesture {
-                let direction = translation.y > 0 ? 1 : -1
-                let speed = abs(velocity.y)
-                
-                let data = GestureData(
-                    translation: translation,
-                    velocity: velocity,
-                    scale: 1.0,
-                    direction: direction,
-                    speed: speed
-                )
-                
-                onGesture(.twoFingerScroll, data)
+                switch gesture.state {
+                case .began:
+                    // Start scrolling - trigger quality reduction
+                    scrollAccumulator = 0
+                    lastScrollTranslation = translation.y
+                    isScrolling = true
+                    
+                case .changed:
+                    // Accumulate distance for smooth scrolling
+                    let deltaY = translation.y - lastScrollTranslation
+                    scrollAccumulator += abs(deltaY)
+                    
+                    // Only trigger slice change when accumulated enough distance
+                    if scrollAccumulator >= baseScrollThreshold {
+                        let direction = translation.y > lastScrollTranslation ? 1 : -1
+                        let speed = abs(velocity.y)
+                        
+                        let data = GestureData(
+                            translation: CGPoint(x: 0, y: deltaY),
+                            velocity: CGPoint(x: 0, y: velocity.y),
+                            scale: 1.0,
+                            direction: direction,
+                            speed: speed,
+                            accumulatedDistance: scrollAccumulator
+                        )
+                        
+                        onGesture(.twoFingerScroll, data)
+                        
+                        // Reset accumulator after triggering slice change
+                        scrollAccumulator = 0
+                        lastScrollTranslation = translation.y
+                    }
+                    
+                case .ended, .cancelled:
+                    // End scrolling - restore quality
+                    isScrolling = false
+                    scrollAccumulator = 0
+                    lastScrollTranslation = 0
+                    
+                    let data = GestureData.zero
+                    onGesture(.scrollEnd, data)
+                    
+                default:
+                    break
+                }
             } else {
                 // Horizontal 2-finger = pan
                 let data = GestureData(
@@ -113,7 +156,8 @@ struct UnifiedGestureHandler: UIViewRepresentable {
                     velocity: velocity,
                     scale: 1.0,
                     direction: 0,
-                    speed: 0
+                    speed: 0,
+                    accumulatedDistance: 0
                 )
                 
                 onGesture(.pan, data)
@@ -126,7 +170,8 @@ struct UnifiedGestureHandler: UIViewRepresentable {
                 velocity: .zero,
                 scale: gesture.scale,
                 direction: 0,
-                speed: 0
+                speed: 0,
+                accumulatedDistance: 0
             )
             
             onGesture(.pinch, data)

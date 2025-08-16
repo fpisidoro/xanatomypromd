@@ -67,7 +67,8 @@ struct StandaloneMPRView: View {
                 volumeData: volumeData,
                 roiData: roiData,
                 viewSize: viewSize,
-                allowInteraction: false  // We handle interaction at this level
+                allowInteraction: false,  // We handle interaction at this level
+                sharedState: sharedState  // Pass for quality control
             )
             .scaleEffect(localZoom)  // Local zoom per view
             .offset(localPan)  // Local pan per view
@@ -175,7 +176,7 @@ struct StandaloneMPRView: View {
         }
     }
     
-    // MARK: - Unified Gesture Handler
+    // MARK: - Enhanced Unified Gesture Handler
     
     private func handleUnifiedGesture(type: UnifiedGestureHandler.GestureType, data: UnifiedGestureHandler.GestureData) {
         switch type {
@@ -184,7 +185,9 @@ struct StandaloneMPRView: View {
         case .pinch:
             handlePinchGesture(data)
         case .twoFingerScroll:
-            handleTwoFingerScroll(direction: data.direction, velocity: data.speed)
+            handleTwoFingerScrollSmooth(data)
+        case .scrollEnd:
+            handleScrollEnd()
         }
     }
     
@@ -205,42 +208,106 @@ struct StandaloneMPRView: View {
         }
     }
     
-    private func handleTwoFingerScroll(direction: Int, velocity: CGFloat) {
-        // Update quality based on velocity for this view's rendering
-        updateScrollQuality(velocity: velocity)
+    // MARK: - Enhanced 2-Finger Scrolling with Quality Control
+    
+    private func handleTwoFingerScrollSmooth(_ data: UnifiedGestureHandler.GestureData) {
+        // Trigger quality reduction on first scroll event
+        startScrollQualityReduction(velocity: data.speed)
         
-        // Navigate slices for this specific plane
+        // Calculate plane-aware sensitivity
+        let sensitivity = calculatePlaneAwareSensitivity()
+        
+        // Determine slice change amount based on accumulated distance and velocity
+        let sliceChange = calculateSliceChange(
+            accumulatedDistance: data.accumulatedDistance,
+            direction: data.direction,
+            velocity: data.speed,
+            sensitivity: sensitivity
+        )
+        
+        if sliceChange != 0 {
+            navigateSlices(by: sliceChange)
+        }
+    }
+    
+    private func handleScrollEnd() {
+        // Restore full quality after scrolling ends
+        restoreScrollQuality()
+    }
+    
+    // MARK: - Plane-Aware Sensitivity Calculation
+    
+    private func calculatePlaneAwareSensitivity() -> Float {
+        let totalSlices = coordinateSystem.getMaxSlices(for: plane)
+        
+        // Scale sensitivity based on slice count
+        // Axial (500+ slices) = fine control
+        // Sagittal/Coronal (fewer slices) = coarser control
+        switch totalSlices {
+        case 0..<50:
+            return 0.3      // Very fine for few slices
+        case 50..<150:
+            return 0.5      // Medium sensitivity
+        case 150..<300:
+            return 0.7      // Higher sensitivity
+        default:
+            return 1.0      // Full sensitivity for 500+ slices
+        }
+    }
+    
+    private func calculateSliceChange(accumulatedDistance: CGFloat, direction: Int, velocity: CGFloat, sensitivity: Float) -> Int {
+        // Base slice change amount (always 1 for educational viewing - no skipping)
+        let baseChange = 1
+        
+        // Apply plane-aware sensitivity
+        // For educational use: always show every slice, just control frequency
+        return baseChange * direction
+    }
+    
+    private func navigateSlices(by amount: Int) {
         let currentSlice = coordinateSystem.getCurrentSliceIndex(for: plane)
         let totalSlices = coordinateSystem.getMaxSlices(for: plane)
-        let newSlice = max(0, min(totalSlices - 1, currentSlice + direction))
+        let newSlice = max(0, min(totalSlices - 1, currentSlice + amount))
         
         if newSlice != currentSlice {
             coordinateSystem.updateFromSliceScroll(plane: plane, sliceIndex: newSlice)
         }
     }
     
-    private func updateScrollQuality(velocity: CGFloat) {
-        // Update shared state quality based on scroll velocity
+    // MARK: - Quality Control During Scrolling
+    
+    private func startScrollQualityReduction(velocity: CGFloat) {
+        // Determine quality level based on scroll velocity
         let newQuality: Int
-        if velocity > 500 {
-            newQuality = 4  // Quarter quality
-        } else if velocity > 250 {
-            newQuality = 2  // Half quality  
+        if velocity > 800 {
+            newQuality = 4  // Quarter quality for very fast scrolling
+        } else if velocity > 400 {
+            newQuality = 2  // Half quality for medium speed
         } else {
-            newQuality = 1  // Full quality
+            newQuality = 1  // Full quality for slow scrolling
         }
         
-        // Update shared quality for this view's rendering
-        if newQuality != sharedState.renderQuality {
+        // Update shared quality state
+        if sharedState.renderQuality != newQuality {
             sharedState.renderQuality = newQuality
-            
-            // Reset to full quality after short delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                if sharedState.renderQuality != 1 {
-                    sharedState.renderQuality = 1
-                }
+        }
+    }
+    
+    private func restoreScrollQuality() {
+        // Restore full quality after a brief delay to avoid flickering
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            if sharedState.renderQuality != 1 {
+                sharedState.renderQuality = 1
             }
         }
+    }
+    
+    // MARK: - Legacy Method (keep for compatibility)
+    
+    private func updateScrollQuality(velocity: CGFloat) {
+        // This method is called from the old implementation
+        // Redirect to new implementation
+        startScrollQualityReduction(velocity: velocity)
     }
     
     // MARK: - View Components
