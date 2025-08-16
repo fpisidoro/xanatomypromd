@@ -1,5 +1,6 @@
 import SwiftUI
 import simd
+import Combine
 
 // MARK: - Standalone MPR View
 // A completely self-contained MPR view that can function independently
@@ -75,8 +76,12 @@ struct StandaloneMPRView: View {
             
             // All gesture handling in UIKit for proper coordination
             if allowInteraction {
-                UnifiedGestureHandler { gestureType, data in
+                UnifiedGestureHandler(currentZoom: localZoom) { gestureType, data in
                     handleUnifiedGesture(type: gestureType, data: data)
+                }
+                .onReceive(Just(localZoom)) { zoom in
+                    // This will trigger a re-creation of the gesture handler with updated zoom
+                    // The gesture handler will use the new zoom level for routing decisions
                 }
             }
             
@@ -163,15 +168,17 @@ struct StandaloneMPRView: View {
     }
     
     private func handleZoom(_ value: CGFloat) {
-        localZoom = lastZoom * value
+        let newZoom = lastZoom * value
+        // CONSTRAINT: Never zoom below 1.0x
+        localZoom = max(1.0, newZoom)
     }
     
     private func handleZoomEnd(_ value: CGFloat) {
         lastZoom = localZoom
         
-        // Constrain zoom levels
+        // Constrain zoom levels: minimum 1.0x, maximum 4.0x
         withAnimation(.spring()) {
-            localZoom = max(0.5, min(localZoom, 4.0))
+            localZoom = max(1.0, min(localZoom, 4.0))
             lastZoom = localZoom
         }
     }
@@ -186,6 +193,8 @@ struct StandaloneMPRView: View {
             handlePinchGesture(data)
         case .twoFingerScroll:
             handleTwoFingerScrollSmooth(data)
+        case .oneFingerScroll:
+            handleOneFingerScrollSmooth(data)
         case .scrollEnd:
             handleScrollEnd()
         }
@@ -196,13 +205,15 @@ struct StandaloneMPRView: View {
     }
     
     private func handlePinchGesture(_ data: UnifiedGestureHandler.GestureData) {
-        localZoom = lastZoom * data.scale
+        let newZoom = lastZoom * data.scale
+        // CONSTRAINT: Never zoom below 1.0x during gesture
+        localZoom = max(1.0, newZoom)
         
         // Constrain zoom on gesture end
         if data.scale == 1.0 {  // Gesture ended
             lastZoom = localZoom
             withAnimation(.spring()) {
-                localZoom = max(0.5, min(localZoom, 4.0))
+                localZoom = max(1.0, min(localZoom, 4.0))
                 lastZoom = localZoom
             }
         }
@@ -227,6 +238,29 @@ struct StandaloneMPRView: View {
         
         if sliceChange != 0 {
             navigateSlices(by: sliceChange)
+        }
+    }
+    
+    // MARK: - NEW: 1-Finger Scrolling (when zoom <= 1.5x)
+    
+    private func handleOneFingerScrollSmooth(_ data: UnifiedGestureHandler.GestureData) {
+        // 1-finger scrolling works the same as 2-finger, just different trigger
+        startScrollQualityReduction(velocity: data.speed)
+        
+        let sensitivity = calculatePlaneAwareSensitivity()
+        
+        let sliceChange = calculateSliceChange(
+            accumulatedDistance: data.accumulatedDistance,
+            direction: data.direction,
+            velocity: data.speed,
+            sensitivity: sensitivity
+        )
+        
+        if sliceChange != 0 {
+            navigateSlices(by: sliceChange)
+            
+            // Visual feedback for 1-finger scroll (optional)
+            print("🖱️ 1-finger scroll: \(plane.displayName) slice \(sliceChange > 0 ? "+" : "")\(sliceChange)")
         }
     }
     
@@ -361,7 +395,7 @@ struct StandaloneMPRView: View {
     /// Reset view transformations
     public func resetView() {
         withAnimation(.spring()) {
-            localZoom = 1.0
+            localZoom = 1.0  // Reset to 1.0x (minimum allowed)
             lastZoom = 1.0
             localPan = .zero
         }

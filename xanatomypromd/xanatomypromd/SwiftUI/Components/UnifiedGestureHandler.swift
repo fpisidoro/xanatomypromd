@@ -6,9 +6,10 @@ import UIKit
 
 struct UnifiedGestureHandler: UIViewRepresentable {
     let onGesture: (GestureType, GestureData) -> Void
+    let currentZoom: CGFloat  // NEW: Current zoom level for gesture routing
     
     enum GestureType {
-        case pan, pinch, twoFingerScroll, scrollEnd
+        case pan, pinch, twoFingerScroll, scrollEnd, oneFingerScroll  // NEW: oneFingerScroll
     }
     
     struct GestureData {
@@ -54,22 +55,34 @@ struct UnifiedGestureHandler: UIViewRepresentable {
     func updateUIView(_ uiView: UIView, context: Context) {}
     
     func makeCoordinator() -> Coordinator {
-        Coordinator(onGesture: onGesture)
+        Coordinator(onGesture: onGesture, currentZoom: currentZoom)
     }
     
     class Coordinator: NSObject, UIGestureRecognizerDelegate {
         let onGesture: (GestureType, GestureData) -> Void
+        private var currentZoom: CGFloat
         
         // 2-finger scroll state tracking
         private var scrollAccumulator: CGFloat = 0
         private var lastScrollTranslation: CGFloat = 0
         private var isScrolling = false
         
+        // 1-finger scroll state tracking
+        private var oneFingerScrollAccumulator: CGFloat = 0
+        private var lastOneFingerTranslation: CGFloat = 0
+        
         // Distance thresholds for different slice counts
         private let baseScrollThreshold: CGFloat = 15  // pixels needed to trigger slice change
+        private let zoomThresholdForPan: CGFloat = 1.5  // Above this zoom, 1-finger becomes pan
         
-        init(onGesture: @escaping (GestureType, GestureData) -> Void) {
+        init(onGesture: @escaping (GestureType, GestureData) -> Void, currentZoom: CGFloat) {
             self.onGesture = onGesture
+            self.currentZoom = currentZoom
+        }
+        
+        // Update zoom level for gesture routing decisions
+        func updateZoom(_ zoom: CGFloat) {
+            self.currentZoom = zoom
         }
         
         // MARK: - UIGestureRecognizerDelegate
@@ -84,16 +97,80 @@ struct UnifiedGestureHandler: UIViewRepresentable {
             let translation = gesture.translation(in: gesture.view)
             let velocity = gesture.velocity(in: gesture.view)
             
-            let data = GestureData(
-                translation: translation,
-                velocity: velocity,
-                scale: 1.0,
-                direction: 0,
-                speed: 0,
-                accumulatedDistance: 0
-            )
+            // Determine behavior based on zoom level
+            if currentZoom <= zoomThresholdForPan {
+                // At default zoom (1.0x to 1.5x): 1-finger scroll
+                handleOneFingerScroll(gesture: gesture, translation: translation, velocity: velocity)
+            } else {
+                // Zoomed in (>1.5x): 1-finger pan
+                let data = GestureData(
+                    translation: translation,
+                    velocity: velocity,
+                    scale: 1.0,
+                    direction: 0,
+                    speed: 0,
+                    accumulatedDistance: 0
+                )
+                
+                onGesture(.pan, data)
+            }
+        }
+        
+        private func handleOneFingerScroll(gesture: UIPanGestureRecognizer, translation: CGPoint, velocity: CGPoint) {
+            // Only handle primarily vertical movement for slice scrolling (like 2-finger)
+            let isVerticalGesture = abs(translation.y) > abs(translation.x) * 0.7
             
-            onGesture(.pan, data)
+            if isVerticalGesture {
+                switch gesture.state {
+                case .began:
+                    oneFingerScrollAccumulator = 0
+                    lastOneFingerTranslation = translation.y
+                    
+                case .changed:
+                    let deltaY = translation.y - lastOneFingerTranslation
+                    oneFingerScrollAccumulator += abs(deltaY)
+                    
+                    // Only trigger slice change when accumulated enough distance
+                    if oneFingerScrollAccumulator >= baseScrollThreshold {
+                        let direction = translation.y > lastOneFingerTranslation ? 1 : -1
+                        let speed = abs(velocity.y)
+                        
+                        let data = GestureData(
+                            translation: CGPoint(x: 0, y: deltaY),
+                            velocity: CGPoint(x: 0, y: velocity.y),
+                            scale: 1.0,
+                            direction: direction,
+                            speed: speed,
+                            accumulatedDistance: oneFingerScrollAccumulator
+                        )
+                        
+                        onGesture(.oneFingerScroll, data)
+                        
+                        // Reset accumulator after triggering slice change
+                        oneFingerScrollAccumulator = 0
+                        lastOneFingerTranslation = translation.y
+                    }
+                    
+                case .ended, .cancelled:
+                    oneFingerScrollAccumulator = 0
+                    lastOneFingerTranslation = 0
+                    
+                default:
+                    break
+                }
+            } else {
+                // Horizontal 1-finger at low zoom = pan (for slight adjustments)
+                let data = GestureData(
+                    translation: translation,
+                    velocity: velocity,
+                    scale: 1.0,
+                    direction: 0,
+                    speed: 0,
+                    accumulatedDistance: 0
+                )
+                
+                onGesture(.pan, data)
+            }
         }
         
         @objc func handleTwoFingerPan(_ gesture: UIPanGestureRecognizer) {
