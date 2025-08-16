@@ -76,9 +76,12 @@ struct StandaloneMPRView: View {
             
             // All gesture handling in UIKit for proper coordination
             if allowInteraction {
-                UnifiedGestureHandler(currentZoom: localZoom) { gestureType, data in
-                    handleUnifiedGesture(type: gestureType, data: data)
-                }
+                UnifiedGestureHandler(
+                    onGesture: { gestureType, data in
+                        handleUnifiedGesture(type: gestureType, data: data)
+                    },
+                    currentZoom: localZoom
+                )
                 .onReceive(Just(localZoom)) { zoom in
                     // This will trigger a re-creation of the gesture handler with updated zoom
                     // The gesture handler will use the new zoom level for routing decisions
