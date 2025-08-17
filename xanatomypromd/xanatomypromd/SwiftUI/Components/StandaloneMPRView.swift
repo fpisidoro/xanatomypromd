@@ -58,25 +58,22 @@ struct StandaloneMPRView: View {
     // MARK: - Body
     
     var body: some View {
-        let mprView = LayeredMPRView(
-            coordinateSystem: coordinateSystem,
-            plane: plane,
-            windowLevel: sharedState.windowLevel,
-            crosshairAppearance: sharedState.crosshairSettings,
-            roiSettings: sharedState.roiSettings,
-            volumeData: volumeData,
-            roiData: roiData,
-            viewSize: viewSize,
-            allowInteraction: false,
-            sharedState: sharedState
-        )
-        
-        return ZStack {
-            mprView
-                .scaleEffect(localZoom)
-                .offset(localPan)
+        ZStack {
+            LayeredMPRView(
+                coordinateSystem: coordinateSystem,
+                plane: plane,
+                windowLevel: sharedState.windowLevel,
+                crosshairAppearance: sharedState.crosshairSettings,
+                roiSettings: sharedState.roiSettings,
+                volumeData: volumeData,
+                roiData: roiData,
+                viewSize: viewSize,
+                allowInteraction: false,
+                sharedState: sharedState
+            )
+            .scaleEffect(localZoom)
+            .offset(localPan)
             
-            // All gesture handling in UIKit for proper coordination
             if allowInteraction {
                 UnifiedGestureHandler(
                     onGesture: handleUnifiedGesture,
@@ -87,15 +84,12 @@ struct StandaloneMPRView: View {
                 )
             }
             
-            // View label overlay
             viewLabelOverlay
-        }
-        .onAppear {
-            updateBaselineZoom()
         }
         .frame(width: viewSize.width, height: viewSize.height)
         .clipped()
-        .background(Color.black as Color)
+        .background(.black)
+        .onAppear { updateBaselineZoom() }
     }
     
     // MARK: - Baseline Zoom Calculation
