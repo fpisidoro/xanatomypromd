@@ -161,7 +161,10 @@ struct XAnatomyProMainView: View {
                             width: geometry.size.width,
                             height: geometry.size.height * 0.7
                         ),
-                        volumeDimensions: dataManager.volumeData?.dimensions ?? SIMD3<Int32>(512, 512, 53),
+                        volumeDimensions: {
+                            let dims = dataManager.volumeData?.dimensions ?? SIMD3<Int>(512, 512, 53)
+                            return SIMD3<Int32>(Int32(dims.x), Int32(dims.y), Int32(dims.z))
+                        }(),
                         currentPlane: currentPlane
                     )
                 )
@@ -451,8 +454,8 @@ struct XAnatomyProMainView: View {
     }
     
     private func handlePanGesture(_ data: UnifiedGestureHandler.GestureData) {
-        // Handle pan/drag for view movement
-        dragOffset = data.translation
+        // Handle pan/drag for view movement (convert CGPoint to CGSize)
+        dragOffset = CGSize(width: data.translation.x, height: data.translation.y)
     }
     
     private func handleTwoFingerScroll(_ data: UnifiedGestureHandler.GestureData) {
