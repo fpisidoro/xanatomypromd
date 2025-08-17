@@ -95,10 +95,10 @@ struct StandaloneMPRView: View {
         .onAppear {
             updateViewStateConfiguration()
         }
-        .onChange(of: viewSize) { (newSize: CGSize) in
+        .onChange(of: viewSize) { _ in
             updateViewStateConfiguration()
         }
-        .onChange(of: volumeData?.dimensions) { (newDimensions: SIMD3<Int32>?) in
+        .onChange(of: volumeData?.dimensions) { _ in
             updateViewStateConfiguration()
         }
     }
