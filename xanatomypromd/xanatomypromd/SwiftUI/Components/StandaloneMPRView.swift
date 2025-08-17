@@ -1,6 +1,5 @@
 import SwiftUI
 import simd
-import Combine
 
 // MARK: - Standalone MPR View
 // A completely self-contained MPR view that can function independently
@@ -79,20 +78,12 @@ struct StandaloneMPRView: View {
             // All gesture handling in UIKit for proper coordination
             if allowInteraction {
                 UnifiedGestureHandler(
-                    onGesture: { gestureType, data in
-                        handleUnifiedGesture(type: gestureType, data: data)
-                    },
-                    onZoomChange: { newZoom in
-                        handleZoomChange(newZoom)
-                    },
+                    onGesture: handleUnifiedGesture,
+                    onZoomChange: handleZoomChange,
                     viewSize: viewSize,
                     volumeDimensions: volumeData?.dimensions ?? SIMD3<Int32>(512, 512, 53),
                     currentPlane: plane
                 )
-                .onReceive(Just(localZoom)) { zoom in
-                    // This will trigger a re-creation of the gesture handler with updated zoom
-                    // The gesture handler will use the new zoom level for routing decisions
-                }
             }
             
             // View label overlay
