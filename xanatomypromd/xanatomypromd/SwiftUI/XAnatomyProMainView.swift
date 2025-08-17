@@ -49,11 +49,32 @@ struct XAnatomyProMainView: View {
                     // Main viewing area
                     mainViewingArea(geometry: geometry)
                     
-                    // Controls (collapsible)
-                    if showingControls {
-                        controlsArea
-                            .transition(.move(edge: .bottom))
+                    // TEST BUTTONS
+                    HStack {
+                        Button("AXIAL") { currentPlane = .axial; show3D = false }
+                            .foregroundColor(.blue)
+                            .padding()
+                        Button("SAGITTAL") { currentPlane = .sagittal; show3D = false }
+                            .foregroundColor(.blue)
+                            .padding()
+                        Button("CORONAL") { currentPlane = .coronal; show3D = false }
+                            .foregroundColor(.blue)
+                            .padding()
+                        Button("3D") { show3D = true }
+                            .foregroundColor(.blue)
+                            .padding()
+                        
+                        Button("BONE") { sharedViewingState.setWindowLevel(.bone) }
+                            .foregroundColor(.red)
+                            .padding()
+                        Button("LUNG") { sharedViewingState.setWindowLevel(.lung) }
+                            .foregroundColor(.red)
+                            .padding()
+                        Button("SOFT") { sharedViewingState.setWindowLevel(.softTissue) }
+                            .foregroundColor(.red)
+                            .padding()
                     }
+                    .background(Color.white)
                 }
                 .background(Color.black)
                 .navigationBarHidden(true)
@@ -187,21 +208,28 @@ struct XAnatomyProMainView: View {
         .frame(height: geometry.size.height * 0.7)
     }
     
-    // MARK: - Controls Area
-    
     private var controlsArea: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                planeSelectionControls
-                windowingControls
-                sliceNavigationControls
-                displayOptionsControls
-                actionButtons
-            }
-            .padding()
+        HStack(spacing: 20) {
+            Button("Axial") { currentPlane = .axial; show3D = false }
+                .foregroundColor(currentPlane == .axial && !show3D ? .blue : .white)
+            Button("Sagittal") { currentPlane = .sagittal; show3D = false }
+                .foregroundColor(currentPlane == .sagittal && !show3D ? .blue : .white)
+            Button("Coronal") { currentPlane = .coronal; show3D = false }
+                .foregroundColor(currentPlane == .coronal && !show3D ? .blue : .white)
+            Button("3D") { show3D = true }
+                .foregroundColor(show3D ? .blue : .white)
+            
+            Spacer()
+            
+            Button("Bone") { sharedViewingState.setWindowLevel(.bone) }
+                .foregroundColor(.white)
+            Button("Lung") { sharedViewingState.setWindowLevel(.lung) }
+                .foregroundColor(.white)
+            Button("Soft") { sharedViewingState.setWindowLevel(.softTissue) }
+                .foregroundColor(.white)
         }
-        .background(Color.gray.opacity(0.1))
-        .frame(maxHeight: 300)
+        .padding()
+        .background(Color.black.opacity(0.8))
     }
     
     // MARK: - Control Sections
