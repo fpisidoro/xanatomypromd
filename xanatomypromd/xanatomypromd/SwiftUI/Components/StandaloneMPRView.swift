@@ -59,6 +59,8 @@ struct StandaloneMPRView: View {
     
     var body: some View {
         ZStack {
+            // Temporarily comment out to isolate compiler issue
+            /*
             LayeredMPRView(
                 coordinateSystem: coordinateSystem,
                 plane: plane,
@@ -73,6 +75,12 @@ struct StandaloneMPRView: View {
             )
             .scaleEffect(localZoom)
             .offset(localPan)
+            */
+            
+            Rectangle()
+                .fill(Color.red)
+                .scaleEffect(localZoom)
+                .offset(localPan)
             
             if allowInteraction {
                 UnifiedGestureHandler(
