@@ -17,9 +17,8 @@ struct XAnatomyProMainView: View {
     @State private var isLoading = true
     @State private var showingControls = true
     
-    // View configuration
+    // View configuration (updated for unified gesture system)
     @State private var scale: CGFloat = 1.0
-    @State private var lastScale: CGFloat = 1.0
     @State private var dragOffset: CGSize = .zero
     
     // Adaptive Quality for Performance
@@ -153,8 +152,19 @@ struct XAnatomyProMainView: View {
                 .scaleEffect(scale)
                 .offset(dragOffset)
                 .clipped()
-                .gesture(panGesture)  // Single finger pan
-                .gesture(zoomGesture)  // Pinch to zoom
+                .overlay(
+                    // PURE UIKIT GESTURE HANDLING
+                    UnifiedGestureHandler(
+                        onGesture: handleUnifiedGesture,
+                        onZoomChange: handleZoomChange,
+                        viewSize: CGSize(
+                            width: geometry.size.width,
+                            height: geometry.size.height * 0.7
+                        ),
+                        volumeDimensions: dataManager.volumeData?.dimensions ?? SIMD3<Int32>(512, 512, 53),
+                        currentPlane: currentPlane
+                    )
+                )
                 .onAppear {
                     // Initialize coordinate system when volume data is loaded
                     if let volumeData = dataManager.volumeData {
@@ -409,53 +419,84 @@ struct XAnatomyProMainView: View {
         }
     }
     
-    // MARK: - Gesture Handlers
+    // MARK: - Unified Gesture Handlers (Pure UIKit)
     
-    // Single finger pan for view movement
-    private var panGesture: some Gesture {
-        DragGesture(minimumDistance: 10)
-            .onChanged { value in
-                dragOffset = value.translation
-            }
-            .onEnded { _ in
-                withAnimation(.spring()) {
-                    dragOffset = .zero
-                }
-            }
+    private func handleUnifiedGesture(_ type: UnifiedGestureHandler.GestureType, _ data: UnifiedGestureHandler.GestureData) {
+        switch type {
+        case .pan:
+            handlePanGesture(data)
+            
+        case .pinch:
+            // Pinch is now handled internally by UnifiedGestureHandler
+            // Scale is updated via handleZoomChange callback
+            break
+            
+        case .twoFingerScroll:
+            handleTwoFingerScroll(data)
+            
+        case .oneFingerScroll:
+            handleOneFingerScroll(data)
+            
+        case .scrollEnd:
+            handleScrollEnd(data)
+            
+        case .zoomEnd:
+            handleZoomEnd(data)
+        }
     }
     
-    // MARK: - Two-Finger Scroll Handler
+    private func handleZoomChange(_ newZoom: CGFloat) {
+        // Direct zoom update from UnifiedGestureHandler
+        scale = newZoom
+    }
     
-    private func handleTwoFingerScroll(translation: CGFloat, velocity: CGFloat) {
+    private func handlePanGesture(_ data: UnifiedGestureHandler.GestureData) {
+        // Handle pan/drag for view movement
+        dragOffset = data.translation
+    }
+    
+    private func handleTwoFingerScroll(_ data: UnifiedGestureHandler.GestureData) {
         // Update scroll velocity for adaptive quality
-        updateScrollVelocity(Float(velocity))
+        updateScrollVelocity(Float(data.speed))
         
-        // Calculate slice delta from translation
-        let sensitivity: CGFloat = 5.0  // Pixels per slice
-        let sliceDelta = Int(translation / sensitivity)
+        // Navigate slices
+        let currentSlice = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
+        let newSlice = currentSlice - data.direction  // Negative for natural scrolling
+        let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
+        let clampedSlice = max(0, min(newSlice, maxSlices - 1))
         
-        if sliceDelta != 0 {
-            let currentSlice = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
-            let newSlice = currentSlice - sliceDelta  // Negative for natural scrolling
-            let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
-            let clampedSlice = max(0, min(newSlice, maxSlices - 1))
-            
-            if clampedSlice != currentSlice {
-                coordinateSystem.updateFromSliceScroll(plane: currentPlane, sliceIndex: clampedSlice)
+        if clampedSlice != currentSlice {
+            coordinateSystem.updateFromSliceScroll(plane: currentPlane, sliceIndex: clampedSlice)
+        }
+    }
+    
+    private func handleOneFingerScroll(_ data: UnifiedGestureHandler.GestureData) {
+        // Same logic as two-finger scroll (1-finger scroll at low zoom)
+        updateScrollVelocity(Float(data.speed))
+        
+        let currentSlice = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
+        let newSlice = currentSlice - data.direction
+        let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
+        let clampedSlice = max(0, min(newSlice, maxSlices - 1))
+        
+        if clampedSlice != currentSlice {
+            coordinateSystem.updateFromSliceScroll(plane: currentPlane, sliceIndex: clampedSlice)
+        }
+    }
+    
+    private func handleScrollEnd(_ data: UnifiedGestureHandler.GestureData) {
+        // Restore quality after scroll stops
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            withAnimation(.easeOut(duration: 0.2)) {
+                self.scrollVelocity = 0.0
+                self.currentQuality = .full
             }
         }
     }
     
-    private var zoomGesture: some Gesture {
-        MagnificationGesture()
-            .onChanged { value in scale = lastScale * value }
-            .onEnded { value in
-                lastScale = scale
-                withAnimation(.spring()) {
-                    scale = max(0.5, min(scale, 3.0))
-                    lastScale = scale
-                }
-            }
+    private func handleZoomEnd(_ data: UnifiedGestureHandler.GestureData) {
+        // Any cleanup after zoom gesture ends
+        print("🔄 Zoom gesture completed at \(String(format: "%.2f", data.zoomLevel))x")
     }
     
     // MARK: - Action Methods
@@ -489,10 +530,16 @@ struct XAnatomyProMainView: View {
     
     private func resetViewTransform() {
         withAnimation(.spring()) {
-            scale = 1.0
-            lastScale = 1.0
+            // Reset drag offset immediately
             dragOffset = .zero
         }
+        
+        // Reset zoom to baseline (will be handled by UnifiedGestureHandler)
+        // Note: The gesture handler will automatically reset to its calculated baseline
+        print("🔄 Reset View Transform requested")
+        
+        // TODO: Add method to access gesture handler coordinator for baseline reset
+        // For now, scale will reset to baseline on next gesture or view update
     }
     
     private func centerCrosshair() {

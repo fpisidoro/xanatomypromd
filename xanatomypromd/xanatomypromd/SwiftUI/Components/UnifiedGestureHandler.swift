@@ -1,16 +1,18 @@
 import SwiftUI
 import UIKit
 
-// MARK: - Unified Gesture Handler with Smooth Scrolling
-// Fixed: Distance-based thresholds, velocity damping, proper gesture state tracking
+// MARK: - Unified Gesture Handler with Integrated Zoom Management
+// Pure UIKit approach - eliminates SwiftUI/UIKit gesture conflicts
 
 struct UnifiedGestureHandler: UIViewRepresentable {
     let onGesture: (GestureType, GestureData) -> Void
-    let currentZoom: CGFloat  // NEW: Current zoom level for gesture routing
-    let baselineZoom: CGFloat  // NEW: Baseline zoom for threshold calculation
+    let onZoomChange: (CGFloat) -> Void  // NEW: Direct zoom callback
+    let viewSize: CGSize  // NEW: For baseline calculation
+    let volumeDimensions: SIMD3<Int32>  // NEW: For baseline calculation
+    let currentPlane: MPRPlane  // NEW: For plane-aware baseline
     
     enum GestureType {
-        case pan, pinch, twoFingerScroll, scrollEnd, oneFingerScroll  // NEW: oneFingerScroll
+        case pan, pinch, twoFingerScroll, scrollEnd, oneFingerScroll, zoomEnd  // NEW: zoomEnd
     }
     
     struct GestureData {
@@ -20,8 +22,10 @@ struct UnifiedGestureHandler: UIViewRepresentable {
         let direction: Int
         let speed: CGFloat
         let accumulatedDistance: CGFloat
+        let zoomLevel: CGFloat  // NEW: Current zoom level
+        let baselineZoom: CGFloat  // NEW: Calculated baseline
         
-        static let zero = GestureData(translation: .zero, velocity: .zero, scale: 1.0, direction: 0, speed: 0, accumulatedDistance: 0)
+        static let zero = GestureData(translation: .zero, velocity: .zero, scale: 1.0, direction: 0, speed: 0, accumulatedDistance: 0, zoomLevel: 1.0, baselineZoom: 1.0)
     }
     
     func makeUIView(context: Context) -> UIView {
@@ -54,18 +58,38 @@ struct UnifiedGestureHandler: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: UIView, context: Context) {
-        // Update the coordinator with the current zoom level
-        context.coordinator.updateZoom(currentZoom)
+        // Update coordinator with current parameters
+        context.coordinator.updateParameters(
+            viewSize: viewSize,
+            volumeDimensions: volumeDimensions,
+            currentPlane: currentPlane
+        )
     }
     
     func makeCoordinator() -> Coordinator {
-        Coordinator(onGesture: onGesture, currentZoom: currentZoom, baselineZoom: baselineZoom)
+        Coordinator(
+            onGesture: onGesture,
+            onZoomChange: onZoomChange,
+            viewSize: viewSize,
+            volumeDimensions: volumeDimensions,
+            currentPlane: currentPlane
+        )
     }
     
     class Coordinator: NSObject, UIGestureRecognizerDelegate {
         let onGesture: (GestureType, GestureData) -> Void
-        private var currentZoom: CGFloat
-        private var baselineZoom: CGFloat
+        let onZoomChange: (CGFloat) -> Void
+        
+        // Zoom state management
+        private var currentZoom: CGFloat = 1.0
+        private var lastZoom: CGFloat = 1.0
+        private var baselineZoom: CGFloat = 1.0
+        private var isPinching = false
+        
+        // View parameters for baseline calculation
+        private var viewSize: CGSize
+        private var volumeDimensions: SIMD3<Int32>
+        private var currentPlane: MPRPlane
         
         // 2-finger scroll state tracking
         private var scrollAccumulator: CGFloat = 0
@@ -79,25 +103,91 @@ struct UnifiedGestureHandler: UIViewRepresentable {
         // Distance thresholds for different slice counts
         private let baseScrollThreshold: CGFloat = 15  // pixels needed to trigger slice change
         
-        init(onGesture: @escaping (GestureType, GestureData) -> Void, currentZoom: CGFloat, baselineZoom: CGFloat) {
+        init(
+            onGesture: @escaping (GestureType, GestureData) -> Void,
+            onZoomChange: @escaping (CGFloat) -> Void,
+            viewSize: CGSize,
+            volumeDimensions: SIMD3<Int32>,
+            currentPlane: MPRPlane
+        ) {
             self.onGesture = onGesture
-            self.currentZoom = currentZoom
-            self.baselineZoom = baselineZoom
+            self.onZoomChange = onZoomChange
+            self.viewSize = viewSize
+            self.volumeDimensions = volumeDimensions
+            self.currentPlane = currentPlane
+            super.init()
+            
+            // Calculate initial baseline
+            updateBaseline()
+            currentZoom = baselineZoom
+            lastZoom = baselineZoom
         }
         
-        // Update zoom level for gesture routing decisions
-        func updateZoom(_ zoom: CGFloat) {
-            let zoomThresholdForPan = baselineZoom * 1.5  // Relative threshold
+        // Update parameters for baseline recalculation
+        func updateParameters(viewSize: CGSize, volumeDimensions: SIMD3<Int32>, currentPlane: MPRPlane) {
+            let oldBaseline = baselineZoom
             
-            if abs(self.currentZoom - zoom) > 0.01 {  // Only log significant changes
-                let oldBehavior = self.currentZoom <= zoomThresholdForPan ? "scroll" : "pan"
-                let newBehavior = zoom <= zoomThresholdForPan ? "scroll" : "pan"
+            self.viewSize = viewSize
+            self.volumeDimensions = volumeDimensions
+            self.currentPlane = currentPlane
+            
+            updateBaseline()
+            
+            // If baseline changed significantly, update current zoom proportionally
+            if abs(oldBaseline - baselineZoom) > 0.01 && oldBaseline > 0 {
+                let ratio = baselineZoom / oldBaseline
+                currentZoom *= ratio
+                lastZoom *= ratio
                 
-                if oldBehavior != newBehavior {
-                    print("🔄 1-finger behavior: \(oldBehavior) → \(newBehavior) (zoom: \(String(format: "%.1f", zoom))x, threshold: \(String(format: "%.1f", zoomThresholdForPan))x)")
-                }
+                print("📐 Baseline changed: \(String(format: "%.2f", oldBaseline))x → \(String(format: "%.2f", baselineZoom))x, zoom adjusted: \(String(format: "%.2f", currentZoom))x")
+                onZoomChange(currentZoom)
             }
-            self.currentZoom = zoom
+        }
+        
+        // MARK: - Baseline Zoom Calculation
+        
+        private func updateBaseline() {
+            baselineZoom = calculateFitToViewBaseline()
+            print("🎯 Baseline calculated: \(String(format: "%.2f", baselineZoom))x for \(currentPlane.displayName) (\(Int(viewSize.width))×\(Int(viewSize.height)))")
+        }
+        
+        private func calculateFitToViewBaseline() -> CGFloat {
+            guard viewSize.width > 0 && viewSize.height > 0 else { return 1.0 }
+            
+            // Get plane-specific image dimensions (these are the actual image pixel dimensions)
+            let imageDimensions = getPlaneImageDimensions()
+            
+            // Calculate scale factors for both dimensions
+            let scaleX = viewSize.width / imageDimensions.width
+            let scaleY = viewSize.height / imageDimensions.height
+            
+            // Use the smaller scale factor to ensure the image fits completely
+            let fitScale = min(scaleX, scaleY)
+            
+            // Apply 75% fill factor and bounds
+            let targetFillRatio: CGFloat = 0.75
+            let baseline = fitScale * targetFillRatio
+            
+            // Apply reasonable bounds
+            let minBaseline: CGFloat = 0.1
+            let maxBaseline: CGFloat = 2.5
+            
+            return max(minBaseline, min(baseline, maxBaseline))
+        }
+        
+        private func getPlaneImageDimensions() -> CGSize {
+            // Convert volume dimensions to image dimensions based on plane
+            switch currentPlane {
+            case .axial:
+                // Axial: width=X, height=Y
+                return CGSize(width: CGFloat(volumeDimensions.x), height: CGFloat(volumeDimensions.y))
+            case .sagittal:
+                // Sagittal: width=Y, height=Z
+                return CGSize(width: CGFloat(volumeDimensions.y), height: CGFloat(volumeDimensions.z))
+            case .coronal:
+                // Coronal: width=X, height=Z
+                return CGSize(width: CGFloat(volumeDimensions.x), height: CGFloat(volumeDimensions.z))
+            }
         }
         
         // MARK: - UIGestureRecognizerDelegate
@@ -132,7 +222,9 @@ struct UnifiedGestureHandler: UIViewRepresentable {
                     scale: 1.0,
                     direction: 0,
                     speed: 0,
-                    accumulatedDistance: 0
+                    accumulatedDistance: 0,
+                    zoomLevel: currentZoom,
+                    baselineZoom: baselineZoom
                 )
                 
                 onGesture(.pan, data)
@@ -164,7 +256,9 @@ struct UnifiedGestureHandler: UIViewRepresentable {
                             scale: 1.0,
                             direction: direction,
                             speed: speed,
-                            accumulatedDistance: oneFingerScrollAccumulator
+                            accumulatedDistance: oneFingerScrollAccumulator,
+                            zoomLevel: currentZoom,
+                            baselineZoom: baselineZoom
                         )
                         
                         onGesture(.oneFingerScroll, data)
@@ -189,7 +283,9 @@ struct UnifiedGestureHandler: UIViewRepresentable {
                     scale: 1.0,
                     direction: 0,
                     speed: 0,
-                    accumulatedDistance: 0
+                    accumulatedDistance: 0,
+                    zoomLevel: currentZoom,
+                    baselineZoom: baselineZoom
                 )
                 
                 onGesture(.pan, data)
@@ -227,7 +323,9 @@ struct UnifiedGestureHandler: UIViewRepresentable {
                             scale: 1.0,
                             direction: direction,
                             speed: speed,
-                            accumulatedDistance: scrollAccumulator
+                            accumulatedDistance: scrollAccumulator,
+                            zoomLevel: currentZoom,
+                            baselineZoom: baselineZoom
                         )
                         
                         onGesture(.twoFingerScroll, data)
@@ -243,7 +341,16 @@ struct UnifiedGestureHandler: UIViewRepresentable {
                     scrollAccumulator = 0
                     lastScrollTranslation = 0
                     
-                    let data = GestureData.zero
+                    let data = GestureData(
+                        translation: .zero,
+                        velocity: .zero,
+                        scale: 1.0,
+                        direction: 0,
+                        speed: 0,
+                        accumulatedDistance: 0,
+                        zoomLevel: currentZoom,
+                        baselineZoom: baselineZoom
+                    )
                     onGesture(.scrollEnd, data)
                     
                 default:
@@ -257,7 +364,9 @@ struct UnifiedGestureHandler: UIViewRepresentable {
                     scale: 1.0,
                     direction: 0,
                     speed: 0,
-                    accumulatedDistance: 0
+                    accumulatedDistance: 0,
+                    zoomLevel: currentZoom,
+                    baselineZoom: baselineZoom
                 )
                 
                 onGesture(.pan, data)
@@ -265,16 +374,79 @@ struct UnifiedGestureHandler: UIViewRepresentable {
         }
         
         @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
-            let data = GestureData(
-                translation: .zero,
-                velocity: .zero,
-                scale: gesture.scale,
-                direction: 0,
-                speed: 0,
-                accumulatedDistance: 0
-            )
-            
-            onGesture(.pinch, data)
+            switch gesture.state {
+            case .began:
+                isPinching = true
+                // CRITICAL FIX: Sync lastZoom to currentZoom at gesture start
+                lastZoom = currentZoom
+                print("🔄 Pinch START: lastZoom synced to \(String(format: "%.2f", lastZoom))x, scale: \(String(format: "%.2f", gesture.scale))")
+                
+            case .changed:
+                // Calculate new zoom based on synced lastZoom
+                let newZoom = lastZoom * gesture.scale
+                
+                // Apply zoom constraints
+                let minZoom = baselineZoom * 0.5
+                let maxZoom = baselineZoom * 4.0
+                currentZoom = max(minZoom, min(newZoom, maxZoom))
+                
+                // Notify zoom change
+                onZoomChange(currentZoom)
+                
+                // Send gesture data
+                let data = GestureData(
+                    translation: .zero,
+                    velocity: .zero,
+                    scale: gesture.scale,
+                    direction: 0,
+                    speed: 0,
+                    accumulatedDistance: 0,
+                    zoomLevel: currentZoom,
+                    baselineZoom: baselineZoom
+                )
+                
+                onGesture(.pinch, data)
+                
+            case .ended, .cancelled:
+                isPinching = false
+                // Update lastZoom for next gesture
+                lastZoom = currentZoom
+                print("🔄 Pinch END: lastZoom updated to \(String(format: "%.2f", lastZoom))x")
+                
+                // Notify zoom end for any cleanup
+                let data = GestureData(
+                    translation: .zero,
+                    velocity: .zero,
+                    scale: gesture.scale,
+                    direction: 0,
+                    speed: 0,
+                    accumulatedDistance: 0,
+                    zoomLevel: currentZoom,
+                    baselineZoom: baselineZoom
+                )
+                
+                onGesture(.zoomEnd, data)
+                
+            default:
+                break
+            }
+        }
+        
+        // MARK: - Public Interface
+        
+        func getCurrentZoom() -> CGFloat {
+            return currentZoom
+        }
+        
+        func getBaselineZoom() -> CGFloat {
+            return baselineZoom
+        }
+        
+        func resetToBaseline() {
+            currentZoom = baselineZoom
+            lastZoom = baselineZoom
+            onZoomChange(currentZoom)
+            print("🔄 Zoom reset to baseline: \(String(format: "%.2f", baselineZoom))x")
         }
     }
 }
