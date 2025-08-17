@@ -58,22 +58,23 @@ struct StandaloneMPRView: View {
     // MARK: - Body
     
     var body: some View {
-        ZStack {
-            // The core layered MPR view
-            LayeredMPRView(
-                coordinateSystem: coordinateSystem,
-                plane: plane,
-                windowLevel: sharedState.windowLevel,  // Synchronized across views
-                crosshairAppearance: sharedState.crosshairSettings,
-                roiSettings: sharedState.roiSettings,
-                volumeData: volumeData,
-                roiData: roiData,
-                viewSize: viewSize,
-                allowInteraction: false,  // We handle interaction at this level
-                sharedState: sharedState  // Pass for quality control
-            )
-            .scaleEffect(localZoom)  // Local zoom per view
-            .offset(localPan)  // Local pan per view
+        let mprView = LayeredMPRView(
+            coordinateSystem: coordinateSystem,
+            plane: plane,
+            windowLevel: sharedState.windowLevel,
+            crosshairAppearance: sharedState.crosshairSettings,
+            roiSettings: sharedState.roiSettings,
+            volumeData: volumeData,
+            roiData: roiData,
+            viewSize: viewSize,
+            allowInteraction: false,
+            sharedState: sharedState
+        )
+        
+        return ZStack {
+            mprView
+                .scaleEffect(localZoom)
+                .offset(localPan)
             
             // All gesture handling in UIKit for proper coordination
             if allowInteraction {
