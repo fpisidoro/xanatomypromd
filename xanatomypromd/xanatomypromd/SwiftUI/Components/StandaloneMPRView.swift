@@ -90,12 +90,12 @@ struct StandaloneMPRView: View {
             // View label overlay
             viewLabelOverlay
         }
-        .frame(width: viewSize.width, height: viewSize.height)
-        .clipped()
-        .background(Color.black)
         .onAppear {
             updateBaselineZoom()
         }
+        .frame(width: viewSize.width, height: viewSize.height)
+        .clipped()
+        .background(Color.black)
     }
     
     // MARK: - Baseline Zoom Calculation
