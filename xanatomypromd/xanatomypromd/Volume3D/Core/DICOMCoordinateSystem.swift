@@ -116,17 +116,36 @@ class DICOMCoordinateSystem: ObservableObject {
         return voxelToWorld(voxelPos)
     }
     
-    /// Get slice index for current position in given plane (for any scan)
+    /// Get slice index for current position in given plane (FIXED: works for any scan)
     func getCurrentSliceIndex(for plane: MPRPlane) -> Int {
+        guard let volumeData = volumeData else { 
+            print("⚠️ No volume data loaded for slice index calculation")
+            return 0 
+        }
+        
         let voxelPos = worldToVoxel(currentWorldPosition)
         let sliceAxis = plane.sliceAxis
+        let maxSlices = volumeData.dimensions[sliceAxis]
         let sliceIndex = Int(round(voxelPos[sliceAxis]))
-        return max(0, min(sliceIndex, volumeDimensions[sliceAxis] - 1))
+        let clampedIndex = max(0, min(sliceIndex, maxSlices - 1))
+        
+        // DEBUG: Log boundary checking for verification
+        if sliceIndex != clampedIndex {
+            print("🔍 BOUNDARY CLAMP: \(plane) axis=\(sliceAxis) raw=\(sliceIndex) clamped=\(clampedIndex) max=\(maxSlices)")
+        }
+        
+        return clampedIndex
     }
     
-    /// Get maximum slices for given plane (for any scan)
+    /// Get maximum slices for given plane (FIXED: fully dynamic)
     func getMaxSlices(for plane: MPRPlane) -> Int {
-        return volumeDimensions[plane.sliceAxis]
+        guard let volumeData = volumeData else { 
+            print("⚠️ No volume data loaded for max slices calculation")
+            return 1 
+        }
+        
+        let maxSlices = volumeData.dimensions[plane.sliceAxis]
+        return maxSlices
     }
     
     /// Convert world position to screen coordinates for given plane and view size

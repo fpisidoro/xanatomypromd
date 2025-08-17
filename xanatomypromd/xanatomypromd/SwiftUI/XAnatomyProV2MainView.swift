@@ -107,33 +107,6 @@ struct XAnatomyProV2MainView: View {
                     if showControls && !isLoading {
                         bottomControls
                     }
-                    
-                    // TEST BUTTONS
-                    HStack {
-                        Button("AXIAL") { selectedSingleViewPlane = .axial }
-                            .foregroundColor(.blue)
-                            .padding()
-                        Button("SAGITTAL") { selectedSingleViewPlane = .sagittal }
-                            .foregroundColor(.blue)
-                            .padding()
-                        Button("CORONAL") { selectedSingleViewPlane = .coronal }
-                            .foregroundColor(.blue)
-                            .padding()
-                        Button("3D") { selectedSingleViewPlane = .threeDimensional }
-                            .foregroundColor(.blue)
-                            .padding()
-                        
-                        Button("BONE") { sharedState.setWindowLevel(.bone) }
-                            .foregroundColor(.red)
-                            .padding()
-                        Button("LUNG") { sharedState.setWindowLevel(.lung) }
-                            .foregroundColor(.red)
-                            .padding()
-                        Button("SOFT") { sharedState.setWindowLevel(.softTissue) }
-                            .foregroundColor(.red)
-                            .padding()
-                    }
-                    .background(Color.white)
                 }
                 
                 persistentControls

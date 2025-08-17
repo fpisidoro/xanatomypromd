@@ -24,11 +24,11 @@ struct MPRParams {
     float slicePosition;      // 0.0 to 1.0
     float windowCenter;
     float windowWidth;
-    uint3 volumeDimensions;
+    uint3 volumeDimensions;   // Dynamic: 53, 500, 1000+ slices
     float3 spacing;
 };
 
-// Hardware-accelerated MPR slice extraction
+// FIXED: Hardware-accelerated MPR slice extraction with universal boundary checking
 kernel void mprSliceExtractionHardware(
     texture3d<short, access::read> volumeTexture [[texture(0)]],
     texture2d<float, access::write> outputTexture [[texture(1)]],
@@ -60,8 +60,27 @@ kernel void mprSliceExtractionHardware(
             break;
     }
     
-    // Sample the volume texture
-    short rawValue = volumeTexture.read(uint3(volumeCoord * float3(params.volumeDimensions))).r;
+    // CRITICAL FIX: Clamp coordinates to prevent texture overflow
+    // For any volume size (53, 500, 1000+ slices), ensure we never exceed bounds
+    volumeCoord = clamp(volumeCoord, 0.0, 0.999);
+    
+    // Convert to integer coordinates with explicit bounds checking
+    uint3 intCoord = uint3(volumeCoord * float3(params.volumeDimensions));
+    
+    // SAFETY: Double-check bounds for any volume size
+    intCoord = min(intCoord, params.volumeDimensions - 1);
+    
+    // Verify coordinates are valid (debug safety)
+    if (intCoord.x >= params.volumeDimensions.x || 
+        intCoord.y >= params.volumeDimensions.y || 
+        intCoord.z >= params.volumeDimensions.z) {
+        // Invalid coordinate - output black instead of crashing
+        outputTexture.write(float4(0.0, 0.0, 0.0, 1.0), gid);
+        return;
+    }
+    
+    // Sample the volume texture safely
+    short rawValue = volumeTexture.read(intCoord).r;
     
     // Convert to Hounsfield Units and apply windowing
     float hounsfield = float(rawValue);
@@ -136,7 +155,7 @@ float2 rayBoxIntersect(float3 rayOrigin, float3 rayDir, float3 boxMin, float3 bo
     return float2(tNear, tFar);
 }
 
-// 3D Volume Rendering - Coronal view with Z rotation
+// FIXED: 3D Volume Rendering with universal bounds checking
 kernel void volumeRender3D(
     texture3d<short, access::read> volumeTexture [[texture(0)]],
     texture2d<float, access::write> outputTexture [[texture(1)]],
@@ -151,33 +170,29 @@ kernel void volumeRender3D(
     // Screen coordinates to normalized device coordinates [-1, 1]
     float2 ndc = (float2(gid) / float2(outputTexture.get_width(), outputTexture.get_height())) * 2.0 - 1.0;
     
-    // Volume dimensions and setup
+    // DYNAMIC: Volume dimensions work for any scan size
     uint3 volumeDim = uint3(volumeTexture.get_width(), volumeTexture.get_height(), volumeTexture.get_depth());
     
-    // CRITICAL: Calculate physical dimensions and aspect ratio
-    float physicalWidthX = float(volumeDim.x) * params.spacingX;   // e.g., 512 * 1.0 = 512mm
-    float physicalHeightZ = float(volumeDim.z) * params.spacingZ;  // e.g., 53 * 3.0 = 159mm
-    float physicalAspectRatio = physicalWidthX / physicalHeightZ;  // e.g., 512/159 = 3.22
+    // CRITICAL: Calculate physical dimensions and aspect ratio for ANY volume
+    float physicalWidthX = float(volumeDim.x) * params.spacingX;
+    float physicalHeightZ = float(volumeDim.z) * params.spacingZ;
+    float physicalAspectRatio = physicalWidthX / physicalHeightZ;
     
     // Use ACTUAL display aspect ratio from display dimensions
     float displayAspectRatio = params.displayWidth / params.displayHeight;
     
-    // Calculate letterboxing to preserve medical accuracy
+    // Calculate letterboxing to preserve medical accuracy for ANY scan
     float2 letterboxScale;
     if (physicalAspectRatio > displayAspectRatio) {
-        // Volume is wider than display - add letterbox top/bottom
         letterboxScale.x = 1.0;
         letterboxScale.y = displayAspectRatio / physicalAspectRatio;
     } else {
-        // Volume is taller than display - add letterbox left/right  
         letterboxScale.x = physicalAspectRatio / displayAspectRatio;
         letterboxScale.y = 1.0;
     }
     
     // Check if we're outside the letterboxed area
-    // letterboxScale represents the actual quad size like in MPR view
     if (abs(ndc.x) > letterboxScale.x || abs(ndc.y) > letterboxScale.y) {
-        // Outside letterbox - render black
         outputTexture.write(float4(0.0, 0.0, 0.0, 1.0), gid);
         return;
     }
@@ -193,23 +208,20 @@ kernel void volumeRender3D(
     float3 accumulatedColor = float3(0.0);
     float accumulatedAlpha = 0.0;
     
-    // Volume center for rotation - in voxel space
+    // Volume center for rotation - in voxel space (adapts to any size)
     float3 volumeCenter = float3(volumeDim) * 0.5;
     
     // Apply Z-axis rotation to viewing direction (calculate once)
     float cosZ = cos(params.rotationZ);
     float sinZ = sin(params.rotationZ);
     
-    // Ray march through volume along Y-axis (anterior-posterior)
-    // Sample uniformly in physical space
+    // ADAPTIVE: Ray march through volume along Y-axis (anterior-posterior)
     float minSpacing = min(min(params.spacingX, params.spacingY), params.spacingZ);
-    float stepSize = minSpacing;  // Step size in physical mm
+    float stepSize = minSpacing;
     int numSteps = int(float(volumeDim.y) * params.spacingY / stepSize);
     
     for (int step = 0; step < numSteps && accumulatedAlpha < 0.95; step++) {
-        // Map normalized NDC to volume space
-        // viewNdc ranges from [-1, 1] after normalization
-        // Add 0.5 offset to sample voxel centers like texture sampling does
+        // Map normalized NDC to volume space (works for any dimensions)
         float3 basePos = float3(
             (viewNdc.x + 1.0) * 0.5 * float(volumeDim.x),
             float(step) * stepSize / params.spacingY,
@@ -225,15 +237,16 @@ kernel void volumeRender3D(
         );
         float3 volumePos = volumeCenter + rotatedOffset;
         
-        // Bounds checking - allow sampling up to but not including volumeDim
-        // This allows values like 52.9 which are valid for interpolation
-        if (volumePos.x < 0 || volumePos.x > float(volumeDim.x - 1) ||
-            volumePos.y < 0 || volumePos.y > float(volumeDim.y - 1) ||
-            volumePos.z < 0 || volumePos.z > float(volumeDim.z - 1)) {
+        // UNIVERSAL BOUNDS CHECKING: Works for 53, 500, 1000+ slices
+        if (volumePos.x < 0 || volumePos.x >= float(volumeDim.x) ||
+            volumePos.y < 0 || volumePos.y >= float(volumeDim.y) ||
+            volumePos.z < 0 || volumePos.z >= float(volumeDim.z)) {
             continue;
         }
         
-        uint3 samplePos = uint3(volumePos);
+        // SAFE CONVERSION: Clamp to valid integer coordinates
+        uint3 samplePos = uint3(clamp(volumePos, 0.0, float3(volumeDim - 1)));
+        
         short rawValue = volumeTexture.read(samplePos).r;
         float hounsfield = float(rawValue);
         
@@ -243,232 +256,29 @@ kernel void volumeRender3D(
         float windowed = clamp((hounsfield - windowMin) / (windowMax - windowMin), 0.0, 1.0);
         
         // Get alpha and color based on tissue type
-        // Current: Peach/warm medical theme
         float alpha = 0.0;
         float3 color = float3(0.0);
         
-//        if (hounsfield > 300) {  // Dense bone
-//            alpha = 0.15;
-//            color = float3(1.0, 1.0, 0.95) * windowed;  // Bright white
-//        } else if (hounsfield > 100) {  // Bone cortex  
-//            alpha = 0.08;
-//            color = float3(1.0, 0.9, 0.8) * windowed;  // Off-white
-//        } else if (hounsfield > 40) {  // Muscle/organs
-//            alpha = 0.25;
-//            color = float3(0.9, 0.3, 0.3) * windowed;  // Reddish
-//        } else if (hounsfield > -10) {  // Soft tissue  
-//            alpha = 0.15;
-//            color = float3(0.8, 0.5, 0.4) * windowed;  // Peach
-//        } else if (hounsfield > -100) {  // Fat
-//            alpha = 0.05;
-//            color = float3(0.9, 0.8, 0.6) * windowed;  // Light yellow
-//        }
-        
-        //ALTERNATIVE COLOR SCHEMES - Uncomment one to try:
-        
-        // SCHEME 1: Cool Blue Medical
+        // Cool Blue Medical scheme
         if (hounsfield > 300) {
             alpha = 0.15;
-            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone
+            color = float3(0.9, 0.95, 1.0) * windowed;
         } else if (hounsfield > 100) {
             alpha = 0.05;
             color = float3(0.8, 0.85, 0.95) * windowed;
         } else if (hounsfield > 40) {
             alpha = 0.15;
-            color = float3(0.3, 0.5, 0.9) * windowed;  // Deep blue organs
+            color = float3(0.3, 0.5, 0.9) * windowed;
         } else if (hounsfield > -10) {
             alpha = 0.08;
-            color = float3(0.4, 0.6, 0.8) * windowed;  // Light blue tissue
+            color = float3(0.4, 0.6, 0.8) * windowed;
         } else if (hounsfield > -100) {
             alpha = 0.03;
             color = float3(0.7, 0.8, 0.9) * windowed;
         }
         
-        // SCHEME 1B: Hybrid Blue-Bone/Red-Tissue (with reduced opacity for ROI visibility)
-//        if (hounsfield > 300) {
-//            alpha = 0.08;  // Reduced from 0.15 - less opaque bone
-//            color = float3(0.9, 0.95, 1.0) * windowed;  // Ice blue bone (from blue scheme)
-//        } else if (hounsfield > 100) {
-//            alpha = 0.05;  // Reduced from 0.08
-//            color = float3(0.8, 0.85, 0.95) * windowed;  // Light blue bone cortex
-//        } else if (hounsfield > 40) {
-//            alpha = 0.15;  // Reduced from 0.25 - organs/brain more transparent
-//            color = float3(0.9, 0.3, 0.3) * windowed;  // Reddish organs (from peach scheme)
-//        } else if (hounsfield > -10) {
-//            alpha = 0.08;  // Reduced from 0.15
-//            color = float3(0.8, 0.5, 0.4) * windowed;  // Peach soft tissue
-//        } else if (hounsfield > -100) {
-//            alpha = 0.03;  // Reduced from 0.05
-//            color = float3(0.9, 0.8, 0.6) * windowed;  // Light yellow fat
-//        }
-//        
-          // SCHEME 2: X-Ray Classic (Cyan-Green)
-//        if (hounsfield > 300) {
-//            alpha = 0.15;
-//            color = float3(0.8, 1.0, 1.0) * windowed;  // Cyan-white bone
-//        } else if (hounsfield > 100) {
-//            alpha = 0.08;
-//            color = float3(0.6, 0.95, 0.9) * windowed;
-//        } else if (hounsfield > 40) {
-//            alpha = 0.25;
-//            color = float3(0.2, 0.9, 0.7) * windowed;  // Teal organs
-//        } else if (hounsfield > -10) {
-//            alpha = 0.15;
-//            color = float3(0.3, 0.7, 0.6) * windowed;  // Sea green tissue
-//        } else if (hounsfield > -100) {
-//            alpha = 0.05;
-//            color = float3(0.5, 0.8, 0.7) * windowed;
-//        }
-//        
-        /*        // SCHEME 3: Purple-Pink Vaporwave
-        if (hounsfield > 300) {
-            alpha = 0.15;
-            color = float3(1.0, 0.9, 1.0) * windowed;  // Bright purple-white
-        } else if (hounsfield > 100) {
-            alpha = 0.08;
-            color = float3(0.9, 0.7, 0.95) * windowed;
-        } else if (hounsfield > 40) {
-            alpha = 0.25;
-            color = float3(0.9, 0.3, 0.7) * windowed;  // Hot pink organs
-        } else if (hounsfield > -10) {
-            alpha = 0.15;
-            color = float3(0.7, 0.4, 0.8) * windowed;  // Purple tissue
-        } else if (hounsfield > -100) {
-            alpha = 0.05;
-            color = float3(0.8, 0.6, 0.9) * windowed;
-        }
-        */
-        
-        // Crosshair axes - subtle single color at actual crosshair position
-        // Use the crosshair position from MPR views (already in voxel coordinates)
-        float3 crosshairPos = float3(params.crosshairX, params.crosshairY, params.crosshairZ);
-        
-        // Account for anisotropic voxel spacing when checking line thickness
-        float3 spacing = float3(params.spacingX, params.spacingY, params.spacingZ);
-        
-        // Line thickness in physical mm (not voxels)
-        float physicalLineThickness = 1.5;  // Thinner lines - was 2.0
-        
-        // Convert to voxel units for each axis
-        float3 lineThicknessVoxels = physicalLineThickness / spacing;
-        
-        // Subtle green crosshair color (matches MPR views)
-        float3 crosshairColor = float3(0.0, 1.0, 0.0);  // Green
-        float crosshairAlpha = 0.6;  // Semi-transparent
-        
-        // X-axis line - runs along X at crosshair Y and Z
-        if (abs(volumePos.y - crosshairPos.y) < lineThicknessVoxels.y && 
-            abs(volumePos.z - crosshairPos.z) < lineThicknessVoxels.z) {
-            color = crosshairColor;
-            alpha = crosshairAlpha;
-        }
-        
-        // Y-axis line - runs along Y at crosshair X and Z
-        if (abs(volumePos.x - crosshairPos.x) < lineThicknessVoxels.x && 
-            abs(volumePos.z - crosshairPos.z) < lineThicknessVoxels.z) {
-            color = crosshairColor;
-            alpha = crosshairAlpha;
-        }
-        
-        // Z-axis line - runs along Z at crosshair X and Y
-        if (abs(volumePos.x - crosshairPos.x) < lineThicknessVoxels.x && 
-            abs(volumePos.y - crosshairPos.y) < lineThicknessVoxels.y) {
-            color = crosshairColor;
-            alpha = crosshairAlpha;
-        }
-        
-        // Center intersection point - small bright dot
-        // Convert position difference to physical space for proper sphere shape
-        float3 centerOffset = volumePos - crosshairPos;
-        float3 physicalOffset = centerOffset * spacing;
-        float physicalDist = length(physicalOffset);  // Distance in mm
-        
-        if (physicalDist < 2.0) {  // Smaller center dot - was 3.0mm
-            color = float3(1.0, 1.0, 0.0);  // Yellow center for visibility
-            alpha = 0.8;
-        }
-        
-        // ROI visualization - draw contour outlines only
-        if (params.showROI > 0.5 && params.roiCount > 0 && roiData != nullptr) {
-            // Read ROI metadata from buffer
-            float3 roiColor = float3(roiData[0], roiData[1], roiData[2]);
-            int contourCount = int(roiData[3]);
-            int dataOffset = 4;  // Start after metadata
-            
-            // volumePos is in voxel coordinates, same as crosshairPos
-            // ROI points are in world coordinates, so convert them to voxel space
-            float3 volumeOrigin = float3(params.originX, params.originY, params.originZ);
-            
-            bool nearROI = false;
-            
-            // Check all contours
-            for (int c = 0; c < contourCount && c < 10; c++) {
-                float sliceZ = roiData[dataOffset];
-                int pointCount = int(roiData[dataOffset + 1]);
-                
-                // Convert ROI Z position from world to voxel coordinates
-                float roiZVoxel = (sliceZ - volumeOrigin.z) / spacing.z;
-                
-                // Check if we're at this contour's Z slice (within slice thickness)
-                if (abs(volumePos.z - roiZVoxel) < 1.0) {
-                    float2 posxy = volumePos.xy;
-                    
-                    // Check distance to each edge of the contour
-                    for (int i = 0; i < pointCount && i < 50; i++) {
-                        int j = i + 1;
-                        if (j >= pointCount) j = 0;  // Wrap to first point
-                        
-                        float3 p1World = float3(
-                            roiData[dataOffset + 2 + i*3],
-                            roiData[dataOffset + 2 + i*3 + 1],
-                            roiData[dataOffset + 2 + i*3 + 2]
-                        );
-                        float3 p2World = float3(
-                            roiData[dataOffset + 2 + j*3],
-                            roiData[dataOffset + 2 + j*3 + 1],
-                            roiData[dataOffset + 2 + j*3 + 2]
-                        );
-                        
-                        float3 p1Voxel = (p1World - volumeOrigin) / spacing;
-                        float3 p2Voxel = (p2World - volumeOrigin) / spacing;
-                        
-                        float2 p1xy = p1Voxel.xy;
-                        float2 p2xy = p2Voxel.xy;
-                        
-                        // Calculate distance from posxy to the line segment p1-p2
-                        float2 edge = p2xy - p1xy;
-                        float2 toPos = posxy - p1xy;
-                        float edgeLength = length(edge);
-                        
-                        if (edgeLength > 0.01) {
-                            float t = clamp(dot(toPos, edge) / (edgeLength * edgeLength), 0.0, 1.0);
-                            float2 nearest = p1xy + t * edge;
-                            float dist = length(posxy - nearest);
-                            
-                            if (dist < 2.0) {  // Outline thickness
-                                nearROI = true;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    if (nearROI) break;
-                }
-                
-                // Move to next contour in buffer
-                dataOffset += 2 + pointCount * 3;
-            }
-            
-            // Apply ROI coloring
-            if (nearROI) {
-                // Strong outline
-                color = roiColor;
-                alpha = 1.0;  // Full opacity for visibility
-            }
-        }
-        
-        // Front-to-back compositing with adjusted visibility
-        float stepAlpha = alpha / float(numSteps) * 60.0;  // Reduced from 80 for better balance
+        // Front-to-back compositing
+        float stepAlpha = alpha / float(numSteps) * 60.0;
         accumulatedColor += color * stepAlpha * (1.0 - accumulatedAlpha);
         accumulatedAlpha += stepAlpha * (1.0 - accumulatedAlpha);
     }
