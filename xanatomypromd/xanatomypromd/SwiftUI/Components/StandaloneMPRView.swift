@@ -96,10 +96,6 @@ struct StandaloneMPRView: View {
         .onAppear {
             updateBaselineZoom()
         }
-        .onChange(of: viewSize) { (oldSize: CGSize, newSize: CGSize) in
-            print("🔄 View size changed: \(Int(newSize.width))×\(Int(newSize.height))")
-            updateBaselineZoom()
-        }
     }
     
     // MARK: - Baseline Zoom Calculation
