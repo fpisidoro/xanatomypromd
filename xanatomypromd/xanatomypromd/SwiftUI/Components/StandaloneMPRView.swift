@@ -95,7 +95,7 @@ struct StandaloneMPRView: View {
         }
         .frame(width: viewSize.width, height: viewSize.height)
         .clipped()
-        .background(Color.black)
+        .background(Color.black as Color)
     }
     
     // MARK: - Baseline Zoom Calculation
