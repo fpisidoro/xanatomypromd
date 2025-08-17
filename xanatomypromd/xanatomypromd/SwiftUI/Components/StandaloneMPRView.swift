@@ -34,6 +34,7 @@ struct StandaloneMPRView: View {
     @State private var localPan: CGSize = .zero
     @State private var isDragging = false
     @State private var isPinching = false  // NEW: Track pinch gesture state
+    @State private var baselineZoom: CGFloat = 1.0  // NEW: Calculated baseline zoom
     
     // MARK: - Initialization
     
@@ -81,7 +82,8 @@ struct StandaloneMPRView: View {
                     onGesture: { gestureType, data in
                         handleUnifiedGesture(type: gestureType, data: data)
                     },
-                    currentZoom: localZoom
+                    currentZoom: localZoom,
+                    baselineZoom: baselineZoom
                 )
                 .onReceive(Just(localZoom)) { zoom in
                     // This will trigger a re-creation of the gesture handler with updated zoom
@@ -96,9 +98,67 @@ struct StandaloneMPRView: View {
         .clipped()
         .background(Color.black)
         .border(Color.gray.opacity(0.3), width: 1)
+        .onAppear {
+            updateBaselineZoom()
+        }
+        .onChange(of: viewSize) { _ in
+            updateBaselineZoom()
+        }
     }
     
-    // MARK: - Gesture Handling
+    // MARK: - Baseline Zoom Calculation
+    
+    private func updateBaselineZoom() {
+        baselineZoom = calculateFitToViewBaseline(
+            textureSize: getEstimatedTextureSize(),
+            availableViewSize: viewSize
+        )
+        
+        // If this is the first time or zoom is at old baseline, update to new baseline
+        if abs(localZoom - 1.0) < 0.01 || localZoom < baselineZoom {
+            localZoom = baselineZoom
+            lastZoom = baselineZoom
+        }
+        
+        print("📊 Baseline zoom for \(plane.displayName): \(String(format: "%.2f", baselineZoom))x (view: \(Int(viewSize.width))×\(Int(viewSize.height)))")
+    }
+    
+    private func calculateFitToViewBaseline(textureSize: CGSize, availableViewSize: CGSize) -> CGFloat {
+        // Calculate zoom needed to fit texture nicely in available view space
+        // Target ~85% of available space for comfortable viewing with margins
+        
+        let targetFillRatio: CGFloat = 0.85
+        let availableWidth = availableViewSize.width * targetFillRatio
+        let availableHeight = availableViewSize.height * targetFillRatio
+        
+        // Calculate scale factors for both dimensions
+        let scaleX = availableWidth / textureSize.width
+        let scaleY = availableHeight / textureSize.height
+        
+        // Use the smaller scale to ensure image fits within bounds
+        let baseline = min(scaleX, scaleY)
+        
+        // Ensure reasonable bounds (never smaller than 0.1x, never larger than 3.0x)
+        return max(0.1, min(baseline, 3.0))
+    }
+    
+    private func getEstimatedTextureSize() -> CGSize {
+        // Get estimated texture dimensions based on volume data or use defaults
+        guard let volumeData = volumeData else {
+            return CGSize(width: 512, height: 512)  // Default fallback
+        }
+        
+        let dims = volumeData.dimensions
+        
+        switch plane {
+        case .axial:
+            return CGSize(width: dims.x, height: dims.y)
+        case .sagittal:
+            return CGSize(width: dims.y, height: dims.z)
+        case .coronal:
+            return CGSize(width: dims.x, height: dims.z)
+        }
+    }
     
     private func createCompositeGesture() -> some Gesture {
         let tapGesture = TapGesture()
@@ -174,8 +234,8 @@ struct StandaloneMPRView: View {
     private func handleZoom(_ value: CGFloat) {
         let newZoom = lastZoom * value
         
-        // HARD LIMIT: Never go below 1.0x
-        localZoom = max(1.0, min(newZoom, 4.0))
+        // CONSTRAINT: Never go below baseline zoom
+        localZoom = max(baselineZoom, min(newZoom, baselineZoom * 10.0))
     }
     
     private func handleZoomEnd(_ value: CGFloat) {
@@ -183,7 +243,7 @@ struct StandaloneMPRView: View {
         
         // Ensure constraints are applied
         withAnimation(.spring()) {
-            localZoom = max(1.0, min(localZoom, 4.0))
+            localZoom = max(baselineZoom, min(localZoom, baselineZoom * 10.0))
             lastZoom = localZoom
         }
     }
@@ -216,7 +276,7 @@ struct StandaloneMPRView: View {
             lastZoom = localZoom
             // Final constraint with animation
             withAnimation(.spring()) {
-                localZoom = max(1.0, min(localZoom, 4.0))
+                localZoom = max(baselineZoom, min(localZoom, baselineZoom * 10.0))
                 lastZoom = localZoom
             }
             return
@@ -230,8 +290,8 @@ struct StandaloneMPRView: View {
         
         let newZoom = lastZoom * data.scale
         
-        // HARD LIMIT: Never go below 1.0x, but make it smooth by clamping
-        localZoom = max(1.0, min(newZoom, 4.0))
+        // CONSTRAINT: Never go below baseline zoom
+        localZoom = max(baselineZoom, min(newZoom, baselineZoom * 10.0))
     }
     
     // MARK: - Enhanced 2-Finger Scrolling with Quality Control
@@ -410,8 +470,8 @@ struct StandaloneMPRView: View {
     /// Reset view transformations
     public func resetView() {
         withAnimation(.spring()) {
-            localZoom = 1.0  // Reset to 1.0x (minimum allowed)
-            lastZoom = 1.0
+            localZoom = baselineZoom  // Reset to calculated baseline
+            lastZoom = baselineZoom
             localPan = .zero
         }
     }

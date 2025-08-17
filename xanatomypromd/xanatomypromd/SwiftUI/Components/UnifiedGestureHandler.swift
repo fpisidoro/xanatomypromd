@@ -7,6 +7,7 @@ import UIKit
 struct UnifiedGestureHandler: UIViewRepresentable {
     let onGesture: (GestureType, GestureData) -> Void
     let currentZoom: CGFloat  // NEW: Current zoom level for gesture routing
+    let baselineZoom: CGFloat  // NEW: Baseline zoom for threshold calculation
     
     enum GestureType {
         case pan, pinch, twoFingerScroll, scrollEnd, oneFingerScroll  // NEW: oneFingerScroll
@@ -58,12 +59,13 @@ struct UnifiedGestureHandler: UIViewRepresentable {
     }
     
     func makeCoordinator() -> Coordinator {
-        Coordinator(onGesture: onGesture, currentZoom: currentZoom)
+        Coordinator(onGesture: onGesture, currentZoom: currentZoom, baselineZoom: baselineZoom)
     }
     
     class Coordinator: NSObject, UIGestureRecognizerDelegate {
         let onGesture: (GestureType, GestureData) -> Void
         private var currentZoom: CGFloat
+        private var baselineZoom: CGFloat
         
         // 2-finger scroll state tracking
         private var scrollAccumulator: CGFloat = 0
@@ -76,21 +78,23 @@ struct UnifiedGestureHandler: UIViewRepresentable {
         
         // Distance thresholds for different slice counts
         private let baseScrollThreshold: CGFloat = 15  // pixels needed to trigger slice change
-        private let zoomThresholdForPan: CGFloat = 1.5  // Above this zoom, 1-finger becomes pan
         
-        init(onGesture: @escaping (GestureType, GestureData) -> Void, currentZoom: CGFloat) {
+        init(onGesture: @escaping (GestureType, GestureData) -> Void, currentZoom: CGFloat, baselineZoom: CGFloat) {
             self.onGesture = onGesture
             self.currentZoom = currentZoom
+            self.baselineZoom = baselineZoom
         }
         
         // Update zoom level for gesture routing decisions
         func updateZoom(_ zoom: CGFloat) {
+            let zoomThresholdForPan = baselineZoom * 1.5  // Relative threshold
+            
             if abs(self.currentZoom - zoom) > 0.01 {  // Only log significant changes
                 let oldBehavior = self.currentZoom <= zoomThresholdForPan ? "scroll" : "pan"
                 let newBehavior = zoom <= zoomThresholdForPan ? "scroll" : "pan"
                 
                 if oldBehavior != newBehavior {
-                    print("🔄 1-finger behavior: \(oldBehavior) → \(newBehavior) (zoom: \(String(format: "%.1f", zoom))x)")
+                    print("🔄 1-finger behavior: \(oldBehavior) → \(newBehavior) (zoom: \(String(format: "%.1f", zoom))x, threshold: \(String(format: "%.1f", zoomThresholdForPan))x)")
                 }
             }
             self.currentZoom = zoom
@@ -108,17 +112,19 @@ struct UnifiedGestureHandler: UIViewRepresentable {
             let translation = gesture.translation(in: gesture.view)
             let velocity = gesture.velocity(in: gesture.view)
             
+            let zoomThresholdForPan = baselineZoom * 1.5  // Relative threshold
+            
             // Determine behavior based on zoom level
             if currentZoom <= zoomThresholdForPan {
-                // At default zoom (1.0x to 1.5x): 1-finger scroll
+                // At default zoom: 1-finger scroll
                 if gesture.state == .began {
-                    print("🖱️ 1-finger @ \(String(format: "%.1f", currentZoom))x → SCROLL mode")
+                    print("🖱️ 1-finger @ \(String(format: "%.1f", currentZoom))x → SCROLL mode (threshold: \(String(format: "%.1f", zoomThresholdForPan))x)")
                 }
                 handleOneFingerScroll(gesture: gesture, translation: translation, velocity: velocity)
             } else {
-                // Zoomed in (>1.5x): 1-finger pan
+                // Zoomed in: 1-finger pan
                 if gesture.state == .began {
-                    print("🖱️ 1-finger @ \(String(format: "%.1f", currentZoom))x → PAN mode")
+                    print("🖱️ 1-finger @ \(String(format: "%.1f", currentZoom))x → PAN mode (threshold: \(String(format: "%.1f", zoomThresholdForPan))x)")
                 }
                 let data = GestureData(
                     translation: translation,
