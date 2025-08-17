@@ -79,7 +79,7 @@ struct StandaloneMPRView: View {
             // Pure UIKit gesture controller (when interaction enabled)
             if allowInteraction {
                 MPRGestureController(
-                    viewState: $viewState,
+                    viewState: viewState,
                     coordinateSystem: coordinateSystem,
                     sharedState: sharedState,
                     config: gestureConfig
@@ -95,10 +95,10 @@ struct StandaloneMPRView: View {
         .onAppear {
             updateViewStateConfiguration()
         }
-        .onChange(of: viewSize) { _ in
+        .onChange(of: viewSize) { (newSize: CGSize) in
             updateViewStateConfiguration()
         }
-        .onChange(of: volumeData?.dimensions) { _ in
+        .onChange(of: volumeData?.dimensions) { (newDimensions: SIMD3<Int32>?) in
             updateViewStateConfiguration()
         }
     }

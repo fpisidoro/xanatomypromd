@@ -10,8 +10,8 @@ struct MPRGestureController: UIViewRepresentable {
     
     // MARK: - Configuration
     
-    /// Binding to view state (our only connection to SwiftUI)
-    @Binding var viewState: MPRViewState
+    /// View state object (our only connection to SwiftUI)
+    @ObservedObject var viewState: MPRViewState
     
     /// Coordinate system for slice navigation
     let coordinateSystem: DICOMCoordinateSystem
@@ -77,7 +77,7 @@ struct MPRGestureController: UIViewRepresentable {
     
     func makeCoordinator() -> Coordinator {
         return Coordinator(
-            viewState: _viewState,
+            viewState: viewState,
             coordinateSystem: coordinateSystem,
             sharedState: sharedState,
             config: config
@@ -90,7 +90,7 @@ struct MPRGestureController: UIViewRepresentable {
         
         // MARK: - Dependencies
         
-        @Binding var viewState: MPRViewState
+        var viewState: MPRViewState
         let coordinateSystem: DICOMCoordinateSystem
         let sharedState: SharedViewingState
         let config: GestureConfiguration
@@ -115,19 +115,19 @@ struct MPRGestureController: UIViewRepresentable {
         // MARK: - Initialization
         
         init(
-            viewState: Binding<MPRViewState>,
+            viewState: MPRViewState,
             coordinateSystem: DICOMCoordinateSystem,
             sharedState: SharedViewingState,
             config: GestureConfiguration
         ) {
-            self._viewState = viewState
+            self.viewState = viewState
             self.coordinateSystem = coordinateSystem
             self.sharedState = sharedState
             self.config = config
             super.init()
             
             // Initialize zoom state
-            self.lastZoomForPinch = viewState.wrappedValue.zoom
+            self.lastZoomForPinch = viewState.zoom
         }
         
         // MARK: - Setup
