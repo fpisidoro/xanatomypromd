@@ -311,8 +311,10 @@ struct MPRGestureController: UIViewRepresentable {
                 // Calculate new zoom based on synced lastZoom
                 let newZoom = lastZoomForPinch * gesture.scale
                 
-                // Apply zoom with constraints
-                viewState.setZoom(newZoom, constrainToLimits: true)
+                // Apply zoom with constraints - never below baseline
+                let minZoom = viewState.baselineZoom
+                let maxZoom = viewState.baselineZoom * 4.0
+                viewState.zoom = max(minZoom, min(newZoom, maxZoom))
                 
             case .ended, .cancelled:
                 viewState.setInteractionState(isPinching: false)

@@ -100,13 +100,19 @@ class MPRViewState: ObservableObject {
         // Use the smaller scale factor to ensure the image fits completely
         let fitScale = min(scaleX, scaleY)
         
-        // Apply 75% fill factor for comfortable viewing
-        let targetFillRatio: CGFloat = 0.75
+        // Apply different fill factors based on device type
+        let targetFillRatio: CGFloat
+        if viewSize.width < 500 {  // iPhone-sized views
+            targetFillRatio = 0.95  // Fill almost entire view
+        } else {  // iPad or multi-panel views
+            targetFillRatio = 0.75  // More conservative
+        }
+        
         let baseline = fitScale * targetFillRatio
         
-        // Apply reasonable bounds
-        let minBaseline: CGFloat = 0.1
-        let maxBaseline: CGFloat = 2.5
+        // Apply reasonable bounds - ensure minimum 1.0x for iPhone
+        let minBaseline: CGFloat = viewSize.width < 500 ? 1.0 : 0.8
+        let maxBaseline: CGFloat = 3.0
         
         return max(minBaseline, min(baseline, maxBaseline))
     }
@@ -146,7 +152,7 @@ class MPRViewState: ObservableObject {
     /// Apply zoom with constraints
     func setZoom(_ newZoom: CGFloat, constrainToLimits: Bool = true) {
         if constrainToLimits {
-            let minZoom = baselineZoom * 0.5
+            let minZoom = baselineZoom  // Never go below baseline
             let maxZoom = baselineZoom * 4.0
             zoom = max(minZoom, min(newZoom, maxZoom))
         } else {
