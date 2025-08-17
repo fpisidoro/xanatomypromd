@@ -106,9 +106,10 @@ struct StandaloneMPRView: View {
     // MARK: - Configuration Updates
     
     private func updateViewStateConfiguration() {
+        let dims = volumeData?.dimensions ?? SIMD3<Int>(512, 512, 53)
         viewState.updateConfiguration(
             viewSize: viewSize,
-            volumeDimensions: volumeData?.dimensions ?? SIMD3<Int32>(512, 512, 53),
+            volumeDimensions: SIMD3<Int32>(Int32(dims.x), Int32(dims.y), Int32(dims.z)),
             currentPlane: plane
         )
     }
