@@ -82,8 +82,12 @@ struct StandaloneMPRView: View {
                     onGesture: { gestureType, data in
                         handleUnifiedGesture(type: gestureType, data: data)
                     },
-                    currentZoom: localZoom,
-                    baselineZoom: baselineZoom
+                    onZoomChange: { newZoom in
+                        handleZoomChange(newZoom)
+                    },
+                    viewSize: viewSize,
+                    volumeDimensions: volumeData?.dimensions ?? SIMD3<Int32>(512, 512, 53),
+                    currentPlane: plane
                 )
                 .onReceive(Just(localZoom)) { zoom in
                     // This will trigger a re-creation of the gesture handler with updated zoom
@@ -242,16 +246,6 @@ struct StandaloneMPRView: View {
         localZoom = max(baselineZoom, min(newZoom, baselineZoom * 4.0))
     }
     
-    private func handleZoomEnd(_ value: CGFloat) {
-        lastZoom = localZoom
-        
-        // Ensure constraints are applied
-        withAnimation(.spring()) {
-            localZoom = max(baselineZoom, min(localZoom, baselineZoom * 4.0))
-            lastZoom = localZoom
-        }
-    }
-    
     // MARK: - Enhanced Unified Gesture Handler
     
     private func handleUnifiedGesture(type: UnifiedGestureHandler.GestureType, data: UnifiedGestureHandler.GestureData) {
@@ -266,7 +260,14 @@ struct StandaloneMPRView: View {
             handleOneFingerScrollSmooth(data)
         case .scrollEnd:
             handleScrollEnd()
+        case .zoomEnd:
+            handleZoomEnd(data)
         }
+    }
+    
+    private func handleZoomChange(_ newZoom: CGFloat) {
+        // Direct zoom update from UnifiedGestureHandler
+        localZoom = newZoom
     }
     
     private func handlePanGesture(_ data: UnifiedGestureHandler.GestureData) {
@@ -347,6 +348,12 @@ struct StandaloneMPRView: View {
     private func handleScrollEnd() {
         // Restore full quality after scrolling ends
         restoreScrollQuality()
+    }
+    
+    private func handleZoomEnd(_ data: UnifiedGestureHandler.GestureData) {
+        // Handle zoom gesture completion
+        lastZoom = localZoom
+        print("🔍 Zoom ended at \(String(format: "%.2f", localZoom))x for \(plane.displayName)")
     }
     
     // MARK: - Plane-Aware Sensitivity Calculation
