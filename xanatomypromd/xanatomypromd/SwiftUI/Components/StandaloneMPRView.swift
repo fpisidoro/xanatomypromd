@@ -97,11 +97,11 @@ struct StandaloneMPRView: View {
         .frame(width: viewSize.width, height: viewSize.height)
         .clipped()
         .background(Color.black)
-        .border(Color.gray.opacity(0.3), width: 1)
         .onAppear {
             updateBaselineZoom()
         }
-        .onChange(of: viewSize) { _ in
+        .onChange(of: viewSize) { newSize in
+            print("🔄 View size changed: \(Int(newSize.width))×\(Int(newSize.height))")
             updateBaselineZoom()
         }
     }
@@ -109,13 +109,16 @@ struct StandaloneMPRView: View {
     // MARK: - Baseline Zoom Calculation
     
     private func updateBaselineZoom() {
-        baselineZoom = calculateFitToViewBaseline(
+        let newBaseline = calculateFitToViewBaseline(
             textureSize: getEstimatedTextureSize(),
             availableViewSize: viewSize
         )
         
-        // If this is the first time or zoom is at old baseline, update to new baseline
-        if abs(localZoom - 1.0) < 0.01 || localZoom < baselineZoom {
+        // Update baseline zoom
+        baselineZoom = newBaseline
+        
+        // If current zoom is below new baseline, bring it up to baseline
+        if localZoom < baselineZoom {
             localZoom = baselineZoom
             lastZoom = baselineZoom
         }
@@ -125,9 +128,9 @@ struct StandaloneMPRView: View {
     
     private func calculateFitToViewBaseline(textureSize: CGSize, availableViewSize: CGSize) -> CGFloat {
         // Calculate zoom needed to fit texture nicely in available view space
-        // Target ~85% of available space for comfortable viewing with margins
+        // Target ~75% of available space for comfortable viewing (reduced from 85%)
         
-        let targetFillRatio: CGFloat = 0.85
+        let targetFillRatio: CGFloat = 0.75
         let availableWidth = availableViewSize.width * targetFillRatio
         let availableHeight = availableViewSize.height * targetFillRatio
         
@@ -138,8 +141,9 @@ struct StandaloneMPRView: View {
         // Use the smaller scale to ensure image fits within bounds
         let baseline = min(scaleX, scaleY)
         
-        // Ensure reasonable bounds (never smaller than 0.1x, never larger than 3.0x)
-        return max(0.1, min(baseline, 3.0))
+        // Ensure reasonable bounds: never smaller than 0.8x, never larger than 2.5x
+        // This prevents tiny baselines on solo views
+        return max(0.8, min(baseline, 2.5))
     }
     
     private func getEstimatedTextureSize() -> CGSize {
@@ -234,8 +238,8 @@ struct StandaloneMPRView: View {
     private func handleZoom(_ value: CGFloat) {
         let newZoom = lastZoom * value
         
-        // CONSTRAINT: Never go below baseline zoom
-        localZoom = max(baselineZoom, min(newZoom, baselineZoom * 10.0))
+        // CONSTRAINT: Never go below baseline zoom, max 4x zoom range
+        localZoom = max(baselineZoom, min(newZoom, baselineZoom * 4.0))
     }
     
     private func handleZoomEnd(_ value: CGFloat) {
@@ -243,7 +247,7 @@ struct StandaloneMPRView: View {
         
         // Ensure constraints are applied
         withAnimation(.spring()) {
-            localZoom = max(baselineZoom, min(localZoom, baselineZoom * 10.0))
+            localZoom = max(baselineZoom, min(localZoom, baselineZoom * 4.0))
             lastZoom = localZoom
         }
     }
@@ -276,7 +280,7 @@ struct StandaloneMPRView: View {
             lastZoom = localZoom
             // Final constraint with animation
             withAnimation(.spring()) {
-                localZoom = max(baselineZoom, min(localZoom, baselineZoom * 10.0))
+                localZoom = max(baselineZoom, min(localZoom, baselineZoom * 4.0))
                 lastZoom = localZoom
             }
             return
@@ -285,13 +289,14 @@ struct StandaloneMPRView: View {
         // Start of gesture: sync lastZoom to prevent jumps
         if !isPinching {
             isPinching = true
-            lastZoom = localZoom
+            lastZoom = localZoom  // CRITICAL: Sync to current zoom to prevent jumps
+            print("🔍 Pinch start: lastZoom synced to \(String(format: "%.2f", lastZoom))x")
         }
         
         let newZoom = lastZoom * data.scale
         
-        // CONSTRAINT: Never go below baseline zoom
-        localZoom = max(baselineZoom, min(newZoom, baselineZoom * 10.0))
+        // CONSTRAINT: Never go below baseline zoom, max 4x zoom range
+        localZoom = max(baselineZoom, min(newZoom, baselineZoom * 4.0))
     }
     
     // MARK: - Enhanced 2-Finger Scrolling with Quality Control
