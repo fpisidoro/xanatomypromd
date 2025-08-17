@@ -1,9 +1,11 @@
 import SwiftUI
 import simd
 
-// MARK: - Standalone MPR View
-// A completely self-contained MPR view that can function independently
-// while maintaining synchronization with other views through shared state
+// MARK: - Standalone MPR View (Clean Declarative Architecture)
+// 
+// This view is now PURELY DECLARATIVE - no gesture handling logic
+// All gesture behavior is handled by MPRGestureController (pure UIKit)
+// This eliminates SwiftUI/UIKit gesture conflicts and compiler errors
 
 struct StandaloneMPRView: View {
     
@@ -26,14 +28,13 @@ struct StandaloneMPRView: View {
     let viewSize: CGSize
     let allowInteraction: Bool
     
-    // MARK: - Local State (Independent per view)
+    // MARK: - Local State (Pure View State)
     
-    @State private var localZoom: CGFloat = 1.0
-    @State private var lastZoom: CGFloat = 1.0
-    @State private var localPan: CGSize = .zero
-    @State private var isDragging = false
-    @State private var isPinching = false  // NEW: Track pinch gesture state
-    @State private var baselineZoom: CGFloat = 1.0  // NEW: Calculated baseline zoom
+    @StateObject private var viewState = MPRViewState()
+    
+    // MARK: - Gesture Configuration
+    
+    private let gestureConfig = GestureConfiguration.default
     
     // MARK: - Initialization
     
@@ -55,10 +56,11 @@ struct StandaloneMPRView: View {
         self.allowInteraction = allowInteraction
     }
     
-    // MARK: - Body
+    // MARK: - Body (PURELY DECLARATIVE)
     
     var body: some View {
         ZStack {
+            // Base MPR rendering layer
             LayeredMPRView(
                 coordinateSystem: coordinateSystem,
                 plane: plane,
@@ -68,271 +70,47 @@ struct StandaloneMPRView: View {
                 volumeData: volumeData,
                 roiData: roiData,
                 viewSize: viewSize,
-                allowInteraction: false,
+                allowInteraction: false,  // Gesture handling is separate
                 sharedState: sharedState
             )
-            .scaleEffect(localZoom)
-            .offset(localPan)
+            .scaleEffect(viewState.zoom)
+            .offset(viewState.pan)
             
+            // Pure UIKit gesture controller (when interaction enabled)
             if allowInteraction {
-                UnifiedGestureHandler(
-                    onGesture: handleUnifiedGesture,
-                    onZoomChange: handleZoomChange,
-                    viewSize: viewSize,
-                    volumeDimensions: volumeData?.dimensions ?? SIMD3<Int32>(512, 512, 53),
-                    currentPlane: plane
+                MPRGestureController(
+                    viewState: $viewState,
+                    coordinateSystem: coordinateSystem,
+                    sharedState: sharedState,
+                    config: gestureConfig
                 )
             }
             
+            // UI overlays
             viewLabelOverlay
         }
         .frame(width: viewSize.width, height: viewSize.height)
         .clipped()
         .background(.black)
-        .onAppear { updateBaselineZoom() }
+        .onAppear {
+            updateViewStateConfiguration()
+        }
+        .onChange(of: viewSize) { _ in
+            updateViewStateConfiguration()
+        }
+        .onChange(of: volumeData?.dimensions) { _ in
+            updateViewStateConfiguration()
+        }
     }
     
-    // MARK: - Baseline Zoom Calculation
+    // MARK: - Configuration Updates
     
-    private func updateBaselineZoom() {
-        let newBaseline = calculateFitToViewBaseline(
-            textureSize: getEstimatedTextureSize(),
-            availableViewSize: viewSize
+    private func updateViewStateConfiguration() {
+        viewState.updateConfiguration(
+            viewSize: viewSize,
+            volumeDimensions: volumeData?.dimensions ?? SIMD3<Int32>(512, 512, 53),
+            currentPlane: plane
         )
-        
-        // Update baseline zoom
-        baselineZoom = newBaseline
-        
-        // If current zoom is below new baseline, bring it up to baseline
-        if localZoom < baselineZoom {
-            localZoom = baselineZoom
-            lastZoom = baselineZoom
-        }
-        
-        print("📊 Baseline zoom for \(plane.displayName): \(String(format: "%.2f", baselineZoom))x (view: \(Int(viewSize.width))×\(Int(viewSize.height)))")
-    }
-    
-    private func calculateFitToViewBaseline(textureSize: CGSize, availableViewSize: CGSize) -> CGFloat {
-        // Calculate zoom needed to fit texture nicely in available view space
-        // Target ~75% of available space for comfortable viewing (reduced from 85%)
-        
-        let targetFillRatio: CGFloat = 0.75
-        let availableWidth = availableViewSize.width * targetFillRatio
-        let availableHeight = availableViewSize.height * targetFillRatio
-        
-        // Calculate scale factors for both dimensions
-        let scaleX = availableWidth / textureSize.width
-        let scaleY = availableHeight / textureSize.height
-        
-        // Use the smaller scale to ensure image fits within bounds
-        let baseline = min(scaleX, scaleY)
-        
-        // Ensure reasonable bounds: never smaller than 0.8x, never larger than 2.5x
-        // This prevents tiny baselines on solo views
-        return max(0.8, min(baseline, 2.5))
-    }
-    
-    private func getEstimatedTextureSize() -> CGSize {
-        // Get estimated texture dimensions based on volume data or use defaults
-        guard let volumeData = volumeData else {
-            return CGSize(width: 512, height: 512)  // Default fallback
-        }
-        
-        let dims = volumeData.dimensions
-        
-        switch plane {
-        case .axial:
-            return CGSize(width: dims.x, height: dims.y)
-        case .sagittal:
-            return CGSize(width: dims.y, height: dims.z)
-        case .coronal:
-            return CGSize(width: dims.x, height: dims.z)
-        }
-    }
-    
-    // MARK: - Enhanced Unified Gesture Handler
-    
-    private func handleUnifiedGesture(type: UnifiedGestureHandler.GestureType, data: UnifiedGestureHandler.GestureData) {
-        switch type {
-        case .pan:
-            handlePanGesture(data)
-        case .pinch:
-            handlePinchGesture(data)
-        case .twoFingerScroll:
-            handleTwoFingerScrollSmooth(data)
-        case .oneFingerScroll:
-            handleOneFingerScrollSmooth(data)
-        case .scrollEnd:
-            handleScrollEnd()
-        case .zoomEnd:
-            handleZoomEnd(data)
-        }
-    }
-    
-    private func handleZoomChange(_ newZoom: CGFloat) {
-        // Direct zoom update from UnifiedGestureHandler
-        localZoom = newZoom
-    }
-    
-    private func handlePanGesture(_ data: UnifiedGestureHandler.GestureData) {
-        localPan = CGSize(width: data.translation.x, height: data.translation.y)
-    }
-    
-    private func handlePinchGesture(_ data: UnifiedGestureHandler.GestureData) {
-        // Handle gesture state transitions
-        if data.scale == 1.0 {  // Gesture ended
-            isPinching = false
-            lastZoom = localZoom
-            // Final constraint with animation
-            withAnimation(.spring()) {
-                localZoom = max(baselineZoom, min(localZoom, baselineZoom * 4.0))
-                lastZoom = localZoom
-            }
-            return
-        }
-        
-        // Start of gesture: sync lastZoom to prevent jumps
-        if !isPinching {
-            isPinching = true
-            lastZoom = localZoom  // CRITICAL: Sync to current zoom to prevent jumps
-            print("🔍 Pinch start: lastZoom synced to \(String(format: "%.2f", lastZoom))x")
-        }
-        
-        let newZoom = lastZoom * data.scale
-        
-        // CONSTRAINT: Never go below baseline zoom, max 4x zoom range
-        localZoom = max(baselineZoom, min(newZoom, baselineZoom * 4.0))
-    }
-    
-    // MARK: - Enhanced 2-Finger Scrolling with Quality Control
-    
-    private func handleTwoFingerScrollSmooth(_ data: UnifiedGestureHandler.GestureData) {
-        // Trigger quality reduction on first scroll event
-        startScrollQualityReduction(velocity: data.speed)
-        
-        // Calculate plane-aware sensitivity
-        let sensitivity = calculatePlaneAwareSensitivity()
-        
-        // Determine slice change amount based on accumulated distance and velocity
-        let sliceChange = calculateSliceChange(
-            accumulatedDistance: data.accumulatedDistance,
-            direction: data.direction,
-            velocity: data.speed,
-            sensitivity: sensitivity
-        )
-        
-        if sliceChange != 0 {
-            navigateSlices(by: sliceChange)
-        }
-    }
-    
-    // MARK: - NEW: 1-Finger Scrolling (when zoom <= 1.5x)
-    
-    private func handleOneFingerScrollSmooth(_ data: UnifiedGestureHandler.GestureData) {
-        // 1-finger scrolling works the same as 2-finger, just different trigger
-        startScrollQualityReduction(velocity: data.speed)
-        
-        let sensitivity = calculatePlaneAwareSensitivity()
-        
-        let sliceChange = calculateSliceChange(
-            accumulatedDistance: data.accumulatedDistance,
-            direction: data.direction,
-            velocity: data.speed,
-            sensitivity: sensitivity
-        )
-        
-        if sliceChange != 0 {
-            navigateSlices(by: sliceChange)
-            
-            // Visual feedback for 1-finger scroll (optional)
-            print("🖱️ 1-finger scroll: \(plane.displayName) slice \(sliceChange > 0 ? "+" : "")\(sliceChange)")
-        }
-    }
-    
-    private func handleScrollEnd() {
-        // Restore full quality after scrolling ends
-        restoreScrollQuality()
-    }
-    
-    private func handleZoomEnd(_ data: UnifiedGestureHandler.GestureData) {
-        // Handle zoom gesture completion
-        lastZoom = localZoom
-        print("🔍 Zoom ended at \(String(format: "%.2f", localZoom))x for \(plane.displayName)")
-    }
-    
-    // MARK: - Plane-Aware Sensitivity Calculation
-    
-    private func calculatePlaneAwareSensitivity() -> Float {
-        let totalSlices = coordinateSystem.getMaxSlices(for: plane)
-        
-        // Scale sensitivity based on slice count
-        // Axial (500+ slices) = fine control
-        // Sagittal/Coronal (fewer slices) = coarser control
-        switch totalSlices {
-        case 0..<50:
-            return 0.3      // Very fine for few slices
-        case 50..<150:
-            return 0.5      // Medium sensitivity
-        case 150..<300:
-            return 0.7      // Higher sensitivity
-        default:
-            return 1.0      // Full sensitivity for 500+ slices
-        }
-    }
-    
-    private func calculateSliceChange(accumulatedDistance: CGFloat, direction: Int, velocity: CGFloat, sensitivity: Float) -> Int {
-        // Base slice change amount (always 1 for educational viewing - no skipping)
-        let baseChange = 1
-        
-        // Apply plane-aware sensitivity
-        // For educational use: always show every slice, just control frequency
-        return baseChange * direction
-    }
-    
-    private func navigateSlices(by amount: Int) {
-        let currentSlice = coordinateSystem.getCurrentSliceIndex(for: plane)
-        let totalSlices = coordinateSystem.getMaxSlices(for: plane)
-        let newSlice = max(0, min(totalSlices - 1, currentSlice + amount))
-        
-        if newSlice != currentSlice {
-            coordinateSystem.updateFromSliceScroll(plane: plane, sliceIndex: newSlice)
-        }
-    }
-    
-    // MARK: - Quality Control During Scrolling
-    
-    private func startScrollQualityReduction(velocity: CGFloat) {
-        // Determine quality level based on scroll velocity
-        let newQuality: Int
-        if velocity > 800 {
-            newQuality = 4  // Quarter quality for very fast scrolling
-        } else if velocity > 400 {
-            newQuality = 2  // Half quality for medium speed
-        } else {
-            newQuality = 1  // Full quality for slow scrolling
-        }
-        
-        // Update shared quality state
-        if sharedState.renderQuality != newQuality {
-            sharedState.renderQuality = newQuality
-        }
-    }
-    
-    private func restoreScrollQuality() {
-        // Restore full quality after a brief delay to avoid flickering
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            if sharedState.renderQuality != 1 {
-                sharedState.renderQuality = 1
-            }
-        }
-    }
-    
-    // MARK: - Legacy Method (keep for compatibility)
-    
-    private func updateScrollQuality(velocity: CGFloat) {
-        // This method is called from the old implementation
-        // Redirect to new implementation
-        startScrollQualityReduction(velocity: velocity)
     }
     
     // MARK: - View Components
@@ -365,40 +143,82 @@ struct StandaloneMPRView: View {
             
             Spacer()
             
-            // Zoom indicator (only show if not 1.0)
-            if abs(localZoom - 1.0) > 0.01 {
+            // Zoom indicator (only show if significantly different from baseline)
+            if abs(viewState.zoom - viewState.baselineZoom) > 0.01 {
                 HStack {
                     Spacer()
-                    Text(String(format: "%.1fx", localZoom))
-                        .font(.caption2)
-                        .foregroundColor(.yellow.opacity(0.7))
-                        .padding(4)
-                        .background(Color.black.opacity(0.5))
-                        .cornerRadius(4)
+                    
+                    VStack(alignment: .trailing, spacing: 2) {
+                        // Current zoom
+                        Text(String(format: "%.1fx", viewState.zoom))
+                            .font(.caption2)
+                            .foregroundColor(.yellow.opacity(0.8))
+                        
+                        // Baseline reference (when significantly different)
+                        if abs(viewState.zoom - viewState.baselineZoom) > 0.2 {
+                            Text("(base: \(String(format: "%.1fx", viewState.baselineZoom)))")
+                                .font(.caption2)
+                                .foregroundColor(.gray.opacity(0.6))
+                        }
+                    }
+                    .padding(4)
+                    .background(Color.black.opacity(0.5))
+                    .cornerRadius(4)
                 }
                 .padding(8)
+            }
+            
+            // Interaction state indicator (debug/development)
+            if viewState.isInteracting {
+                HStack {
+                    if viewState.isPinching {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.blue)
+                    }
+                    if viewState.isPanning {
+                        Image(systemName: "hand.draw")
+                            .foregroundColor(.green)
+                    }
+                    if viewState.isScrolling {
+                        Image(systemName: "scroll")
+                            .foregroundColor(.orange)
+                    }
+                }
+                .font(.caption2)
+                .padding(4)
+                .background(Color.black.opacity(0.5))
+                .cornerRadius(4)
+                .padding(.bottom, 8)
             }
         }
     }
     
-    // MARK: - Public Methods
+    // MARK: - Public Interface
     
-    /// Reset view transformations
+    /// Reset view transformations to baseline
     public func resetView() {
         withAnimation(.spring()) {
-            localZoom = baselineZoom  // Reset to calculated baseline
-            lastZoom = baselineZoom
-            localPan = .zero
+            viewState.resetView()
         }
     }
     
-    /// Check if view has been transformed
+    /// Check if view has been transformed from baseline
     public var isTransformed: Bool {
-        return abs(localZoom - 1.0) > 0.01 || localPan != .zero
+        return viewState.isTransformed
+    }
+    
+    /// Get current zoom level
+    public var currentZoom: CGFloat {
+        return viewState.zoom
+    }
+    
+    /// Get baseline zoom level
+    public var baselineZoom: CGFloat {
+        return viewState.baselineZoom
     }
 }
 
-// MARK: - Multi-View Container Example
+// MARK: - Multi-View Container (Updated)
 
 struct MultiViewMPRContainer: View {
     @StateObject private var coordinateSystem = DICOMCoordinateSystem()
@@ -448,5 +268,20 @@ struct MultiViewMPRContainer: View {
                 )
             }
         }
+    }
+}
+
+// MARK: - Preview Provider
+
+struct StandaloneMPRView_Previews: PreviewProvider {
+    static var previews: some View {
+        StandaloneMPRView(
+            plane: .axial,
+            coordinateSystem: DICOMCoordinateSystem(),
+            sharedState: SharedViewingState(),
+            viewSize: CGSize(width: 400, height: 400)
+        )
+        .frame(width: 400, height: 400)
+        .background(.black)
     }
 }
