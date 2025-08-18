@@ -250,35 +250,29 @@ struct CTDisplayLayer: UIViewRepresentable {
             self.currentWindowLevel = windowLevel
             self.currentScrollVelocity = scrollVelocity
             
-            // FIXED: Use velocity-based quality and update SharedViewingState
-            let velocityBasedQuality = determineQuality(from: scrollVelocity)
-            
-            print("🚀 QUALITY DEBUG:")
-            print("   📊 Scroll velocity: \(scrollVelocity)")
-            print("   🎯 Velocity-based quality: \(velocityBasedQuality)")
-            
-            // Update SharedViewingState with velocity-based quality
+            // SIMPLIFIED: Use SharedViewingState quality directly (set by MPRGestureController)
+            let newQuality: MetalVolumeRenderer.RenderQuality
             if let sharedState = sharedState {
-                let qualityValue: Int
-                switch velocityBasedQuality {
-                case .full:
-                    qualityValue = 1
-                case .half:
-                    qualityValue = 2
-                case .quarter:
-                    qualityValue = 4
-                case .eighth:
-                    qualityValue = 8
-                }
+                let currentRenderQuality = sharedState.getQuality(for: plane)
+                print("🎯 Using quality \(currentRenderQuality) for plane \(plane) (from SharedViewingState)")
                 
-                // Only update if quality changed to avoid unnecessary updates
-                if sharedState.getQuality(for: plane) != qualityValue {
-                    sharedState.setQuality(for: plane, quality: qualityValue)
-                    print("   🔄 Updated SharedViewingState quality for \(plane): \(qualityValue)")
+                // Convert SharedViewingState quality to MetalVolumeRenderer quality
+                switch currentRenderQuality {
+                case 1:
+                    newQuality = .full
+                case 2:
+                    newQuality = .half
+                case 4:
+                    newQuality = .quarter
+                case 8:
+                    newQuality = .eighth
+                default:
+                    newQuality = .full
                 }
+            } else {
+                // Fallback when no shared state
+                newQuality = .full
             }
-            
-            let newQuality = velocityBasedQuality
             
             if newQuality != currentQuality {
                 currentQuality = newQuality
@@ -497,22 +491,7 @@ struct CTDisplayLayer: UIViewRepresentable {
         }
         
         // MARK: - Adaptive Quality Methods
-        
-        private func determineQuality(from velocity: Float) -> MetalVolumeRenderer.RenderQuality {
-            // Velocity is in pixels per second (much higher scale than expected)
-            let absVelocity = abs(velocity)
-            
-            // FIXED: Use proper velocity scale matching main view (100s, not decimals)
-            if absVelocity < 10 {
-                return .full  // Very slow: full quality
-            } else if absVelocity < 50 {
-                return .half  // Slow: half quality
-            } else if absVelocity < 150 {
-                return .quarter  // Medium: quarter quality
-            } else {
-                return .eighth  // Fast: minimum quality
-            }
-        }
+        // NOTE: Quality is now managed by MPRGestureController via SharedViewingState
         
         private func restoreFullQuality() {
             guard currentQuality != .full else { return }
