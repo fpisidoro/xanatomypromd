@@ -94,11 +94,6 @@ struct XAnatomyProV2MainView: View {
                     } else {
                         ZStack {
                             mprViewsLayout(in: geometry)
-                                .background(
-                                    TwoFingerScrollHandler { direction, velocity in
-                                        handleTwoFingerScroll(direction: direction, velocity: velocity)
-                                    }
-                                )
                             
                             sliceNavigationOverlay(in: geometry)
                         }
