@@ -268,8 +268,8 @@ struct XAnatomyProV2MainView: View {
                 
                 Spacer()
                 
-                Button("TRIPLE") {
-                    layoutMode = .triple
+                Button("2x2") {
+                    layoutMode = .quad
                 }
                 .foregroundColor(.green)
                 .padding()
@@ -366,8 +366,64 @@ struct XAnatomyProV2MainView: View {
             }
             
         case .double, .quad, .automatic:
-            Text("Layout: \(effectiveLayout.displayName)")
-                .foregroundColor(.white)
+            if effectiveLayout == .quad {
+                // 2x2 Grid: Axial (top-left), Coronal (top-right), Sagittal (bottom-left), 3D (bottom-right)
+                VStack(spacing: 2) {
+                    HStack(spacing: 2) {
+                        // Top-left: Axial
+                        StandaloneMPRView(
+                            plane: .axial,
+                            coordinateSystem: coordinateSystem,
+                            sharedState: sharedState,
+                            volumeData: dataManager.volumeData,
+                            roiData: dataManager.roiData,
+                            viewSize: viewSize,
+                            allowInteraction: true
+                        )
+                        .id("quad-axial-view")
+                        
+                        // Top-right: Coronal
+                        StandaloneMPRView(
+                            plane: .coronal,
+                            coordinateSystem: coordinateSystem,
+                            sharedState: sharedState,
+                            volumeData: dataManager.volumeData,
+                            roiData: dataManager.roiData,
+                            viewSize: viewSize,
+                            allowInteraction: true
+                        )
+                        .id("quad-coronal-view")
+                    }
+                    
+                    HStack(spacing: 2) {
+                        // Bottom-left: Sagittal
+                        StandaloneMPRView(
+                            plane: .sagittal,
+                            coordinateSystem: coordinateSystem,
+                            sharedState: sharedState,
+                            volumeData: dataManager.volumeData,
+                            roiData: dataManager.roiData,
+                            viewSize: viewSize,
+                            allowInteraction: true
+                        )
+                        .id("quad-sagittal-view")
+                        
+                        // Bottom-right: 3D
+                        Standalone3DView(
+                            coordinateSystem: coordinateSystem,
+                            sharedState: sharedState,
+                            volumeData: dataManager.volumeData,
+                            roiData: dataManager.roiData,
+                            viewSize: viewSize,
+                            allowInteraction: true
+                        )
+                        .id("quad-3d-view")
+                    }
+                }
+            } else {
+                Text("Layout: \(effectiveLayout.displayName)")
+                    .foregroundColor(.white)
+            }
         }
     }
     
