@@ -176,10 +176,10 @@ struct MPRGestureController: UIViewRepresentable {
             
             // Determine behavior based on current zoom level
             if viewState.allowsOneFingerScroll {
-                // At low zoom: 1-finger scroll
+                // At low zoom: 1-finger scroll ONLY (no horizontal pan)
                 handleOneFingerScroll(gesture: gesture, translation: translation, velocity: velocity)
             } else {
-                // At high zoom: 1-finger pan
+                // At high zoom: 1-finger pan (all directions)
                 handlePanMovement(gesture: gesture, translation: translation, velocity: velocity)
             }
         }
@@ -189,17 +189,18 @@ struct MPRGestureController: UIViewRepresentable {
             translation: CGPoint, 
             velocity: CGPoint
         ) {
-            // Only handle primarily vertical movement for slice scrolling
+            // ONLY handle vertical movement for slice scrolling - no horizontal pan at low zoom
             let isVerticalGesture = abs(translation.y) > abs(translation.x) * config.verticalGestureRatio
             
             if isVerticalGesture {
+                // Process vertical scrolling
                 switch gesture.state {
                 case .began:
                     oneFingerScrollAccumulator = 0
                     lastOneFingerTranslation = translation.y
                     viewState.setInteractionState(isScrolling: true)
                     
-                    print("🖱️ 1-finger @ \(String(format: "%.1f", viewState.zoom))x → SCROLL mode")
+                    print("🖱️ 1-finger @ \(String(format: "%.1f", viewState.zoom))x → SCROLL mode (vertical only)")
                     
                 case .changed:
                     let deltaY = translation.y - lastOneFingerTranslation
@@ -226,10 +227,9 @@ struct MPRGestureController: UIViewRepresentable {
                 default:
                     break
                 }
-            } else {
-                // Horizontal 1-finger at low zoom = pan (for slight adjustments)
-                handlePanMovement(gesture: gesture, translation: translation, velocity: velocity)
             }
+            // REMOVED: else clause that handled horizontal pan at low zoom
+            // This prevents unsteady scrolling by eliminating horizontal pan interference
         }
         
         private func handlePanMovement(
@@ -240,7 +240,7 @@ struct MPRGestureController: UIViewRepresentable {
             switch gesture.state {
             case .began:
                 viewState.setInteractionState(isPanning: true)
-                print("🖱️ 1-finger @ \(String(format: "%.1f", viewState.zoom))x → PAN mode")
+                print("🖱️ 1-finger @ \(String(format: "%.1f", viewState.zoom))x → PAN mode (high zoom)")
                 
             case .changed:
                 viewState.setPan(CGSize(width: translation.x, height: translation.y))
@@ -257,15 +257,17 @@ struct MPRGestureController: UIViewRepresentable {
             let translation = gesture.translation(in: gesture.view)
             let velocity = gesture.velocity(in: gesture.view)
             
-            // Only handle primarily vertical movement for slice scrolling
+            // ONLY handle vertical movement for slice scrolling - no horizontal pan for 2-finger
             let isVerticalGesture = abs(translation.y) > abs(translation.x) * config.verticalGestureRatio
             
             if isVerticalGesture {
+                // Process vertical scrolling
                 switch gesture.state {
                 case .began:
                     scrollAccumulator = 0
                     lastScrollTranslation = translation.y
                     viewState.setInteractionState(isScrolling: true)
+                    print("✌️ 2-finger → SCROLL mode (vertical only)")
                     
                 case .changed:
                     let deltaY = translation.y - lastScrollTranslation
@@ -292,10 +294,9 @@ struct MPRGestureController: UIViewRepresentable {
                 default:
                     break
                 }
-            } else {
-                // Horizontal 2-finger = pan
-                handlePanMovement(gesture: gesture, translation: translation, velocity: velocity)
             }
+            // REMOVED: else clause that handled horizontal pan for 2-finger
+            // This eliminates horizontal pan for 2-finger gestures entirely
         }
         
         @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
