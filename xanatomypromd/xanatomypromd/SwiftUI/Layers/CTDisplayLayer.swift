@@ -499,18 +499,18 @@ struct CTDisplayLayer: UIViewRepresentable {
         // MARK: - Adaptive Quality Methods
         
         private func determineQuality(from velocity: Float) -> MetalVolumeRenderer.RenderQuality {
-            // Velocity is in slices per second
+            // Velocity is in pixels per second (much higher scale than expected)
             let absVelocity = abs(velocity)
             
-            // QUAD MODE FIX: Much more aggressive quality reduction for better performance
-            if absVelocity < 0.1 {
-                return .full  // Stopped: full quality
-            } else if absVelocity < 0.5 {
-                return .half  // Very slow: half quality
-            } else if absVelocity < 1.5 {
-                return .quarter  // Slow: quarter quality
+            // FIXED: Use proper velocity scale matching main view (100s, not decimals)
+            if absVelocity < 10 {
+                return .full  // Very slow: full quality
+            } else if absVelocity < 50 {
+                return .half  // Slow: half quality
+            } else if absVelocity < 150 {
+                return .quarter  // Medium: quarter quality
             } else {
-                return .eighth  // Any significant movement: minimum quality
+                return .eighth  // Fast: minimum quality
             }
         }
         
