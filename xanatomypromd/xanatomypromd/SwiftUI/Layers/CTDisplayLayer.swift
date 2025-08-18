@@ -250,28 +250,35 @@ struct CTDisplayLayer: UIViewRepresentable {
             self.currentWindowLevel = windowLevel
             self.currentScrollVelocity = scrollVelocity
             
-            // FIXED: Use plane-specific quality instead of global
-            let newQuality: MetalVolumeRenderer.RenderQuality
+            // FIXED: Use velocity-based quality and update SharedViewingState
+            let velocityBasedQuality = determineQuality(from: scrollVelocity)
+            
+            print("🚀 QUALITY DEBUG:")
+            print("   📊 Scroll velocity: \(scrollVelocity)")
+            print("   🎯 Velocity-based quality: \(velocityBasedQuality)")
+            
+            // Update SharedViewingState with velocity-based quality
             if let sharedState = sharedState {
-                // Get quality for THIS specific plane only
-                let currentRenderQuality = sharedState.getQuality(for: plane)
-                print("🎯 Using quality \(currentRenderQuality) for plane \(plane)")
-                
-                // Convert SharedViewingState quality to MetalVolumeRenderer quality
-                switch currentRenderQuality {
-                case 1:
-                    newQuality = .full
-                case 2:
-                    newQuality = .half
-                case 4:
-                    newQuality = .quarter
-                default:
-                    newQuality = .full
+                let qualityValue: Int
+                switch velocityBasedQuality {
+                case .full:
+                    qualityValue = 1
+                case .half:
+                    qualityValue = 2
+                case .quarter:
+                    qualityValue = 4
+                case .eighth:
+                    qualityValue = 8
                 }
-            } else {
-                // Fallback to velocity-based quality
-                newQuality = determineQuality(from: scrollVelocity)
+                
+                // Only update if quality changed to avoid unnecessary updates
+                if sharedState.getQuality(for: plane) != qualityValue {
+                    sharedState.setQuality(for: plane, quality: qualityValue)
+                    print("   🔄 Updated SharedViewingState quality for \(plane): \(qualityValue)")
+                }
             }
+            
+            let newQuality = velocityBasedQuality
             
             if newQuality != currentQuality {
                 currentQuality = newQuality
@@ -495,15 +502,15 @@ struct CTDisplayLayer: UIViewRepresentable {
             // Velocity is in slices per second
             let absVelocity = abs(velocity)
             
-            // More aggressive quality reduction for better performance
-            if absVelocity < 0.5 {
-                return .full  // Very slow or stopped: full quality
-            } else if absVelocity < 2.0 {
-                return .half  // Slow: half quality
-            } else if absVelocity < 5.0 {
-                return .quarter  // Medium: quarter quality
+            // QUAD MODE FIX: Much more aggressive quality reduction for better performance
+            if absVelocity < 0.1 {
+                return .full  // Stopped: full quality
+            } else if absVelocity < 0.5 {
+                return .half  // Very slow: half quality
+            } else if absVelocity < 1.5 {
+                return .quarter  // Slow: quarter quality
             } else {
-                return .eighth  // Fast: minimum quality
+                return .eighth  // Any significant movement: minimum quality
             }
         }
         
@@ -515,8 +522,11 @@ struct CTDisplayLayer: UIViewRepresentable {
             cachedTexture = nil
             cacheKey = ""
             
-            // Trigger redraw
+            // Update SharedViewingState to reflect restored quality
             if let coordinateSystem = currentCoordinateSystem {
+                // Note: We don't have direct access to sharedState here, but the next
+                // updateRenderingParameters call with velocity=0 will set it to quality 1
+                
                 DispatchQueue.main.async { [weak self] in
                     // Force a refresh by clearing cache
                     self?.cachedTexture = nil
