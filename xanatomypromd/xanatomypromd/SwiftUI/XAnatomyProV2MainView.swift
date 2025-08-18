@@ -179,23 +179,112 @@ struct XAnatomyProV2MainView: View {
     
     private var headerBar: some View {
         HStack {
-            Text("X-Anatomy Pro v2.0")
-                .font(.headline)
-                .foregroundColor(.white)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("X-Anatomy Pro v2.0")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                
+                if let patientInfo = dataManager.patientInfo {
+                    Text(patientInfo.name)
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                }
+            }
+            
             Spacer()
+            
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(selectedSingleViewPlane.displayName)
+                    .font(.headline)
+                    .foregroundColor(.blue)
+                
+                let sliceIndex = coordinateSystem.getCurrentSliceIndex(for: selectedSingleViewPlane.mprPlane ?? .axial)
+                let maxSlices = coordinateSystem.getMaxSlices(for: selectedSingleViewPlane.mprPlane ?? .axial)
+                Text("Slice \(sliceIndex + 1)/\(maxSlices)")
+                    .font(.caption)
+                    .foregroundColor(.white)
+                
+                Text(sharedState.windowLevel.name)
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+            }
+            
+            Button(action: { withAnimation { showControls.toggle() } }) {
+                Image(systemName: showControls ? "chevron.down" : "chevron.up")
+                    .foregroundColor(.white)
+            }
         }
-        .padding()
-        .background(Color.black)
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.8))
     }
     
     private var bottomControls: some View {
-        HStack {
-            Text("Controls")
-                .foregroundColor(.white)
-            Spacer()
+        VStack(spacing: 0) {
+            // TEST BUTTONS - Direct from working version
+            HStack {
+                Button("AXIAL") { 
+                    selectedSingleViewPlane = .axial
+                    layoutMode = .single
+                }
+                .foregroundColor(.blue)
+                .padding()
+                
+                Button("SAGITTAL") { 
+                    selectedSingleViewPlane = .sagittal
+                    layoutMode = .single
+                }
+                .foregroundColor(.blue)
+                .padding()
+                
+                Button("CORONAL") { 
+                    selectedSingleViewPlane = .coronal
+                    layoutMode = .single
+                }
+                .foregroundColor(.blue)
+                .padding()
+                
+                Button("3D") { 
+                    selectedSingleViewPlane = .threeDimensional
+                    layoutMode = .single
+                }
+                .foregroundColor(.blue)
+                .padding()
+                
+                Button("BONE") { 
+                    sharedState.windowLevel = CTWindowLevel.bone
+                }
+                .foregroundColor(.red)
+                .padding()
+                
+                Button("LUNG") { 
+                    sharedState.windowLevel = CTWindowLevel.lung
+                }
+                .foregroundColor(.red)
+                .padding()
+                
+                Button("SOFT") { 
+                    sharedState.windowLevel = CTWindowLevel.softTissue
+                }
+                .foregroundColor(.red)
+                .padding()
+                
+                Spacer()
+                
+                Button("TRIPLE") {
+                    layoutMode = .triple
+                }
+                .foregroundColor(.green)
+                .padding()
+                
+                Button("SINGLE") {
+                    layoutMode = .single
+                }
+                .foregroundColor(.green)
+                .padding()
+            }
+            .background(Color.white)
         }
-        .padding()
-        .background(Color.black)
     }
     
     private var persistentControls: some View {
@@ -220,15 +309,26 @@ struct XAnatomyProV2MainView: View {
         
         switch effectiveLayout {
         case .single:
-            StandaloneMPRView(
-                plane: selectedSingleViewPlane.mprPlane ?? .axial,
-                coordinateSystem: coordinateSystem,
-                sharedState: sharedState,
-                volumeData: dataManager.volumeData,
-                roiData: dataManager.roiData,
-                viewSize: viewSize,
-                allowInteraction: true
-            )
+            if selectedSingleViewPlane == .threeDimensional {
+                Standalone3DView(
+                    coordinateSystem: coordinateSystem,
+                    sharedState: sharedState,
+                    volumeData: dataManager.volumeData,
+                    roiData: dataManager.roiData,
+                    viewSize: viewSize,
+                    allowInteraction: true
+                )
+            } else {
+                StandaloneMPRView(
+                    plane: selectedSingleViewPlane.mprPlane ?? .axial,
+                    coordinateSystem: coordinateSystem,
+                    sharedState: sharedState,
+                    volumeData: dataManager.volumeData,
+                    roiData: dataManager.roiData,
+                    viewSize: viewSize,
+                    allowInteraction: true
+                )
+            }
             
         case .triple:
             HStack(spacing: 2) {
@@ -340,6 +440,178 @@ struct XAnatomyProV2MainView: View {
             return .quad    // Large iPad/Mac
         }
     }
+}
+
+// MARK: - Data Manager
+
+@MainActor
+class XAnatomyDataManager: ObservableObject {
+    @Published var volumeData: VolumeData?
+    @Published var roiData: MinimalRTStructParser.SimpleRTStructData?
+    @Published var patientInfo: PatientInfo?
+    @Published var isLoading = false
+    @Published var loadingProgress: String = ""
+    @Published var loadingCurrent: Int = 0
+    @Published var loadingTotal: Int = 0
+    @Published var isAxialReady = false
+    
+    private var volumeRenderer: MetalVolumeRenderer?
+    
+    var isVolumeLoaded: Bool { volumeData != nil }
+    var isROILoaded: Bool { roiData != nil }
+    
+    init() {
+        // Initialize volume renderer
+        do {
+            volumeRenderer = try MetalVolumeRenderer()
+            print("✅ MetalVolumeRenderer initialized")
+        } catch {
+            print("❌ Failed to initialize MetalVolumeRenderer: \(error)")
+        }
+    }
+    
+    func loadAllData() async {
+        isLoading = true
+        loadingProgress = "Initializing..."
+        
+        await loadVolumeData()
+        await loadROIData()
+        await loadPatientInfo()
+        
+        isLoading = false
+        loadingProgress = "Complete"
+    }
+    
+    private func loadVolumeData() async {
+        loadingProgress = "Loading DICOM files..."
+        
+        do {
+            // Get DICOM files from bundle
+            let dicomFiles = getDICOMFiles()
+            
+            guard !dicomFiles.isEmpty else {
+                return
+            }
+            
+            // Set total for progress tracking
+            loadingTotal = dicomFiles.count
+            loadingProgress = "Processing \(dicomFiles.count) DICOM files..."
+            
+            // Simulate progress updates
+            for (index, _) in dicomFiles.enumerated() {
+                loadingCurrent = index + 1
+                try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
+            }
+            
+            // Load volume using MetalVolumeRenderer
+            if let renderer = volumeRenderer {
+                let loadedVolumeData = try await renderer.loadVolumeFromDICOMFiles(dicomFiles)
+                volumeData = loadedVolumeData
+                loadingProgress = "Volume loaded successfully"
+            }
+            
+        } catch {
+            print("❌ Failed to load volume data: \(error)")
+            loadingProgress = "Failed to load volume: \(error.localizedDescription)"
+        }
+    }
+    
+    private func loadROIData() async {
+        loadingProgress = "Loading ROI structures..."
+        
+        let rtStructFiles = DICOMFileManager.getRTStructFiles()
+        
+        if !rtStructFiles.isEmpty {
+            let rtStructFile = rtStructFiles[0]
+            
+            do {
+                let data = try Data(contentsOf: rtStructFile)
+                let dataset = try DICOMParser.parse(data)
+                
+                if let simpleRTStruct = MinimalRTStructParser.parseSimpleRTStruct(from: dataset) {
+                    roiData = simpleRTStruct
+                    loadingProgress = "RTStruct loaded: \(simpleRTStruct.roiStructures.count) ROIs"
+                } else {
+                    loadingProgress = "RTStruct parsing failed - no geometry found"
+                }
+                
+            } catch {
+                loadingProgress = "Failed to load RTStruct: \(error.localizedDescription)"
+            }
+        } else {
+            loadingProgress = "No RTStruct files found"
+        }
+    }
+    
+    private func loadPatientInfo() async {
+        loadingProgress = "Loading patient information..."
+        
+        let dicomFiles = getDICOMFiles()
+        if let firstFile = dicomFiles.first {
+            do {
+                let data = try Data(contentsOf: firstFile)
+                let dataset = try DICOMParser.parse(data)
+                
+                let patientName = dataset.getString(tag: DICOMTag.patientName) ?? "Unknown Patient"
+                let studyDate = dataset.getString(tag: DICOMTag.studyDate) ?? "Unknown Date"
+                let modality = dataset.getString(tag: DICOMTag.modality) ?? "CT"
+                
+                patientInfo = PatientInfo(
+                    name: patientName,
+                    studyDate: studyDate,
+                    modality: modality
+                )
+                
+                loadingProgress = "Patient information loaded"
+                
+            } catch {
+                patientInfo = PatientInfo(
+                    name: "Test Patient XAPV2",
+                    studyDate: "2025-01-28",
+                    modality: "CT"
+                )
+            }
+        }
+    }
+    
+    private func getDICOMFiles() -> [URL] {
+        guard let bundlePath = Bundle.main.resourcePath else {
+            return []
+        }
+        
+        do {
+            let fileURLs = try FileManager.default.contentsOfDirectory(
+                at: URL(fileURLWithPath: bundlePath),
+                includingPropertiesForKeys: nil,
+                options: .skipsHiddenFiles
+            )
+            
+            let dicomFiles = fileURLs.filter { url in
+                let filename = url.lastPathComponent
+                return (url.pathExtension.lowercased() == "dcm" ||
+                        filename.contains("2.16.840.1.114362")) &&
+                       !filename.contains("rtstruct") &&
+                       !filename.contains("test_")
+            }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+            
+            return dicomFiles
+            
+        } catch {
+            return []
+        }
+    }
+    
+    func getVolumeRenderer() -> MetalVolumeRenderer? {
+        return volumeRenderer
+    }
+}
+
+// MARK: - Supporting Types
+
+struct PatientInfo {
+    let name: String
+    let studyDate: String
+    let modality: String
 }
 
 // MARK: - Preview
