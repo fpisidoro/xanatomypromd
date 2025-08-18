@@ -145,7 +145,8 @@ struct XAnatomyProV2MainView: View {
         if newQuality != currentQuality {
             currentQuality = newQuality
             Task { @MainActor in
-                sharedState.renderQuality = newQuality.rawValue
+                // Use new plane-specific quality method
+                sharedState.setQuality(for: .axial, quality: newQuality.rawValue)
             }
         }
         
@@ -154,7 +155,8 @@ struct XAnatomyProV2MainView: View {
             Task { @MainActor in
                 if currentQuality != .full {
                     currentQuality = .full
-                    sharedState.renderQuality = ScrollQuality.full.rawValue
+                    // Use new plane-specific quality method
+                    sharedState.setQuality(for: .axial, quality: ScrollQuality.full.rawValue)
                 }
             }
         }
