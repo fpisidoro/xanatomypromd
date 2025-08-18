@@ -277,6 +277,132 @@ kernel void volumeRender3D(
             color = float3(0.7, 0.8, 0.9) * windowed;
         }
         
+        // RESTORED: 3D Crosshair axes - drawn INTO the volume at actual crosshair position
+        float3 crosshairPos = float3(params.crosshairX, params.crosshairY, params.crosshairZ);
+        
+        // Account for anisotropic voxel spacing when checking line thickness
+        float3 spacing = float3(params.spacingX, params.spacingY, params.spacingZ);
+        
+        // Line thickness in physical mm (not voxels)
+        float physicalLineThickness = 1.5;  // Thinner lines
+        
+        // Convert to voxel units for each axis
+        float3 lineThicknessVoxels = physicalLineThickness / spacing;
+        
+        // Subtle green crosshair color (matches MPR views)
+        float3 crosshairColor = float3(0.0, 1.0, 0.0);  // Green
+        float crosshairAlpha = 0.6;  // Semi-transparent
+        
+        // X-axis line - runs along X at crosshair Y and Z
+        if (abs(volumePos.y - crosshairPos.y) < lineThicknessVoxels.y && 
+            abs(volumePos.z - crosshairPos.z) < lineThicknessVoxels.z) {
+            color = crosshairColor;
+            alpha = crosshairAlpha;
+        }
+        
+        // Y-axis line - runs along Y at crosshair X and Z
+        if (abs(volumePos.x - crosshairPos.x) < lineThicknessVoxels.x && 
+            abs(volumePos.z - crosshairPos.z) < lineThicknessVoxels.z) {
+            color = crosshairColor;
+            alpha = crosshairAlpha;
+        }
+        
+        // Z-axis line - runs along Z at crosshair X and Y
+        if (abs(volumePos.x - crosshairPos.x) < lineThicknessVoxels.x && 
+            abs(volumePos.y - crosshairPos.y) < lineThicknessVoxels.y) {
+            color = crosshairColor;
+            alpha = crosshairAlpha;
+        }
+        
+        // Center intersection point - small bright dot
+        float3 centerOffset = volumePos - crosshairPos;
+        float3 physicalOffset = centerOffset * spacing;
+        float physicalDist = length(physicalOffset);  // Distance in mm
+        
+        if (physicalDist < 2.0) {  // Small center dot
+            color = float3(1.0, 1.0, 0.0);  // Yellow center for visibility
+            alpha = 0.8;
+        }
+        
+        // RESTORED: 3D ROI visualization - draw actual contour outlines
+        if (params.showROI > 0.5 && params.roiCount > 0 && roiData != nullptr) {
+            // Read ROI metadata from buffer
+            float3 roiColor = float3(roiData[0], roiData[1], roiData[2]);
+            int contourCount = int(roiData[3]);
+            int dataOffset = 4;  // Start after metadata
+            
+            // volumePos is in voxel coordinates, same as crosshairPos
+            // ROI points are in world coordinates, so convert them to voxel space
+            float3 volumeOrigin = float3(params.originX, params.originY, params.originZ);
+            
+            bool nearROI = false;
+            
+            // Check all contours
+            for (int c = 0; c < contourCount && c < 10; c++) {
+                float sliceZ = roiData[dataOffset];
+                int pointCount = int(roiData[dataOffset + 1]);
+                
+                // Convert ROI Z position from world to voxel coordinates
+                float roiZVoxel = (sliceZ - volumeOrigin.z) / spacing.z;
+                
+                // Check if we're at this contour's Z slice (within slice thickness)
+                if (abs(volumePos.z - roiZVoxel) < 1.0) {
+                    float2 posxy = volumePos.xy;
+                    
+                    // Check distance to each edge of the contour
+                    for (int i = 0; i < pointCount && i < 50; i++) {
+                        int j = i + 1;
+                        if (j >= pointCount) j = 0;  // Wrap to first point
+                        
+                        float3 p1World = float3(
+                            roiData[dataOffset + 2 + i*3],
+                            roiData[dataOffset + 2 + i*3 + 1],
+                            roiData[dataOffset + 2 + i*3 + 2]
+                        );
+                        float3 p2World = float3(
+                            roiData[dataOffset + 2 + j*3],
+                            roiData[dataOffset + 2 + j*3 + 1],
+                            roiData[dataOffset + 2 + j*3 + 2]
+                        );
+                        
+                        float3 p1Voxel = (p1World - volumeOrigin) / spacing;
+                        float3 p2Voxel = (p2World - volumeOrigin) / spacing;
+                        
+                        float2 p1xy = p1Voxel.xy;
+                        float2 p2xy = p2Voxel.xy;
+                        
+                        // Calculate distance from posxy to the line segment p1-p2
+                        float2 edge = p2xy - p1xy;
+                        float2 toPos = posxy - p1xy;
+                        float edgeLength = length(edge);
+                        
+                        if (edgeLength > 0.01) {
+                            float t = clamp(dot(toPos, edge) / (edgeLength * edgeLength), 0.0, 1.0);
+                            float2 nearest = p1xy + t * edge;
+                            float dist = length(posxy - nearest);
+                            
+                            if (dist < 2.0) {  // Outline thickness
+                                nearROI = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (nearROI) break;
+                }
+                
+                // Move to next contour in buffer
+                dataOffset += 2 + pointCount * 3;
+            }
+            
+            // Apply ROI coloring
+            if (nearROI) {
+                // Strong outline
+                color = roiColor;
+                alpha = 1.0;  // Full opacity for visibility
+            }
+        }
+        
         // Front-to-back compositing
         float stepAlpha = alpha / float(numSteps) * 60.0;
         accumulatedColor += color * stepAlpha * (1.0 - accumulatedAlpha);
