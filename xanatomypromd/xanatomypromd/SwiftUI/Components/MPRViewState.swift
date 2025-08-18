@@ -49,8 +49,7 @@ class MPRViewState: ObservableObject {
     init(plane: MPRPlane = .axial) {
         self.currentPlane = plane
         updateBaselineZoom()
-        
-        print("🎥 MPRViewState initialized for \(plane.displayName) plane")
+        print("\(plane) viewState created")
     }
     
     // MARK: - State Management
@@ -67,14 +66,14 @@ class MPRViewState: ObservableObject {
         self.volumeDimensions = volumeDimensions
         self.currentPlane = currentPlane
         
+        print("Plane set to: \(currentPlane)")
+        
         updateBaselineZoom()
         
         // If baseline changed significantly, adjust current zoom proportionally
         if abs(oldBaseline - baselineZoom) > 0.01 && oldBaseline > 0 {
             let ratio = baselineZoom / oldBaseline
             zoom *= ratio
-            
-            print("📐 Baseline changed: \(String(format: "%.2f", oldBaseline))x → \(String(format: "%.2f", baselineZoom))x, zoom adjusted: \(String(format: "%.2f", zoom))x")
         }
     }
     
@@ -211,8 +210,8 @@ struct GestureConfiguration {
     /// Sensitivity multiplier for different planes
     let planeScrollSensitivity: [MPRPlane: Float] = [
         .axial: 1.0,     // Full sensitivity for axial (most slices)
-        .sagittal: 0.7,  // Reduced for sagittal
-        .coronal: 0.7    // Reduced for coronal
+        .sagittal: 1.0,  // Full sensitivity for sagittal (was 0.7 - too low!)
+        .coronal: 1.0    // Full sensitivity for coronal (was 0.7 - too low!)
     ]
     
     // MARK: - Zoom Settings

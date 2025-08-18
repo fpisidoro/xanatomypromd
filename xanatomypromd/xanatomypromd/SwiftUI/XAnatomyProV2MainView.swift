@@ -313,6 +313,7 @@ struct XAnatomyProV2MainView: View {
                     viewSize: viewSize,
                     allowInteraction: true
                 )
+                .id("3d-view")  // 🔧 FIX: Force unique @StateObject identity
             } else {
                 StandaloneMPRView(
                     plane: selectedSingleViewPlane.mprPlane ?? .axial,
@@ -323,6 +324,7 @@ struct XAnatomyProV2MainView: View {
                     viewSize: viewSize,
                     allowInteraction: true
                 )
+                .id("single-\(selectedSingleViewPlane.displayName.lowercased())")  // 🔧 FIX: Unique identity per plane
             }
             
         case .triple:
@@ -336,6 +338,7 @@ struct XAnatomyProV2MainView: View {
                     viewSize: viewSize,
                     allowInteraction: true
                 )
+                .id("axial-view")  // 🔧 FIX: Force separate @StateObject for axial
                 
                 StandaloneMPRView(
                     plane: .sagittal,
@@ -346,6 +349,7 @@ struct XAnatomyProV2MainView: View {
                     viewSize: viewSize,
                     allowInteraction: true
                 )
+                .id("sagittal-view")  // 🔧 FIX: Force separate @StateObject for sagittal
                 
                 StandaloneMPRView(
                     plane: .coronal,
@@ -356,6 +360,7 @@ struct XAnatomyProV2MainView: View {
                     viewSize: viewSize,
                     allowInteraction: true
                 )
+                .id("coronal-view")  // 🔧 FIX: Force separate @StateObject for coronal
             }
             
         case .double, .quad, .automatic:

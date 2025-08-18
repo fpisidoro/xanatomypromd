@@ -96,6 +96,8 @@ struct StandaloneMPRView: View {
         .clipped()
         .background(.black)
         .onAppear {
+            // Force plane assignment immediately
+            viewState.currentPlane = plane
             updateViewStateConfiguration()
         }
         .onChange(of: viewSize) {

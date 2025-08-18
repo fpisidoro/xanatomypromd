@@ -339,28 +339,48 @@ struct MPRGestureController: UIViewRepresentable {
         // MARK: - Slice Navigation
         
         private func handleSliceScroll(direction: Int, speed: CGFloat) {
+            // ADD DEBUG LOGGING HERE
+            print("🎯 SCROLL DEBUG:")
+            print("   Plane: \(viewState.currentPlane)")
+            print("   Direction: \(direction)")
+            print("   Speed: \(speed)")
+            
             // Start quality reduction based on scroll speed
             startScrollQualityReduction(velocity: speed)
             
             // Calculate plane-aware sensitivity
             let sensitivity = config.planeScrollSensitivity[viewState.currentPlane] ?? 1.0
+            print("   Sensitivity: \(sensitivity)")
             
             // For educational use: always navigate one slice at a time
             let sliceChange = Int(Float(direction) * sensitivity).clamped(to: -1...1)
+            print("   Slice change: \(sliceChange)")
             
             if sliceChange != 0 {
+                print("   Calling navigateSlices...")
                 navigateSlices(by: sliceChange)
+            } else {
+                print("   ❌ No slice change - sliceChange = 0")
             }
         }
         
         private func navigateSlices(by amount: Int) {
+            print("🔄 NAVIGATE DEBUG:")
+            print("   Plane: \(viewState.currentPlane)")
+            print("   Amount: \(amount)")
+            
             let currentSlice = coordinateSystem.getCurrentSliceIndex(for: viewState.currentPlane)
             let totalSlices = coordinateSystem.getMaxSlices(for: viewState.currentPlane)
+            print("   Current: \(currentSlice), Total: \(totalSlices)")
+            
             let newSlice = max(0, min(totalSlices - 1, currentSlice + amount))
+            print("   New slice: \(newSlice)")
             
             if newSlice != currentSlice {
-                print("📏 [\(viewState.currentPlane.displayName)] Scrolling: \(currentSlice) → \(newSlice) / \(totalSlices)")
+                print("   ✅ Updating slice: \(currentSlice)→\(newSlice)")
                 coordinateSystem.updateFromSliceScroll(plane: viewState.currentPlane, sliceIndex: newSlice)
+            } else {
+                print("   ❌ No update - same slice or invalid bounds")
             }
         }
         
