@@ -27,6 +27,7 @@ struct StandaloneMPRView: View {
     /// View configuration
     let viewSize: CGSize
     let allowInteraction: Bool
+    let scrollVelocity: Float  // NEW: Scroll velocity for adaptive quality
     
     // MARK: - Local State (Pure View State)
     
@@ -45,7 +46,8 @@ struct StandaloneMPRView: View {
         volumeData: VolumeData? = nil,
         roiData: MinimalRTStructParser.SimpleRTStructData? = nil,
         viewSize: CGSize = CGSize(width: 512, height: 512),
-        allowInteraction: Bool = true
+        allowInteraction: Bool = true,
+        scrollVelocity: Float = 0.0  // NEW: Default to 0
     ) {
         self.plane = plane
         self.coordinateSystem = coordinateSystem
@@ -54,6 +56,7 @@ struct StandaloneMPRView: View {
         self.roiData = roiData
         self.viewSize = viewSize
         self.allowInteraction = allowInteraction
+        self.scrollVelocity = scrollVelocity  // NEW: Store scroll velocity
         
         // 🔧 FIX: Initialize viewState with correct plane IMMEDIATELY
         self._viewState = StateObject(wrappedValue: MPRViewState(plane: plane))
@@ -74,6 +77,7 @@ struct StandaloneMPRView: View {
                 roiData: roiData,
                 viewSize: viewSize,
                 allowInteraction: false,  // Gesture handling is separate
+                scrollVelocity: scrollVelocity,  // NEW: Pass through scroll velocity
                 sharedState: sharedState
             )
             .scaleEffect(viewState.zoom)

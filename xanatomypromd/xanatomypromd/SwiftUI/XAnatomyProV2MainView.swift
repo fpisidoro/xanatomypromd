@@ -133,10 +133,16 @@ struct XAnatomyProV2MainView: View {
         scrollVelocity = Float(velocity)
         lastSliceChange = Date()
         
+        // FIXED: Lower thresholds for better responsiveness, especially in quad mode
+        let effectiveLayout = resolveEffectiveLayout(for: UIScreen.main.bounds.size)
+        let velocityMultiplier = effectiveLayout == .quad ? 0.5 : 1.0  // Quad mode is more sensitive
+        
+        let adjustedVelocity = scrollVelocity * Float(velocityMultiplier)
+        
         let newQuality: ScrollQuality
-        if scrollVelocity > 500 {
+        if adjustedVelocity > 200 {  // Reduced from 500
             newQuality = .quarter
-        } else if scrollVelocity > 250 {
+        } else if adjustedVelocity > 100 {  // Reduced from 250
             newQuality = .half
         } else {
             newQuality = .full
@@ -145,21 +151,49 @@ struct XAnatomyProV2MainView: View {
         if newQuality != currentQuality {
             currentQuality = newQuality
             Task { @MainActor in
-                // Use new plane-specific quality method
-                sharedState.setQuality(for: .axial, quality: newQuality.rawValue)
+                // FIXED: Apply quality to ALL planes, not just axial
+                applyQualityToAllViews(quality: newQuality)
             }
         }
         
         qualityTimer?.invalidate()
-        qualityTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
+        qualityTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { _ in  // Faster restore
             Task { @MainActor in
                 if currentQuality != .full {
                     currentQuality = .full
-                    // Use new plane-specific quality method
-                    sharedState.setQuality(for: .axial, quality: ScrollQuality.full.rawValue)
+                    // FIXED: Restore quality to ALL planes
+                    applyQualityToAllViews(quality: .full)
                 }
             }
         }
+    }
+    
+    // FIXED: Apply quality changes to all visible views based on layout mode
+    private func applyQualityToAllViews(quality: ScrollQuality) {
+        let effectiveLayout = resolveEffectiveLayout(for: UIScreen.main.bounds.size)
+        
+        switch effectiveLayout {
+        case .single:
+            if let plane = selectedSingleViewPlane.mprPlane {
+                sharedState.setQuality(for: plane, quality: quality.rawValue)
+            }
+        case .triple:
+            // Apply to all three MPR planes
+            sharedState.setQuality(for: .axial, quality: quality.rawValue)
+            sharedState.setQuality(for: .sagittal, quality: quality.rawValue)
+            sharedState.setQuality(for: .coronal, quality: quality.rawValue)
+        case .quad:
+            // Apply to all three MPR planes (3D doesn't use quality setting)
+            sharedState.setQuality(for: .axial, quality: quality.rawValue)
+            sharedState.setQuality(for: .sagittal, quality: quality.rawValue)
+            sharedState.setQuality(for: .coronal, quality: quality.rawValue)
+        default:
+            // Default to axial for other layouts
+            sharedState.setQuality(for: .axial, quality: quality.rawValue)
+        }
+        
+        // Debug logging
+        print("🎛️ Applied quality \(quality.description) to \(effectiveLayout.displayName) layout")
     }
     
     private func navigateSlice(plane: MPRPlane, direction: Int) {
@@ -324,7 +358,8 @@ struct XAnatomyProV2MainView: View {
                     volumeData: dataManager.volumeData,
                     roiData: dataManager.roiData,
                     viewSize: viewSize,
-                    allowInteraction: true
+                    allowInteraction: true,
+                    scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
                 )
                 .id("single-\(selectedSingleViewPlane.displayName.lowercased())")  // 🔧 FIX: Unique identity per plane
             }
@@ -338,7 +373,8 @@ struct XAnatomyProV2MainView: View {
                     volumeData: dataManager.volumeData,
                     roiData: dataManager.roiData,
                     viewSize: viewSize,
-                    allowInteraction: true
+                    allowInteraction: true,
+                    scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
                 )
                 .id("axial-view")  // 🔧 FIX: Force separate @StateObject for axial
                 
@@ -349,7 +385,8 @@ struct XAnatomyProV2MainView: View {
                     volumeData: dataManager.volumeData,
                     roiData: dataManager.roiData,
                     viewSize: viewSize,
-                    allowInteraction: true
+                    allowInteraction: true,
+                    scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
                 )
                 .id("sagittal-view")  // 🔧 FIX: Force separate @StateObject for sagittal
                 
@@ -360,7 +397,8 @@ struct XAnatomyProV2MainView: View {
                     volumeData: dataManager.volumeData,
                     roiData: dataManager.roiData,
                     viewSize: viewSize,
-                    allowInteraction: true
+                    allowInteraction: true,
+                    scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
                 )
                 .id("coronal-view")  // 🔧 FIX: Force separate @StateObject for coronal
             }
@@ -378,7 +416,8 @@ struct XAnatomyProV2MainView: View {
                             volumeData: dataManager.volumeData,
                             roiData: dataManager.roiData,
                             viewSize: viewSize,
-                            allowInteraction: true
+                            allowInteraction: true,
+                            scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
                         )
                         .id("quad-axial-view")
                         
@@ -390,7 +429,8 @@ struct XAnatomyProV2MainView: View {
                             volumeData: dataManager.volumeData,
                             roiData: dataManager.roiData,
                             viewSize: viewSize,
-                            allowInteraction: true
+                            allowInteraction: true,
+                            scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
                         )
                         .id("quad-coronal-view")
                     }
@@ -404,7 +444,8 @@ struct XAnatomyProV2MainView: View {
                             volumeData: dataManager.volumeData,
                             roiData: dataManager.roiData,
                             viewSize: viewSize,
-                            allowInteraction: true
+                            allowInteraction: true,
+                            scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
                         )
                         .id("quad-sagittal-view")
                         
