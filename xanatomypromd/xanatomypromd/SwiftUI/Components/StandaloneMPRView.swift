@@ -30,7 +30,7 @@ struct StandaloneMPRView: View {
     
     // MARK: - Local State (Pure View State)
     
-    @StateObject private var viewState = MPRViewState()
+    @StateObject private var viewState: MPRViewState
     
     // MARK: - Gesture Configuration
     
@@ -54,6 +54,9 @@ struct StandaloneMPRView: View {
         self.roiData = roiData
         self.viewSize = viewSize
         self.allowInteraction = allowInteraction
+        
+        // 🔧 FIX: Initialize viewState with correct plane IMMEDIATELY
+        self._viewState = StateObject(wrappedValue: MPRViewState(plane: plane))
     }
     
     // MARK: - Body (PURELY DECLARATIVE)

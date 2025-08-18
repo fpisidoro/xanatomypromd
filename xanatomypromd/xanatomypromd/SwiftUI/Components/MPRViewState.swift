@@ -46,8 +46,11 @@ class MPRViewState: ObservableObject {
     
     // MARK: - Initialization
     
-    init() {
+    init(plane: MPRPlane = .axial) {
+        self.currentPlane = plane
         updateBaselineZoom()
+        
+        print("🎥 MPRViewState initialized for \(plane.displayName) plane")
     }
     
     // MARK: - State Management

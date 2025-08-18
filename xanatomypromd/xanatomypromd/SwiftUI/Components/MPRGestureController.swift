@@ -359,6 +359,7 @@ struct MPRGestureController: UIViewRepresentable {
             let newSlice = max(0, min(totalSlices - 1, currentSlice + amount))
             
             if newSlice != currentSlice {
+                print("📏 [\(viewState.currentPlane.displayName)] Scrolling: \(currentSlice) → \(newSlice) / \(totalSlices)")
                 coordinateSystem.updateFromSliceScroll(plane: viewState.currentPlane, sliceIndex: newSlice)
             }
         }
