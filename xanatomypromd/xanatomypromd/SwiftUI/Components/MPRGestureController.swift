@@ -398,19 +398,22 @@ struct MPRGestureController: UIViewRepresentable {
                 newQuality = 1  // Full quality for slow scrolling
             }
             
-            // Update shared quality state
-            if sharedState.renderQuality != newQuality {
-                sharedState.renderQuality = newQuality
+            // FIXED: Only update quality for the CURRENT plane being scrolled
+            let currentPlane = viewState.currentPlane
+            if sharedState.getQuality(for: currentPlane) != newQuality {
+                sharedState.setQuality(for: currentPlane, quality: newQuality)
+                print("🎯 Quality \(newQuality) applied to \(currentPlane) only")
             }
         }
         
         private func restoreScrollQuality() {
+            // FIXED: Only restore quality for the CURRENT plane
+            let currentPlane = viewState.currentPlane
+            
             // Restore full quality after a brief delay
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 guard let self = self else { return }
-                if self.sharedState.renderQuality != 1 {
-                    self.sharedState.renderQuality = 1
-                }
+                self.sharedState.restoreFullQuality(for: currentPlane)
             }
         }
         

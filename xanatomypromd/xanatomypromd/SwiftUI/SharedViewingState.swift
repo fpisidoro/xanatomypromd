@@ -18,8 +18,12 @@ class SharedViewingState: ObservableObject {
     /// ROI overlay display settings
     @Published var roiSettings = ROIDisplaySettings.default
     
-    /// Render quality for adaptive performance (1=full, 2=half, 4=quarter)
-    @Published var renderQuality: Int = 1
+    /// FIXED: Plane-specific render quality (1=full, 2=half, 4=quarter)
+    @Published var renderQuality: [MPRPlane: Int] = [
+        .axial: 1,
+        .sagittal: 1,
+        .coronal: 1
+    ]
     
     // MARK: - 3D View State (Persistent)
     
@@ -35,7 +39,36 @@ class SharedViewingState: ObservableObject {
     /// Last active MPR plane before switching to 3D
     @Published var lastActivePlane: MPRPlane = .axial
     
-    // MARK: - Methods
+    // MARK: - Quality Management Methods
+    
+    /// Set quality for a specific plane only
+    func setQuality(for plane: MPRPlane, quality: Int) {
+        renderQuality[plane] = quality
+        print("🎯 Quality set for \(plane): \(quality) (other planes unaffected)")
+    }
+    
+    /// Get quality for a specific plane
+    func getQuality(for plane: MPRPlane) -> Int {
+        return renderQuality[plane] ?? 1
+    }
+    
+    /// Restore full quality for a specific plane
+    func restoreFullQuality(for plane: MPRPlane) {
+        if renderQuality[plane] != 1 {
+            renderQuality[plane] = 1
+            print("🔄 Full quality restored for \(plane)")
+        }
+    }
+    
+    /// Restore full quality for all planes
+    func restoreAllQuality() {
+        for plane in [MPRPlane.axial, .sagittal, .coronal] {
+            renderQuality[plane] = 1
+        }
+        print("🔄 Full quality restored for all planes")
+    }
+    
+    // MARK: - Existing Methods (Updated)
     
     func setWindowLevel(_ level: CTWindowLevel) {
         windowLevel = level

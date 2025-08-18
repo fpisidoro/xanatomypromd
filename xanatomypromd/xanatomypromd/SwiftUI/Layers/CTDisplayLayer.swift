@@ -238,11 +238,13 @@ struct CTDisplayLayer: UIViewRepresentable {
             self.currentWindowLevel = windowLevel
             self.currentScrollVelocity = scrollVelocity
             
-            // Use shared state quality if available, otherwise calculate from velocity
+            // FIXED: Use plane-specific quality instead of global
             let newQuality: MetalVolumeRenderer.RenderQuality
             if let sharedState = sharedState {
-                // Access @MainActor property safely
-                let currentRenderQuality = sharedState.renderQuality
+                // Get quality for THIS specific plane only
+                let currentRenderQuality = sharedState.getQuality(for: plane)
+                print("🎯 Using quality \(currentRenderQuality) for plane \(plane)")
+                
                 // Convert SharedViewingState quality to MetalVolumeRenderer quality
                 switch currentRenderQuality {
                 case 1:
@@ -261,7 +263,7 @@ struct CTDisplayLayer: UIViewRepresentable {
             
             if newQuality != currentQuality {
                 currentQuality = newQuality
-                print("🎯 Quality: \(currentQuality) from shared state")
+                print("🎯 Quality: \(currentQuality) for plane \(plane) (plane-specific)")
                 cachedTexture = nil  // Force regeneration at new quality
                 cacheKey = ""  // Clear cache key
             }
