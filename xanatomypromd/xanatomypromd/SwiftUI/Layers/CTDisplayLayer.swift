@@ -56,7 +56,7 @@ struct CTDisplayLayer: UIViewRepresentable {
             )
             uiView.setNeedsDisplay()
         }
-    }
+        }
     
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -133,23 +133,25 @@ struct CTDisplayLayer: UIViewRepresentable {
             viewSize: CGSize,
             plane: MPRPlane,
             dicomSpacing: SIMD3<Float>,
+            quality: MetalVolumeRenderer.RenderQuality,  // NEW: Quality parameter
             device: MTLDevice
         ) {
-            // CRITICAL: Calculate PHYSICAL dimensions using DICOM spacing
+            // CRITICAL: Calculate PHYSICAL dimensions using DICOM spacing and ORIGINAL dimensions
             let physicalDimensions = calculatePhysicalDimensions(
                 textureSize: textureSize,
                 plane: plane,
-                spacing: dicomSpacing
+                spacing: dicomSpacing,
+                quality: quality  // Pass quality to use original dimensions
             )
             
             // Calculate aspect ratio from PHYSICAL dimensions (not pixels)
             let physicalAspect = physicalDimensions.width / physicalDimensions.height
             let viewAspect = Float(viewSize.width / viewSize.height)
             
-            print("🏥 MEDICAL ACCURACY:")
-            print("   📐 Texture pixels: \(Int(textureSize.width))×\(Int(textureSize.height))")
+            print("🏥 MEDICAL ACCURACY (FIXED):")
+            print("   📐 Texture pixels: \(Int(textureSize.width))×\(Int(textureSize.height)) (quality: \(quality))")
             print("   📏 Physical size: \(String(format: "%.1f", physicalDimensions.width))mm × \(String(format: "%.1f", physicalDimensions.height))mm")
-            print("   📊 Physical aspect: \(String(format: "%.3f", physicalAspect)) (medical)")
+            print("   📊 Physical aspect: \(String(format: "%.3f", physicalAspect)) (medical - quality independent)")
             print("   📱 View aspect: \(String(format: "%.3f", viewAspect)) (screen)")
             print("   🎯 DICOM spacing: \(dicomSpacing)")
             
@@ -190,33 +192,43 @@ struct CTDisplayLayer: UIViewRepresentable {
             lastSpacing = dicomSpacing
         }
         
-        // MEDICAL-CRITICAL: Calculate physical dimensions using DICOM spacing
+        // MEDICAL-CRITICAL: Calculate physical dimensions using DICOM spacing and ORIGINAL dimensions
+        // FIXED: Use original full-resolution dimensions regardless of quality scaling
         private func calculatePhysicalDimensions(
             textureSize: CGSize,
             plane: MPRPlane,
-            spacing: SIMD3<Float>
+            spacing: SIMD3<Float>,
+            quality: MetalVolumeRenderer.RenderQuality  // NEW: Quality parameter
         ) -> (width: Float, height: Float) {
             
-            let pixelWidth = Float(textureSize.width)
-            let pixelHeight = Float(textureSize.height)
+            // CRITICAL FIX: Use ORIGINAL full-resolution dimensions for spacing calculation
+            // Quality scaling should not affect physical dimensions or aspect ratios
+            let originalDimensions = getOriginalPlaneDimensions(plane: plane)
+            
+            let originalPixelWidth = Float(originalDimensions.width)
+            let originalPixelHeight = Float(originalDimensions.height)
+            
+            print("🔧 ASPECT RATIO FIX:")
+            print("   📐 Texture size: \(Int(textureSize.width))×\(Int(textureSize.height)) (quality: \(quality))")
+            print("   📏 Original size: \(originalDimensions.width)×\(originalDimensions.height) (for spacing)")
             
             switch plane {
             case .axial:
                 // XY plane: X × Y dimensions
-                let physicalWidth = pixelWidth * spacing.x   // pixels × mm/pixel
-                let physicalHeight = pixelHeight * spacing.y
+                let physicalWidth = originalPixelWidth * spacing.x   // Use ORIGINAL pixels × mm/pixel
+                let physicalHeight = originalPixelHeight * spacing.y
                 return (physicalWidth, physicalHeight)
                 
             case .sagittal:
                 // YZ plane: Y × Z dimensions  
-                let physicalWidth = pixelWidth * spacing.y   // Y dimension (anterior-posterior)
-                let physicalHeight = pixelHeight * spacing.z // Z dimension (superior-inferior)
+                let physicalWidth = originalPixelWidth * spacing.y   // Y dimension (anterior-posterior)
+                let physicalHeight = originalPixelHeight * spacing.z // Z dimension (superior-inferior)
                 return (physicalWidth, physicalHeight)
                 
             case .coronal:
                 // XZ plane: X × Z dimensions
-                let physicalWidth = pixelWidth * spacing.x   // X dimension (left-right)
-                let physicalHeight = pixelHeight * spacing.z // Z dimension (superior-inferior)
+                let physicalWidth = originalPixelWidth * spacing.x   // X dimension (left-right)
+                let physicalHeight = originalPixelHeight * spacing.z // Z dimension (superior-inferior)
                 return (physicalWidth, physicalHeight)
             }
         }
@@ -408,6 +420,7 @@ struct CTDisplayLayer: UIViewRepresentable {
                     viewSize: currentViewSize,
                     plane: currentPlane,
                     dicomSpacing: volumeData.spacing,
+                    quality: currentQuality,  // FIXED: Pass current quality
                     device: device
                 )
             }
@@ -509,6 +522,29 @@ struct CTDisplayLayer: UIViewRepresentable {
                     self?.cachedTexture = nil
                     self?.cacheKey = ""
                 }
+            }
+        }
+        
+        // NEW: Get original full-resolution dimensions for each plane
+        private func getOriginalPlaneDimensions(plane: MPRPlane) -> (width: Int, height: Int) {
+            guard let volumeData = currentVolumeData else {
+                return (512, 512)  // Fallback
+            }
+            
+            let dims = volumeData.dimensions
+            
+            switch plane {
+            case .axial:
+                // XY plane - original matrix size
+                return (dims.x, dims.y)
+                
+            case .sagittal:
+                // YZ plane - Y (anterior-posterior) x Z (superior-inferior)
+                return (dims.y, dims.z)
+                
+            case .coronal:
+                // XZ plane - X (left-right) x Z (superior-inferior)
+                return (dims.x, dims.z)
             }
         }
     }
