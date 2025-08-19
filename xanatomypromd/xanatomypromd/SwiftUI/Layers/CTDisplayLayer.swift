@@ -89,7 +89,8 @@ struct CTDisplayLayer: UIViewRepresentable {
                 windowLevel: windowLevel,
                 volumeData: volumeData,
                 scrollVelocity: scrollVelocity,
-                sharedState: sharedState
+                sharedState: sharedState,
+                isViewScrolling: isViewScrolling
             )
             uiView.setNeedsDisplay()
         }
@@ -119,6 +120,7 @@ struct CTDisplayLayer: UIViewRepresentable {
         private var currentWindowLevel: CTWindowLevel = CTWindowLevel.softTissue
         private var currentVolumeData: VolumeData?
         private var currentScrollVelocity: Float = 0.0
+        private var currentIsViewScrolling: Bool = false
         
         // Texture caching for performance (still independent per view)
         private var cachedTexture: MTLTexture?
@@ -270,7 +272,8 @@ struct CTDisplayLayer: UIViewRepresentable {
             windowLevel: CTWindowLevel,
             volumeData: VolumeData?,
             scrollVelocity: Float,
-            sharedState: SharedViewingState?
+            sharedState: SharedViewingState?,
+            isViewScrolling: Bool
         ) {
             print("🔍 CT Medical Display: updateRenderingParameters called")
             print("   Plane: \(plane), VolumeData: \(volumeData != nil ? "present" : "nil")")
@@ -284,6 +287,7 @@ struct CTDisplayLayer: UIViewRepresentable {
             self.currentPlane = plane
             self.currentWindowLevel = windowLevel
             self.currentScrollVelocity = scrollVelocity
+            self.currentIsViewScrolling = isViewScrolling
             
             // SIMPLIFIED: Use SharedViewingState quality directly (set by MPRGestureController)
             let newQuality: MetalVolumeRenderer.RenderQuality
@@ -421,9 +425,9 @@ struct CTDisplayLayer: UIViewRepresentable {
                 print("🛠️ Generating MPR slice: \(currentPlane) slice \(currentSliceIndex) quality \(currentQuality)")
                 
                 // MODULAR FIX: Use per-view scrolling state (true standalone modules)
-                let isActiveScrollingView = isViewScrolling && (coordinateSystem.scrollVelocity > 0.1)
+                let isActiveScrollingView = currentIsViewScrolling && (coordinateSystem.scrollVelocity > 0.1)
                 
-                print("🚀 MODULAR: plane=\(currentPlane), thisViewScrolling=\(isViewScrolling), priority=\(isActiveScrollingView)")
+                print("🚀 MODULAR: plane=\(currentPlane), thisViewScrolling=\(currentIsViewScrolling), priority=\(isActiveScrollingView)")
                 
                 if isActiveScrollingView {
                     // PRIORITY: Immediate generation for the actively scrolled view
