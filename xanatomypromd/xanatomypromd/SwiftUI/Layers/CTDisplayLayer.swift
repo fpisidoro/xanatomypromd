@@ -511,7 +511,10 @@ struct CTDisplayLayer: UIViewRepresentable {
         // MARK: - Rendering Methods (MEDICAL-ACCURATE)
         
         private func displayTexture(_ texture: MTLTexture, drawable: CAMetalDrawable, commandQueue: MTLCommandQueue) {
-            let commandBuffer = commandQueue.makeCommandBuffer()
+            guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+                print("❌ CT Display: Failed to create command buffer")
+                return
+            }
             
             let renderPassDescriptor = MTLRenderPassDescriptor()
             renderPassDescriptor.colorAttachments[0].texture = drawable.texture
@@ -519,11 +522,12 @@ struct CTDisplayLayer: UIViewRepresentable {
             renderPassDescriptor.colorAttachments[0].storeAction = .store
             renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1.0)
             
-            guard let renderEncoder = commandBuffer?.makeRenderCommandEncoder(descriptor: renderPassDescriptor),
+            guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor),
                   let pipelineState = displayPipelineState,
                   let vertexBuffer = vertexBuffer else {
-                commandBuffer?.present(drawable)
-                commandBuffer?.commit()
+                print("❌ CT Display: Failed to create render encoder or missing pipeline/buffer")
+                commandBuffer.present(drawable)
+                commandBuffer.commit()
                 return
             }
             
@@ -533,12 +537,15 @@ struct CTDisplayLayer: UIViewRepresentable {
             renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
             
             renderEncoder.endEncoding()
-            commandBuffer?.present(drawable)
-            commandBuffer?.commit()
+            commandBuffer.present(drawable)
+            commandBuffer.commit()
         }
         
         private func displayLoadingState(drawable: CAMetalDrawable, commandQueue: MTLCommandQueue) {
-            let commandBuffer = commandQueue.makeCommandBuffer()
+            guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+                print("❌ CT Display: Failed to create command buffer for loading state")
+                return
+            }
             
             let renderPassDescriptor = MTLRenderPassDescriptor()
             renderPassDescriptor.colorAttachments[0].texture = drawable.texture
@@ -546,15 +553,18 @@ struct CTDisplayLayer: UIViewRepresentable {
             renderPassDescriptor.colorAttachments[0].storeAction = .store
             renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1.0)
             
-            if let renderEncoder = commandBuffer?.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
+            if let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
                 renderEncoder.endEncoding()
             }
-            commandBuffer?.present(drawable)
-            commandBuffer?.commit()
+            commandBuffer.present(drawable)
+            commandBuffer.commit()
         }
         
         private func clearView(drawable: CAMetalDrawable, commandQueue: MTLCommandQueue) {
-            let commandBuffer = commandQueue.makeCommandBuffer()
+            guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+                print("❌ CT Display: Failed to create command buffer for clear view")
+                return
+            }
             
             let renderPassDescriptor = MTLRenderPassDescriptor()
             renderPassDescriptor.colorAttachments[0].texture = drawable.texture
@@ -562,11 +572,11 @@ struct CTDisplayLayer: UIViewRepresentable {
             renderPassDescriptor.colorAttachments[0].storeAction = .store
             renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1.0)
             
-            if let renderEncoder = commandBuffer?.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
+            if let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
                 renderEncoder.endEncoding()
             }
-            commandBuffer?.present(drawable)
-            commandBuffer?.commit()
+            commandBuffer.present(drawable)
+            commandBuffer.commit()
         }
         
         // MARK: - Adaptive Quality Methods
