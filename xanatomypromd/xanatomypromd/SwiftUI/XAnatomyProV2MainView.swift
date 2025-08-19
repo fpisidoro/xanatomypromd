@@ -86,7 +86,7 @@ struct XAnatomyProV2MainView: View {
                     
                     if isLoading {
                         MedicalProgressView(
-                            current: dataManager.loadingCurrent,
+                            current: dataCoordinator.loadingCurrent,
                             total: dataManager.loadingTotal,
                             message: dataManager.loadingProgress.isEmpty ? "Initializing..." : dataManager.loadingProgress
                         )

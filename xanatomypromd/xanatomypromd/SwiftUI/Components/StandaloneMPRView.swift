@@ -269,17 +269,17 @@ struct StandaloneMPRView: View, LoadableView {
             // Stage 2: Create GPU textures
             loadingState.updateStage(.textureCreation)
             try await initializeGPUResources(volumeData: volumeData)
-            await Task.sleep(nanoseconds: 50_000_000)
+            try await Task.sleep(nanoseconds: 50_000_000)
             
             // Stage 3: Generate initial MPR slice
             loadingState.updateStage(.sliceGeneration)
             try await generateInitialSlice()
-            await Task.sleep(nanoseconds: 50_000_000)
+            try await Task.sleep(nanoseconds: 50_000_000)
             
             // Stage 4: Process ROI data (if available)
             loadingState.updateStage(.roiProcessing)
             try await processROIData()
-            await Task.sleep(nanoseconds: 50_000_000)
+            try await Task.sleep(nanoseconds: 50_000_000)
             
             // Stage 5: Complete
             completeLoading()
@@ -294,13 +294,13 @@ struct StandaloneMPRView: View, LoadableView {
     
     private func initializeGPUResources(volumeData: VolumeData) async throws {
         // Initialize Metal resources for this specific view
-        guard let renderer = dataCoordinator.getVolumeRenderer() else {
+        guard dataCoordinator.getVolumeRenderer() != nil else {
             throw ViewLoadingError.rendererInitializationFailed
         }
         
         // This would involve creating view-specific GPU textures
         // For now, we'll simulate the GPU setup time
-        await Task.sleep(nanoseconds: 100_000_000) // 100ms for GPU setup
+        try await Task.sleep(nanoseconds: 100_000_000) // 100ms for GPU setup
         
         print("🔧 \(plane.displayName): GPU resources initialized")
     }
@@ -308,7 +308,7 @@ struct StandaloneMPRView: View, LoadableView {
     private func generateInitialSlice() async throws {
         // Generate the first MPR slice for this plane
         // This simulates the time needed to create the initial slice
-        await Task.sleep(nanoseconds: 150_000_000) // 150ms for initial slice generation
+        try await Task.sleep(nanoseconds: 150_000_000) // 150ms for initial slice generation
         
         print("🔧 \(plane.displayName): Initial slice generated")
     }
