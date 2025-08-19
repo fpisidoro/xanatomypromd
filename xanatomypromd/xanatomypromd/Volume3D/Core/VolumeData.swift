@@ -57,9 +57,6 @@ public class VolumeData: Equatable {
             return pos1.z > pos2.z  // Higher Z = superior (top of head)
         }
         
-        // Building volume from datasets
-        print("\n📦 Building volume from \(sortedDatasets.count) DICOM slices...")
-        
         // Extract slice information
         var sliceInfos: [SliceInfo] = []
         var allVoxelData: [Int16] = []
@@ -95,8 +92,6 @@ public class VolumeData: Equatable {
             }
             
             allVoxelData.append(contentsOf: rescaledPixels)
-            
-            // Slice processed
         }
         
         self.sliceInfos = sliceInfos
@@ -114,37 +109,6 @@ public class VolumeData: Equatable {
             lastSlicePosition.z    // Use the MINIMUM Z (last slice after high-to-low sort)
         )
         self.orientation = sliceInfos.first?.orientation ?? matrix_identity_float3x3
-        
-        print("✅ Volume created: \(width)×\(height)×\(depth)")
-        print("   📏 Spacing: \(spacing) mm")
-        print("   📍 Origin: \(origin)")
-        print("   💾 Memory: \(allVoxelData.count * 2) bytes (\(String(format: "%.1f", Double(allVoxelData.count * 2) / 1024.0 / 1024.0)) MB)")
-        
-        // Log Z-position summary for debugging ROI alignment
-        print("\n📊 Volume Z-Position Summary:")
-        print("   Origin Z: \(self.origin.z)mm")
-        print("   Z-spacing: \(self.spacing.z)mm")
-        
-        let zPositions = sliceInfos.map { $0.position.z }.sorted()
-        if let minZ = zPositions.first, let maxZ = zPositions.last {
-            print("   Z-range: \(minZ)mm to \(maxZ)mm")
-            print("   Total slices: \(zPositions.count)")
-            
-            // Show first and last few Z-positions
-            print("   First 5 slices:")
-            for i in 0..<min(5, zPositions.count) {
-                print("      Slice \(i): Z = \(zPositions[i])mm")
-            }
-            if zPositions.count > 10 {
-                print("      ...")
-                print("   Last 5 slices:")
-                for i in max(0, zPositions.count - 5)..<zPositions.count {
-                    print("      Slice \(i): Z = \(zPositions[i])mm")
-                }
-            }
-            
-            print("   Volume bounds Z: \(self.origin.z)mm to \(self.origin.z + Float(self.dimensions.z - 1) * self.spacing.z)mm")
-        }
     }
     
     // MARK: - Voxel Access
@@ -269,12 +233,10 @@ public class VolumeData: Equatable {
         let position: SIMD3<Float>
         if let imagePos = extractImagePosition(from: dataset) {
             position = imagePos
-            print("   📍 Slice \(index): Image Position Patient = \(imagePos) (Z=\(imagePos.z)mm)")
         } else {
             // FALLBACK: Use slice index * assumed spacing if no position tag
             let assumedZSpacing: Float = 3.0  // Typical CT slice spacing
             position = SIMD3<Float>(0, 0, Float(index) * assumedZSpacing)
-            print("   ⚠️ Slice \(index): No Image Position Patient! Using fallback Z=\(position.z)mm")
         }
         
         // Extract image orientation
@@ -348,7 +310,7 @@ public class VolumeData: Equatable {
         // Calculate Z spacing from slice positions
         let zSpacing: Float
         if sliceInfos.count > 1 {
-            // CRITICAL: Use only Z-axis difference, not Euclidean distance
+            // Use only Z-axis difference, not Euclidean distance
             // Slices are sorted superior to inferior (high Z to low Z)
             let firstPos = sliceInfos[0].position
             let lastPos = sliceInfos[sliceInfos.count - 1].position
@@ -358,13 +320,6 @@ public class VolumeData: Equatable {
             
             // Divide by number of GAPS between slices (not number of slices)
             zSpacing = zDistance / Float(sliceInfos.count - 1)
-            
-            print("   📏 Z-spacing calculation:")
-            print("      First slice Z: \(firstPos.z)mm")
-            print("      Last slice Z: \(lastPos.z)mm")
-            print("      Z distance: \(zDistance)mm")
-            print("      Number of gaps: \(sliceInfos.count - 1)")
-            print("      Z-spacing: \(zSpacing)mm")
         } else {
             zSpacing = sliceInfos[0].sliceThickness
         }

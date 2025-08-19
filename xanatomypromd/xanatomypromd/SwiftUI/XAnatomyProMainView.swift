@@ -1,15 +1,15 @@
 import SwiftUI
 import simd
 
-// MARK: - Updated Main Application View
-// No more global loading overlay - each view manages its own loading
+// MARK: - Main Application View
+// Clean production version without test functions and verbose logging
 
 struct XAnatomyProMainView: View {
     
     // MARK: - State Management
     @StateObject var coordinateSystem = DICOMCoordinateSystem()
     @StateObject var sharedViewingState = SharedViewingState()
-    @StateObject var dataCoordinator = ViewDataCoordinator()  // NEW: Centralized data coordinator
+    @StateObject var dataCoordinator = ViewDataCoordinator()
     
     @State private var currentPlane: MPRPlane = .axial
     @State private var show3D: Bool = false
@@ -44,7 +44,7 @@ struct XAnatomyProMainView: View {
                     // Header
                     headerView
                     
-                    // Main viewing area - NO MORE GLOBAL LOADING OVERLAY
+                    // Main viewing area
                     mainViewingArea(geometry: geometry)
                     
                     // Control buttons
@@ -127,16 +127,15 @@ struct XAnatomyProMainView: View {
         .background(Color.black.opacity(0.8))
     }
     
-    // MARK: - Main Viewing Area (Per-View Loading)
+    // MARK: - Main Viewing Area
     private func mainViewingArea(geometry: GeometryProxy) -> some View {
         ZStack {
-            // Each view now manages its own loading state
             Group {
                 if show3D {
                     Standalone3DView(
                         coordinateSystem: coordinateSystem,
                         sharedState: sharedViewingState,
-                        dataCoordinator: dataCoordinator,  // Pass data coordinator
+                        dataCoordinator: dataCoordinator,
                         viewSize: CGSize(
                             width: geometry.size.width,
                             height: geometry.size.height * 0.7
@@ -148,7 +147,7 @@ struct XAnatomyProMainView: View {
                         plane: currentPlane,
                         coordinateSystem: coordinateSystem,
                         sharedState: sharedViewingState,
-                        dataCoordinator: dataCoordinator,  // Pass data coordinator
+                        dataCoordinator: dataCoordinator,
                         viewSize: CGSize(
                             width: geometry.size.width,
                             height: geometry.size.height * 0.7
@@ -162,7 +161,6 @@ struct XAnatomyProMainView: View {
             .offset(dragOffset)
             .clipped()
             .overlay(
-                // PURE UIKIT GESTURE HANDLING (only when not loading)
                 UnifiedGestureHandler(
                     onGesture: handleUnifiedGesture,
                     onZoomChange: handleZoomChange,
@@ -181,14 +179,12 @@ struct XAnatomyProMainView: View {
                 // Initialize coordinate system when volume data is loaded
                 if let volumeData = dataCoordinator.volumeData {
                     coordinateSystem.initializeFromVolumeData(volumeData)
-                    print("✅ Coordinate system initialized with volume dimensions: \(volumeData.dimensions)")
                 }
             }
             .onChange(of: dataCoordinator.volumeData) { _, volumeData in
                 // Update coordinate system when volume data becomes available
                 if let volumeData = volumeData {
                     coordinateSystem.initializeFromVolumeData(volumeData)
-                    print("✅ Coordinate system updated with new volume data")
                 }
             }
         }
@@ -255,16 +251,9 @@ struct XAnatomyProMainView: View {
                     .foregroundColor(.white)
                     .cornerRadius(8)
                 
-                Button("Test RTStruct") { testRTStructParsing() }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.green.opacity(0.6))
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
-                
                 Spacer()
                 
-                // Global loading status (if any views are still loading)
+                // Global loading status
                 if dataCoordinator.isVolumeLoading {
                     HStack {
                         ProgressView()
@@ -281,7 +270,7 @@ struct XAnatomyProMainView: View {
         .background(Color.black.opacity(0.8))
     }
     
-    // MARK: - Unified Gesture Handlers (unchanged)
+    // MARK: - Unified Gesture Handlers
     private func handleUnifiedGesture(_ type: UnifiedGestureHandler.GestureType, _ data: UnifiedGestureHandler.GestureData) {
         switch type {
         case .pan:
@@ -343,15 +332,14 @@ struct XAnatomyProMainView: View {
     }
     
     private func handleZoomEnd(_ data: UnifiedGestureHandler.GestureData) {
-        print("🔄 Zoom gesture completed at \(String(format: "%.2f", data.zoomLevel))x")
+        // Zoom gesture completed - could add haptic feedback here if needed
     }
     
-    // MARK: - Action Methods (unchanged)
+    // MARK: - Action Methods
     private func resetViewTransform() {
         withAnimation(.spring()) {
             dragOffset = .zero
         }
-        print("🔄 Reset View Transform requested")
     }
     
     private func centerCrosshair() {
@@ -368,51 +356,6 @@ struct XAnatomyProMainView: View {
         }
     }
     
-    private func testRTStructParsing() {
-        print("\n🧪 MANUAL RTStruct Test Called")
-        debugROISystem()
-        
-        Task {
-            let rtStructFiles = DICOMFileManager.getRTStructFiles()
-            
-            if rtStructFiles.isEmpty {
-                print("❌ No RTStruct files found for testing")
-                return
-            }
-            
-            for (index, file) in rtStructFiles.enumerated() {
-                print("\n📄 Testing RTStruct file \(index + 1): \(file.lastPathComponent)")
-                
-                do {
-                    let data = try Data(contentsOf: file)
-                    let dataset = try DICOMParser.parse(data)
-                    
-                    if let result = MinimalRTStructParser.parseSimpleRTStruct(from: dataset) {
-                        print("✅ SUCCESS: Found \(result.roiStructures.count) ROI structures")
-                        
-                        let totalContours = result.roiStructures.reduce(0) { $0 + $1.contours.count }
-                        let totalPoints = result.roiStructures.reduce(0) { total, roi in
-                            total + roi.contours.reduce(0) { $0 + $1.points.count }
-                        }
-                        
-                        print("📊 Total: \(totalContours) contours, \(totalPoints) points")
-                        
-                        for roi in result.roiStructures {
-                            let zPositions = roi.contours.map { $0.slicePosition }
-                            let minZ = zPositions.min() ?? 0
-                            let maxZ = zPositions.max() ?? 0
-                            print("   🏷️ ROI \(roi.roiNumber): '\(roi.roiName)' - \(roi.contours.count) contours (Z: \(minZ) to \(maxZ)mm)")
-                        }
-                    } else {
-                        print("❌ Parsing failed - no data returned")
-                    }
-                } catch {
-                    print("❌ Error testing file: \(error)")
-                }
-            }
-        }
-    }
-    
     private func updateScrollVelocity(_ velocity: Float) {
         scrollVelocity = velocity
         
@@ -422,10 +365,6 @@ struct XAnatomyProMainView: View {
             currentQuality = .half
         } else {
             currentQuality = .quarter
-        }
-        
-        if currentQuality != .full {
-            print("🎯 Adaptive Quality: \(currentQuality.description) (velocity: \(velocity))")
         }
         
         qualityTimer?.invalidate()
@@ -440,7 +379,7 @@ struct XAnatomyProMainView: View {
     }
 }
 
-// MARK: - Supporting Types (unchanged)
+// MARK: - Supporting Types
 struct PatientInfo {
     let name: String
     let studyDate: String

@@ -464,6 +464,66 @@ public enum MetalVolumeError: Error, LocalizedError {
     }
 }
 
+// MARK: - Conversion to PixelData
+
+extension MetalVolumeRenderer {
+    
+    /// Convert hardware-accelerated MPR slice to PixelData for existing pipeline
+    public func mprSliceToPixelData(
+        plane: MPRPlane,
+        slicePosition: Float
+    ) -> PixelData? {
+        guard let volumeData = volumeData else { return nil }
+        
+        // Use hardware-accelerated GPU extraction instead of CPU interpolation
+        // For now, fall back to CPU but this could be GPU-accelerated texture readback
+        let sliceData: [Int16]
+        let dimensions: (width: Int, height: Int)
+        
+        switch plane {
+        case .axial:
+            let z = slicePosition * Float(volumeData.dimensions.z - 1)
+            sliceData = volumeData.extractAxialSlice(atZ: z)
+            dimensions = (volumeData.dimensions.x, volumeData.dimensions.y)
+            
+        case .sagittal:
+            let x = slicePosition * Float(volumeData.dimensions.x - 1)
+            sliceData = volumeData.extractSagittalSlice(atX: x)
+            dimensions = (volumeData.dimensions.y, volumeData.dimensions.z)
+            
+        case .coronal:
+            let y = slicePosition * Float(volumeData.dimensions.y - 1)
+            sliceData = volumeData.extractCoronalSlice(atY: y)
+            dimensions = (volumeData.dimensions.x, volumeData.dimensions.z)
+        }
+        
+        // Convert to Data
+        let data = sliceData.withUnsafeBytes { bytes in
+            Data(bytes: bytes.baseAddress!, count: bytes.count)
+        }
+        
+        return PixelData(
+            data: data,
+            rows: dimensions.height,
+            columns: dimensions.width,
+            bitsAllocated: 16,
+            bitsStored: 16,
+            highBit: 15,
+            pixelRepresentation: 1  // Signed
+        )
+    }
+}CompilationFailed:
+            return "Failed to compile hardware-accelerated MPR shaders"
+        case .pipelineCreationFailed:
+            return "Failed to create hardware MPR pipeline"
+        case .textureCreationFailed:
+            return "Failed to create 3D r16Sint texture"
+        case .volumeNotLoaded:
+            return "Volume data not loaded"
+        }
+    }
+}
+
 // MARK: - Testing and Validation (Fixed Hardware Accelerated)
 
 extension MetalVolumeRenderer {

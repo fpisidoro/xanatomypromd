@@ -1,8 +1,8 @@
 import Foundation
 import simd
 
-// MARK: - Enhanced RTStruct Parser - Finds ALL Contours Across Multiple Z-Slices
-// Fixed to properly extract all contours from RTStruct files, not just the first one
+// MARK: - Enhanced RTStruct Parser - Production Version
+// Extracts ROI contour data from RTStruct files without verbose logging
 
 public class MinimalRTStructParser {
     
@@ -45,12 +45,9 @@ public class MinimalRTStructParser {
     
     // MARK: - Main Parsing Interface
     public static func parseSimpleRTStruct(from dataset: DICOMDataset) -> SimpleRTStructData? {
-        print("🎯 Enhanced RTStruct Parser - Finding ALL Contours")
-        
         // Verify RTStruct modality
         guard let modality = dataset.getString(tag: .modality),
               modality == "RTSTRUCT" else {
-            print("❌ Not an RTStruct file")
             return nil
         }
         
@@ -58,29 +55,14 @@ public class MinimalRTStructParser {
         let structureSetName = dataset.getString(tag: .structureSetName)
         let patientName = dataset.getString(tag: .patientName)
         
-        print("   📋 Structure Set: \(structureSetName ?? "Unknown")")
-        print("   👤 Patient: \(patientName ?? "Unknown")")
-        
-        // ENHANCED: Find ALL contours using multiple methods
+        // Find all contours using multiple methods
         let allContours = findAllContoursInDataset(dataset: dataset)
         
-        if allContours.isEmpty {
-            print("   ❌ No contour data found")
+        guard !allContours.isEmpty else {
             return nil
         }
         
-        // Group contours by Z position to show distribution
-        let groupedByZ = Dictionary(grouping: allContours) { $0.slicePosition }
-        let sortedZPositions = groupedByZ.keys.sorted()
-        
-        print("   ✅ Found contours across \(sortedZPositions.count) Z-slices:")
-        for z in sortedZPositions {
-            let contoursAtZ = groupedByZ[z]!
-            let totalPoints = contoursAtZ.reduce(0) { $0 + $1.points.count }
-            print("      Z=\(z)mm: \(contoursAtZ.count) contours, \(totalPoints) points")
-        }
-        
-        // Group contours into separate ROI structures based on Z-position clustering
+        // Group contours into separate ROI structures
         let roiStructures = groupContoursIntoROIs(contours: allContours, dataset: dataset)
         
         return SimpleRTStructData(
@@ -90,29 +72,21 @@ public class MinimalRTStructParser {
         )
     }
     
-    // MARK: - ENHANCED: Find ALL Contours Using Multiple Methods
+    // MARK: - Find All Contours Using Multiple Methods
     private static func findAllContoursInDataset(dataset: DICOMDataset) -> [SimpleContour] {
         var allContours: [SimpleContour] = []
-        var foundContourTags = 0
         
-        print("\n   🔍 Method 1: Direct Element Scanning for ALL (3006,0050) tags...")
-        
-        // FIXED: Don't stop after first contour - check ALL elements
+        // Method 1: Direct element scanning for (3006,0050) tags
         for (tag, element) in dataset.elements {
             if tag.group == 0x3006 && tag.element == 0x0050 {
-                foundContourTags += 1
-                print("     ✅ Found Contour Data tag #\(foundContourTags) - \(element.data.count) bytes")
-                
                 if let contour = parseContourDataDirectly(element.data) {
                     allContours.append(contour)
-                    print("       📍 Extracted: \(contour.points.count) points at Z=\(contour.slicePosition)")
                 }
             }
         }
         
-        print("\n   🔍 Method 2: Parse ROI Contour Sequence (3006,0039)...")
+        // Method 2: Parse ROI Contour Sequence (3006,0039)
         if let roiContourSeq = dataset.elements[.roiContourSequence] {
-            print("     📦 Found ROI Contour Sequence (\(roiContourSeq.data.count) bytes)")
             let sequenceContours = parseROIContourSequence(roiContourSeq.data)
             
             for contour in sequenceContours {
@@ -123,14 +97,11 @@ public class MinimalRTStructParser {
                 
                 if isUnique {
                     allContours.append(contour)
-                    print("       🆕 Added unique contour: \(contour.points.count) points at Z=\(contour.slicePosition)")
                 }
             }
         }
         
-        print("\n   🔍 Method 3: Raw Byte Scanning for ALL (3006,0050) occurrences...")
-        
-        // Get raw DICOM file data if available
+        // Method 3: Raw byte scanning for all (3006,0050) occurrences
         if let rawData = dataset.rawData {
             let rawContours = scanRawDataForAllContours(rawData)
             
@@ -143,12 +114,10 @@ public class MinimalRTStructParser {
                 
                 if isUnique {
                     allContours.append(contour)
-                    print("       🆕 Found via raw scan: \(contour.points.count) points at Z=\(contour.slicePosition)")
                 }
             }
         }
         
-        print("\n   📊 Total unique contours found: \(allContours.count)")
         return allContours
     }
     
@@ -156,15 +125,10 @@ public class MinimalRTStructParser {
     private static func parseROIContourSequence(_ data: Data) -> [SimpleContour] {
         var contours: [SimpleContour] = []
         
-        print("     🔄 Parsing ROI Contour Sequence...")
-        
         // Parse all sequence items
         let items = parseSequenceItems(data)
-        print("       📎 Found \(items.count) sequence items")
         
-        for (index, itemData) in items.enumerated() {
-            print("       📦 Processing item \(index + 1)/\(items.count) (\(itemData.count) bytes)...")
-            
+        for itemData in items {
             // Look for Contour Sequence (3006,0040) within this item
             let contourSeqContours = findContourSequenceInItem(itemData)
             contours.append(contentsOf: contourSeqContours)
@@ -189,15 +153,11 @@ public class MinimalRTStructParser {
             let found = scanForTag(in: data, tag: contourSeqTag, startingAt: offset)
             
             if let tagOffset = found {
-                print("         🎯 Found Contour Sequence (3006,0040) at offset \(tagOffset)")
-                
-                // Read length (safely handle unaligned data)
+                // Read length safely
                 let length: UInt32
                 if tagOffset + 8 <= data.count {
-                    // Read 4 bytes safely without assuming alignment
                     let lengthData = data.subdata(in: (tagOffset + 4)..<(tagOffset + 8))
                     length = lengthData.withUnsafeBytes { bytes in
-                        // Create aligned copy for safe reading
                         var value: UInt32 = 0
                         withUnsafeMutableBytes(of: &value) { dest in
                             dest.copyMemory(from: bytes)
@@ -214,10 +174,8 @@ public class MinimalRTStructParser {
                 if length == 0xFFFFFFFF {
                     // Undefined length - find delimiter
                     seqEnd = findDelimiter(in: data, startingAt: seqStart) ?? data.count
-                    print("         📏 Undefined length sequence, ends at \(seqEnd)")
                 } else {
                     seqEnd = seqStart + Int(length)
-                    print("         📏 Defined length sequence: \(length) bytes")
                 }
                 
                 if seqEnd <= data.count && seqStart < seqEnd {
@@ -225,7 +183,6 @@ public class MinimalRTStructParser {
                     
                     // Parse items within this Contour Sequence
                     let seqItems = parseSequenceItems(seqData)
-                    print("         📦 Found \(seqItems.count) contour items")
                     
                     for itemData in seqItems {
                         // Each item should contain Contour Data (3006,0050)
@@ -253,13 +210,11 @@ public class MinimalRTStructParser {
             let found = scanForTag(in: data, tag: contourDataTag, startingAt: offset)
             
             if let tagOffset = found {
-                // Read length (safely handle unaligned data)
+                // Read length safely
                 let length: UInt32
                 if tagOffset + 8 <= data.count {
-                    // Read 4 bytes safely without assuming alignment
                     let lengthData = data.subdata(in: (tagOffset + 4)..<(tagOffset + 8))
                     length = lengthData.withUnsafeBytes { bytes in
-                        // Create aligned copy for safe reading
                         var value: UInt32 = 0
                         withUnsafeMutableBytes(of: &value) { dest in
                             dest.copyMemory(from: bytes)
@@ -275,7 +230,6 @@ public class MinimalRTStructParser {
                     
                     if let contour = parseContourDataDirectly(contourData) {
                         contours.append(contour)
-                        print("           ✅ Found contour: \(contour.points.count) points at Z=\(contour.slicePosition)")
                     }
                 }
                 
@@ -294,21 +248,16 @@ public class MinimalRTStructParser {
         let contourDataTag: [UInt8] = [0x06, 0x30, 0x50, 0x00]
         
         var offset = 0
-        var tagCount = 0
         
         while offset < data.count - 8 {
             let found = scanForTag(in: data, tag: contourDataTag, startingAt: offset)
             
             if let tagOffset = found {
-                tagCount += 1
-                
-                // Read length (4 bytes after tag, safely handle unaligned data)
+                // Read length safely
                 let length: UInt32
                 if tagOffset + 8 <= data.count {
-                    // Read 4 bytes safely without assuming alignment
                     let lengthData = data.subdata(in: (tagOffset + 4)..<(tagOffset + 8))
                     length = lengthData.withUnsafeBytes { bytes in
-                        // Create aligned copy for safe reading
                         var value: UInt32 = 0
                         withUnsafeMutableBytes(of: &value) { dest in
                             dest.copyMemory(from: bytes)
@@ -318,8 +267,6 @@ public class MinimalRTStructParser {
                 } else {
                     length = 0
                 }
-                
-                print("       🔍 Raw scan found (3006,0050) #\(tagCount) at byte \(tagOffset), length: \(length)")
                 
                 if length > 0 && length < 1000000 && tagOffset + 8 + Int(length) <= data.count {
                     let contourData = data.subdata(in: (tagOffset + 8)..<(tagOffset + 8 + Int(length)))
@@ -336,7 +283,6 @@ public class MinimalRTStructParser {
             }
         }
         
-        print("       📊 Raw scan found \(tagCount) contour data tags total")
         return contours
     }
     
@@ -350,13 +296,11 @@ public class MinimalRTStructParser {
             let found = scanForTag(in: data, tag: itemTag, startingAt: offset)
             
             if let tagOffset = found {
-                // Read item length (safely handle unaligned data)
+                // Read item length safely
                 let length: UInt32
                 if tagOffset + 8 <= data.count {
-                    // Read 4 bytes safely without assuming alignment
                     let lengthData = data.subdata(in: (tagOffset + 4)..<(tagOffset + 8))
                     length = lengthData.withUnsafeBytes { bytes in
-                        // Create aligned copy for safe reading
                         var value: UInt32 = 0
                         withUnsafeMutableBytes(of: &value) { dest in
                             dest.copyMemory(from: bytes)
@@ -417,8 +361,6 @@ public class MinimalRTStructParser {
     private static func groupContoursIntoROIs(contours: [SimpleContour], dataset: DICOMDataset) -> [SimpleROIStructure] {
         guard !contours.isEmpty else { return [] }
         
-        print("\n   🔍 Analyzing contour clustering for ROI separation...")
-        
         // Sort contours by Z position
         let sortedContours = contours.sorted { $0.slicePosition < $1.slicePosition }
         
@@ -434,14 +376,11 @@ public class MinimalRTStructParser {
             if abs(currZ - prevZ) > 10.0 {
                 roiGroups.append(currentGroup)
                 currentGroup = [sortedContours[i]]
-                print("      🆕 New ROI group detected (Z-gap: \(abs(currZ - prevZ))mm)")
             } else {
                 currentGroup.append(sortedContours[i])
             }
         }
         roiGroups.append(currentGroup)
-        
-        print("   📦 Identified \(roiGroups.count) separate ROI structures")
         
         // Try to extract ROI metadata from dataset
         let roiMetadata = extractROIMetadata(from: dataset)
@@ -469,15 +408,6 @@ public class MinimalRTStructParser {
                 contours: group
             )
             
-            let zPositions = group.map { $0.slicePosition }
-            let minZ = zPositions.min() ?? 0
-            let maxZ = zPositions.max() ?? 0
-            let totalPoints = group.reduce(0) { $0 + $1.points.count }
-            
-            print("      🏷️ ROI \(roiNumber): '\(roiName)'")
-            print("         📍 Z-range: \(minZ)mm to \(maxZ)mm")
-            print("         🔢 \(group.count) contours, \(totalPoints) points")
-            
             roiStructures.append(roi)
         }
         
@@ -488,14 +418,9 @@ public class MinimalRTStructParser {
     private static func extractROIMetadata(from dataset: DICOMDataset) -> [(name: String, color: SIMD3<Float>, zMin: Float, zMax: Float)] {
         var metadata: [(name: String, color: SIMD3<Float>, zMin: Float, zMax: Float)] = []
         
-        print("   📚 Extracting ROI metadata from RTStruct...")
-        
         // Parse ROI Contour Sequence (3006,0039) for colors
         if let roiContourSeq = dataset.elements[.roiContourSequence] {
-            print("      🎨 Parsing ROI Contour Sequence for colors...")
-            
             let items = parseSequenceItems(roiContourSeq.data)
-            print("      Found \(items.count) ROI contour items")
             
             for (index, itemData) in items.enumerated() {
                 // Extract ROI Display Color (3006,002A) from each item
@@ -531,8 +456,6 @@ public class MinimalRTStructParser {
                                             Float(b) / 255.0
                                         )
                                         
-                                        print("         🌈 ROI \(index + 1) color: RGB(\(r), \(g), \(b))")
-                                        
                                         let name = "Structure \(index + 1)"
                                         metadata.append((name: name, color: color, zMin: -200, zMax: 200))
                                     }
@@ -547,17 +470,13 @@ public class MinimalRTStructParser {
                     let color = generateROIColor(for: index)
                     let name = "Structure \(index + 1)"
                     metadata.append((name: name, color: color, zMin: -200, zMax: 200))
-                    print("         ⚠️ No color found for ROI \(index + 1), using generated color")
                 }
             }
         }
         
         // Parse Structure Set ROI Sequence (3006,0020) for names
         if let structureSetROISeq = dataset.elements[.structureSetROISequence] {
-            print("      🏷️ Parsing Structure Set ROI Sequence for names...")
-            
             let items = parseSequenceItems(structureSetROISeq.data)
-            print("      Found \(items.count) structure set items")
             
             for (index, itemData) in items.enumerated() {
                 // Extract ROI Name (3006,0026)
@@ -582,7 +501,6 @@ public class MinimalRTStructParser {
                                     // Update the name while keeping the color
                                     let oldMetadata = metadata[index]
                                     metadata[index] = (name: roiName, color: oldMetadata.color, zMin: oldMetadata.zMin, zMax: oldMetadata.zMax)
-                                    print("         🆔 ROI \(index + 1) name: '\(roiName)'")
                                 }
                             }
                         }
@@ -591,7 +509,6 @@ public class MinimalRTStructParser {
             }
         }
         
-        print("      ✅ Extracted metadata for \(metadata.count) ROIs")
         return metadata
     }
     
