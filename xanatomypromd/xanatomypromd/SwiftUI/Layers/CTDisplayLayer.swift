@@ -452,7 +452,11 @@ struct CTDisplayLayer: UIViewRepresentable {
                         }
                     } else {
                         // DEFERRED: Delay generation for non-scrolling views to reduce load
-                        await Task.sleep(nanoseconds: 50_000_000) // 50ms delay
+                        do {
+                            try await Task.sleep(nanoseconds: 50_000_000) // 50ms delay
+                        } catch {
+                            // Task was cancelled, continue anyway
+                        }
                         
                         sharedRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
                             guard let self = self else { return }
