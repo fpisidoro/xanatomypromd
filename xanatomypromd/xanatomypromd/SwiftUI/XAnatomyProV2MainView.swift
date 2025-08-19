@@ -85,11 +85,17 @@ struct XAnatomyProV2MainView: View {
                     }
                     
                     if isLoading {
-                        MedicalProgressView(
-                            current: dataCoordinator.loadingCurrent,
-                            total: dataManager.loadingTotal,
-                            message: dataManager.loadingProgress.isEmpty ? "Initializing..." : dataManager.loadingProgress
-                        )
+                        VStack {
+                            ProgressView("Loading DICOM Data...")
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .foregroundColor(.white)
+                            
+                            if dataCoordinator.isVolumeLoading {
+                                Text("Loading volume: \(Int(dataCoordinator.volumeLoadingProgress * 100))%")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            }
+                        }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         ZStack {
