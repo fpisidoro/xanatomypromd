@@ -258,7 +258,7 @@ struct MPRGestureController: UIViewRepresentable {
             let velocity = gesture.velocity(in: gesture.view)
             
             // ONLY handle vertical movement for slice scrolling - no horizontal pan for 2-finger
-            let isVerticalGesture = abs(translation.y) > abs(translation.x) * config.verticalGestureRatio
+            let isVerticalGesture = config.isVerticalScrollGesture(translation: translation)
             
             if isVerticalGesture {
                 // Process vertical scrolling
@@ -273,8 +273,13 @@ struct MPRGestureController: UIViewRepresentable {
                     let deltaY = translation.y - lastScrollTranslation
                     scrollAccumulator += abs(deltaY)
                     
+                    // ADAPTIVE: Calculate threshold based on current view size
+                    let adaptiveThreshold = config.calculateScrollThreshold(for: viewState.viewSize)
+                    
+                    print("📤 ADAPTIVE: viewSize=\(Int(viewState.viewSize.width))x\(Int(viewState.viewSize.height)), threshold=\(String(format: "%.1f", adaptiveThreshold))px")
+                    
                     // Trigger slice change when accumulated enough distance
-                    if scrollAccumulator >= config.baseScrollThreshold {
+                    if scrollAccumulator >= adaptiveThreshold {
                         let direction = translation.y > lastScrollTranslation ? 1 : -1
                         let speed = abs(velocity.y)
                         
