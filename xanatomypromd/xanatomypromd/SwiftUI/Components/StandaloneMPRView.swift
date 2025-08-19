@@ -122,7 +122,8 @@ struct StandaloneMPRView: View, LoadableView {
                 viewSize: viewSize,
                 allowInteraction: false,  // Gesture handling is separate
                 scrollVelocity: scrollVelocity,
-                sharedState: sharedState
+                sharedState: sharedState,
+                isViewScrolling: viewState.isScrolling  // Per-view scrolling state
             )
             .scaleEffect(viewState.zoom)
             .offset(viewState.pan)

@@ -62,6 +62,9 @@ struct CTDisplayLayer: UIViewRepresentable {
     /// Shared viewing state for quality control
     let sharedState: SharedViewingState?
     
+    /// Per-view scrolling state (true modularity)
+    let isViewScrolling: Bool
+    
     // MARK: - UIViewRepresentable Implementation
     
     func makeUIView(context: Context) -> MTKView {
@@ -417,11 +420,10 @@ struct CTDisplayLayer: UIViewRepresentable {
                 
                 print("🛠️ Generating MPR slice: \(currentPlane) slice \(currentSliceIndex) quality \(currentQuality)")
                 
-                // FINAL FIX: Only the specific plane being scrolled gets priority
-                let isActiveScrollingView = (coordinateSystem.activeScrollingPlane == currentPlane) && 
-                                          (coordinateSystem.scrollVelocity > 0.1)
+                // MODULAR FIX: Use per-view scrolling state (true standalone modules)
+                let isActiveScrollingView = isViewScrolling && (coordinateSystem.scrollVelocity > 0.1)
                 
-                print("🚀 ACTIVE VIEW: plane=\(currentPlane), activeScrolling=\(coordinateSystem.activeScrollingPlane?.rawValue ?? "none"), priority=\(isActiveScrollingView)")
+                print("🚀 MODULAR: plane=\(currentPlane), thisViewScrolling=\(isViewScrolling), priority=\(isActiveScrollingView)")
                 
                 if isActiveScrollingView {
                     // PRIORITY: Immediate generation for the actively scrolled view

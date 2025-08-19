@@ -37,6 +37,9 @@ struct LayeredMPRView: View {
     /// Shared viewing state for quality control
     let sharedState: SharedViewingState?
     
+    /// Per-view scrolling state (for standalone modularity)
+    let isViewScrolling: Bool
+    
     // MARK: - Initialization
     
     init(
@@ -50,7 +53,8 @@ struct LayeredMPRView: View {
         viewSize: CGSize = CGSize(width: 512, height: 512),
         allowInteraction: Bool = true,
         scrollVelocity: Float = 0.0,
-        sharedState: SharedViewingState? = nil
+        sharedState: SharedViewingState? = nil,
+        isViewScrolling: Bool = false
     ) {
         self.coordinateSystem = coordinateSystem
         self.plane = plane
@@ -63,6 +67,7 @@ struct LayeredMPRView: View {
         self.viewSize = viewSize
         self.allowInteraction = allowInteraction
         self.sharedState = sharedState
+        self.isViewScrolling = isViewScrolling
     }
     
     // MARK: - Body
@@ -76,7 +81,8 @@ struct LayeredMPRView: View {
                 windowLevel: windowLevel,
                 volumeData: volumeData,
                 scrollVelocity: scrollVelocity,
-                sharedState: sharedState
+                sharedState: sharedState,
+                isViewScrolling: isViewScrolling
             )
             
             // Layer 3: ROI Overlay (Anatomical Structures) - MIDDLE

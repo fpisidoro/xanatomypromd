@@ -389,10 +389,11 @@ struct MPRGestureController: UIViewRepresentable {
         
         private func startScrollQualityReduction(velocity: CGFloat) {
             // Determine quality level based on scroll velocity
+            // LOWERED: More aggressive thresholds for better quad mode performance
             let newQuality: Int
-            if velocity > 800 {
-                newQuality = 4  // Quarter quality for very fast scrolling
-            } else if velocity > 400 {
+            if velocity > 200 {  // Was 800 - much more aggressive
+                newQuality = 4  // Quarter quality for fast scrolling
+            } else if velocity > 100 {  // Was 400 - more sensitive
                 newQuality = 2  // Half quality for medium speed
             } else {
                 newQuality = 1  // Full quality for slow scrolling
