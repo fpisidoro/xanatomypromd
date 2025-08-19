@@ -417,22 +417,51 @@ struct CTDisplayLayer: UIViewRepresentable {
                 
                 print("🛠️ Generating MPR slice: \(currentPlane) slice \(currentSliceIndex) quality \(currentQuality)")
                 
-                // RESTORED: Simple immediate generation like before
-                sharedRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
-                    guard let self = self else { return }
-                    self.cachedTexture = mprTexture
-                    
-                    // OPTIMIZED: Only regenerate vertex buffer if texture size actually changed
-                    if let texture = mprTexture {
-                        let newTextureSize = CGSize(width: texture.width, height: texture.height)
-                        if newTextureSize != self.lastTextureSize {
-                            self.vertexBuffer = nil
+                // FINAL FIX: Only the specific plane being scrolled gets priority
+                let isActiveScrollingView = (coordinateSystem.activeScrollingPlane == currentPlane) && 
+                                          (coordinateSystem.scrollVelocity > 0.1)
+                
+                print("🚀 ACTIVE VIEW: plane=\(currentPlane), activeScrolling=\(coordinateSystem.activeScrollingPlane?.rawValue ?? "none"), priority=\(isActiveScrollingView)")
+                
+                if isActiveScrollingView {
+                    // PRIORITY: Immediate generation for the actively scrolled view
+                    sharedRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
+                        guard let self = self else { return }
+                        self.cachedTexture = mprTexture
+                        
+                        // OPTIMIZED: Only regenerate vertex buffer if texture size actually changed
+                        if let texture = mprTexture {
+                            let newTextureSize = CGSize(width: texture.width, height: texture.height)
+                            if newTextureSize != self.lastTextureSize {
+                                self.vertexBuffer = nil
+                            }
+                        }
+                        
+                        // IMMEDIATE: Update without delay for active view
+                        DispatchQueue.main.async {
+                            view.setNeedsDisplay()
                         }
                     }
-                    
-                    // Update view when ready
-                    DispatchQueue.main.async {
-                        view.setNeedsDisplay()
+                } else {
+                    // DEFERRED: Slight delay for non-active views to prioritize the scrolling view
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        sharedRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
+                            guard let self = self else { return }
+                            self.cachedTexture = mprTexture
+                            
+                            // OPTIMIZED: Only regenerate vertex buffer if texture size actually changed
+                            if let texture = mprTexture {
+                                let newTextureSize = CGSize(width: texture.width, height: texture.height)
+                                if newTextureSize != self.lastTextureSize {
+                                    self.vertexBuffer = nil
+                                }
+                            }
+                            
+                            // Update view when ready
+                            DispatchQueue.main.async {
+                                view.setNeedsDisplay()
+                            }
+                        }
                     }
                 }
                 return

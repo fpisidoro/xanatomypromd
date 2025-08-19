@@ -20,6 +20,9 @@ class DICOMCoordinateSystem: ObservableObject {
     /// Current scroll velocity in slices per second
     @Published var scrollVelocity: Float = 0.0
     
+    /// Track which specific plane is currently being actively scrolled
+    @Published var activeScrollingPlane: MPRPlane?
+    
     /// Last slice update time for velocity calculation
     private var lastSliceUpdateTime: Date = Date()
     private var lastSliceIndex: [MPRPlane: Int] = [:]
@@ -362,6 +365,9 @@ class DICOMCoordinateSystem: ObservableObject {
         let maxSlice = getMaxSlices(for: plane) - 1
         let clampedIndex = max(0, min(sliceIndex, maxSlice))
         
+        // CRITICAL: Track which specific plane is being actively scrolled
+        activeScrollingPlane = plane
+        
         // Calculate velocity (reduced logging for performance)
         let now = Date()
         let timeDelta = now.timeIntervalSince(lastSliceUpdateTime)
@@ -390,6 +396,7 @@ class DICOMCoordinateSystem: ObservableObject {
         velocityTimer?.invalidate()
         velocityTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in
             self?.scrollVelocity = 0.0
+            self?.activeScrollingPlane = nil  // Clear active plane when scrolling stops
         }
         
         // Convert slice index to voxel coordinate
