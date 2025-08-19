@@ -4,23 +4,10 @@
 import SwiftUI
 import Combine
 
-// MARK: - Patient Information Structure
-struct PatientInfo {
-    let name: String
-    let studyDate: String
-    let modality: String
-    
-    init(name: String, studyDate: String, modality: String) {
-        self.name = name
-        self.studyDate = studyDate
-        self.modality = modality
-    }
-}
-
 /// Protocol for views that need to manage their own loading state
 protocol LoadableView {
     associatedtype LoadingState: ViewLoadingState
-    internal var loadingState: LoadingState { get }
+    var loadingState: LoadingState { get }
     func startLoading()
     func updateLoadingProgress(_ progress: Float, message: String)
     func completeLoading()
@@ -290,7 +277,7 @@ class ViewDataCoordinator: ObservableObject {
     // Global data state
     @Published var volumeData: VolumeData?
     @Published var roiData: MinimalRTStructParser.SimpleRTStructData?
-    @Published var patientInfo: PatientInfo?
+    @Published var patientInfo: SimplePatientInfo?
     
     // Loading progress for coordination
     @Published var isVolumeLoading: Bool = false
@@ -398,13 +385,13 @@ class ViewDataCoordinator: ObservableObject {
                 let studyDate = dataset.getString(tag: DICOMTag.studyDate) ?? "Unknown Date"
                 let modality = dataset.getString(tag: DICOMTag.modality) ?? "CT"
                 
-                patientInfo = PatientInfo(
+                patientInfo = SimplePatientInfo(
                     name: patientName,
                     studyDate: studyDate,
                     modality: modality
                 )
             } catch {
-                patientInfo = PatientInfo(
+                patientInfo = SimplePatientInfo(
                     name: "Test Patient XAPV2",
                     studyDate: "2025-01-28",
                     modality: "CT"
@@ -446,6 +433,13 @@ class ViewDataCoordinator: ObservableObject {
             return []
         }
     }
+}
+
+// MARK: - Simple Patient Info Structure
+struct SimplePatientInfo {
+    let name: String
+    let studyDate: String
+    let modality: String
 }
 
 // MARK: - Loading Error Types

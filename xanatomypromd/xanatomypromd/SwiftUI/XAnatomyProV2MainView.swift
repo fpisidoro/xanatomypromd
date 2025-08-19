@@ -10,7 +10,7 @@ struct XAnatomyProV2MainView: View {
     // MARK: - Shared State
     @StateObject private var coordinateSystem = DICOMCoordinateSystem()
     @StateObject private var sharedState = SharedViewingState()
-    @StateObject private var dataManager = XAnatomyDataManager()
+    @StateObject private var dataCoordinator = ViewDataCoordinator()
     
     // MARK: - View Configuration
     @State private var layoutMode: LayoutMode = .automatic
