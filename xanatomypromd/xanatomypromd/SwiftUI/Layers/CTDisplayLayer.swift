@@ -424,8 +424,8 @@ struct CTDisplayLayer: UIViewRepresentable {
                 
                 print("🛠️ Generating MPR slice: \(currentPlane) slice \(currentSliceIndex) quality \(currentQuality)")
                 
-                // MODULAR FIX: Use per-view scrolling state (true standalone modules)
-                let isActiveScrollingView = currentIsViewScrolling && (coordinateSystem.scrollVelocity > 0.1)
+                // SIMPLIFIED: Use per-view scrolling state only (remove velocity race condition)
+                let isActiveScrollingView = currentIsViewScrolling
                 
                 print("🚀 MODULAR: plane=\(currentPlane), thisViewScrolling=\(currentIsViewScrolling), priority=\(isActiveScrollingView)")
                 
