@@ -264,7 +264,6 @@ struct CTDisplayLayer: UIViewRepresentable {
             let newQuality: MetalVolumeRenderer.RenderQuality
             if let sharedState = sharedState {
                 let currentRenderQuality = sharedState.getQuality(for: plane)
-                print("🎯 Using quality \(currentRenderQuality) for plane \(plane) (from SharedViewingState)")
                 
                 // Convert SharedViewingState quality to MetalVolumeRenderer quality
                 switch currentRenderQuality {
@@ -289,18 +288,15 @@ struct CTDisplayLayer: UIViewRepresentable {
             
             if newQuality != currentQuality {
                 currentQuality = newQuality
-                print("🎯 Quality: \(currentQuality) for plane \(plane) (plane-specific)")
                 shouldClearCache = true  // Quality change requires new texture
             }
             
             if plane != previousPlane {
-                print("🔍 Plane changed: \(previousPlane) → \(plane)")
                 shouldClearCache = true  // Plane change requires new texture
                 vertexBuffer = nil  // Only regenerate vertex buffer on plane change
             }
             
             if windowLevel.center != previousWindowLevel.center || windowLevel.width != previousWindowLevel.width {
-                print("🔍 Window level changed")
                 shouldClearCache = true  // Window level change requires new texture
             }
             
@@ -308,9 +304,6 @@ struct CTDisplayLayer: UIViewRepresentable {
             if shouldClearCache {
                 cachedTexture = nil
                 cacheKey = ""
-                print("🛠️ Cache cleared due to parameter change")
-            } else {
-                print("⚙️ Cache preserved - no significant changes")
             }
             
             // Reset quality timer
@@ -325,10 +318,8 @@ struct CTDisplayLayer: UIViewRepresentable {
             // Load volume data into individual renderer if provided
             if let volumeData = volumeData {
                 if currentVolumeData == nil {
-                    print("🔍 CT Medical Display: Loading volume data into individual renderer...")
                     do {
                         try volumeRenderer?.loadVolume(volumeData)
-                        print("✅ Volume loaded into individual renderer")
                         self.currentVolumeData = volumeData
                     } catch {
                         print("❌ Failed to load volume: \(error)")
@@ -337,15 +328,11 @@ struct CTDisplayLayer: UIViewRepresentable {
                     self.currentVolumeData = volumeData
                 }
             }
-            
-            print("🔍 CT Medical Display: Parameters updated")
         }
         
         // MARK: - MTKViewDelegate
         
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-            print("🔍 CT Medical: Drawable size changed to \(Int(size.width))×\(Int(size.height))")
-            
             // MEDICAL-CRITICAL: Force vertex buffer regeneration on size changes
             vertexBuffer = nil
             lastViewSize = .zero // Reset to force recalculation
