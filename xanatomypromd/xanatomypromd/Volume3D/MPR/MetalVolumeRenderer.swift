@@ -2,7 +2,7 @@ import Foundation
 import Metal
 import simd
 
-// MARK: - FIXED HARDWARE ACCELERATED Metal Volume Renderer
+// MARK: - Hardware Accelerated Metal Volume Renderer
 // GPU-accelerated 3D volume reconstruction and MPR slice generation
 // Uses r16Sint format with hardware sampling for maximum performance
 
@@ -14,8 +14,8 @@ public class MetalVolumeRenderer {
     private let commandQueue: MTLCommandQueue
     private let library: MTLLibrary
     
-    // 3D Volume Storage (FIXED: Made public)
-    public var volumeData: VolumeData?  // FIXED: Changed from private to public
+    // 3D Volume Storage
+    public var volumeData: VolumeData?
     private var volumeTexture: MTLTexture?
     
     // MPR Compute Pipeline
@@ -53,7 +53,7 @@ public class MetalVolumeRenderer {
         public let sliceIndex: Float        // 0.0 to 1.0 normalized position
         public let windowCenter: Float
         public let windowWidth: Float
-        public let quality: RenderQuality   // NEW: Adaptive quality level
+        public let quality: RenderQuality   // Adaptive quality level
         
         public init(plane: MPRPlane, sliceIndex: Float, windowCenter: Float = 0.0, windowWidth: Float = 2000.0, quality: RenderQuality = .full) {
             self.plane = plane
@@ -85,20 +85,18 @@ public class MetalVolumeRenderer {
         
         // Setup MPR pipeline
         try setupMPRPipeline()
-        
-        // Renderer initialized
     }
     
-    // MARK: - Volume Loading (FIXED - No Float16 Conversion)
+    // MARK: - Volume Loading
     
     /// Load volume data into 3D Metal texture with hardware sampling support
     public func loadVolume(_ volumeData: VolumeData) throws {
         self.volumeData = volumeData
         
-        // FIXED: Use r16Sint format directly (no conversion needed)
+        // Use r16Sint format directly (no conversion needed)
         let descriptor = MTLTextureDescriptor()
         descriptor.textureType = .type3D
-        descriptor.pixelFormat = .r16Sint  // FIXED: Use signed integer format directly
+        descriptor.pixelFormat = .r16Sint  // Use signed integer format directly
         descriptor.width = volumeData.dimensions.x
         descriptor.height = volumeData.dimensions.y
         descriptor.depth = volumeData.dimensions.z
@@ -108,8 +106,6 @@ public class MetalVolumeRenderer {
         guard let texture = device.makeTexture(descriptor: descriptor) else {
             throw MetalVolumeError.textureCreationFailed
         }
-        
-        // Upload Int16 data directly
         
         // Upload volume data to 3D texture directly as Int16
         let bytesPerRow = volumeData.dimensions.x * MemoryLayout<Int16>.size  // 2 bytes per Int16
@@ -137,11 +133,9 @@ public class MetalVolumeRenderer {
         }
         
         self.volumeTexture = texture
-        
-        // Volume texture created successfully
     }
     
-    // MARK: - MPR Slice Generation (Hardware Accelerated - Fixed)
+    // MARK: - MPR Slice Generation (Hardware Accelerated)
     
     /// Generate MPR slice from 3D volume using hardware sampling with adaptive quality
     public func generateMPRSlice(
@@ -161,11 +155,6 @@ public class MetalVolumeRenderer {
         let scaledWidth = max(32, Int(Float(baseSize.width) * config.quality.scaleFactor))
         let scaledHeight = max(32, Int(Float(baseSize.height) * config.quality.scaleFactor))
         
-        // Log quality adjustment if not full
-        if config.quality != .full {
-            print("🎯 Adaptive Quality: \(config.quality.description) - \(scaledWidth)×\(scaledHeight) (from \(baseSize.width)×\(baseSize.height))")
-        }
-        
         // Create output texture at adjusted resolution
         let outputDescriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .rgba8Unorm,
@@ -180,24 +169,18 @@ public class MetalVolumeRenderer {
             return
         }
         
-        // Execute FIXED HARDWARE ACCELERATED MPR compute shader
-        let startTime = CFAbsoluteTimeGetCurrent()
-        
+        // Execute hardware accelerated MPR compute shader
         executeMPRCompute(
             volumeTexture: volumeTexture,
             outputTexture: outputTexture,
             config: config,
             pipelineState: pipelineState
         ) { success in
-            let renderTime = CFAbsoluteTimeGetCurrent() - startTime
-            
-            // MPR generation completed
-            
             completion(success ? outputTexture : nil)
         }
     }
     
-    // MARK: - Convenience Methods with Performance Logging
+    // MARK: - Convenience Methods
     
     /// Generate sagittal slice at normalized X position (0.0 = left, 1.0 = right)
     public func generateSagittalSlice(
@@ -256,16 +239,13 @@ public class MetalVolumeRenderer {
     // MARK: - Private Implementation
     
     private func setupMPRPipeline() throws {
-        // FIXED: Use shader that works with r16Sint format
         guard let function = library.makeFunction(name: "mprSliceExtractionHardware") else {
             throw MetalVolumeError.shaderCompilationFailed
         }
         
         do {
             mprPipelineState = try device.makeComputePipelineState(function: function)
-            // MPR compute pipeline created
         } catch {
-            // Pipeline creation failed
             throw MetalVolumeError.pipelineCreationFailed
         }
     }
@@ -365,7 +345,7 @@ public class MetalVolumeRenderer {
         let stats = volumeData.getStatistics()
         
         return """
-        📊 FIXED HARDWARE ACCELERATED Volume Information:
+        📊 Hardware Accelerated Volume Information:
            🚀 Sampling: Hardware-accelerated r16Sint (.sample() calls)
            📐 Dimensions: \(stats.dimensions.x)×\(stats.dimensions.y)×\(stats.dimensions.z)
            📏 Spacing: \(String(format: "%.2f", stats.spacing.x))×\(String(format: "%.2f", stats.spacing.y))×\(String(format: "%.2f", stats.spacing.z)) mm
@@ -389,12 +369,10 @@ public class MetalVolumeRenderer {
         return volumeData?.spacing
     }
     
-    // MARK: - FIXED: Instance method for loading volume from DICOM files
+    // MARK: - Load volume from DICOM files
     
-    /// Load volume from DICOM files with hardware acceleration (FIXED: Instance method)
+    /// Load volume from DICOM files with hardware acceleration
     public func loadVolumeFromDICOMFiles(_ fileURLs: [URL]) async throws -> VolumeData {
-        print("📂 Loading volume from \(fileURLs.count) DICOM files for FIXED HARDWARE ACCELERATION...")
-        
         var datasets: [(DICOMDataset, Int)] = []
         
         for (index, fileURL) in fileURLs.enumerated() {
@@ -402,12 +380,7 @@ public class MetalVolumeRenderer {
                 let data = try Data(contentsOf: fileURL)
                 let dataset = try DICOMParser.parse(data)
                 datasets.append((dataset, index))
-                
-                if index % 10 == 0 || index < 5 {
-                    print("   ✅ Loaded file \(index + 1)/\(fileURLs.count)")
-                }
             } catch {
-                print("   ❌ Failed to load file \(index): \(fileURL.lastPathComponent) - \(error)")
                 throw error
             }
         }
@@ -418,17 +391,11 @@ public class MetalVolumeRenderer {
         // Store the volume data in this renderer instance
         try loadVolume(volumeData)
         
-        let stats = volumeData.getStatistics()
-        print("✅ Volume loading complete for FIXED HARDWARE ACCELERATION:")
-        print("   📐 Dimensions: \(stats.dimensions)")
-        print("   📏 Spacing: \(stats.spacing) mm")
-        print("   📊 Value range: \(stats.minValue) to \(stats.maxValue)")
-        
         return volumeData
     }
 }
 
-// MARK: - Shader Parameters Structure (Updated for r16Sint)
+// MARK: - Shader Parameters Structure
 
 private struct MPRParams {
     let planeType: UInt32           // 0=axial, 1=sagittal, 2=coronal
@@ -465,103 +432,6 @@ public enum MetalVolumeError: Error, LocalizedError {
 }
 
 // MARK: - Conversion to PixelData
-
-extension MetalVolumeRenderer {
-    
-    /// Convert hardware-accelerated MPR slice to PixelData for existing pipeline
-    public func mprSliceToPixelData(
-        plane: MPRPlane,
-        slicePosition: Float
-    ) -> PixelData? {
-        guard let volumeData = volumeData else { return nil }
-        
-        // Use hardware-accelerated GPU extraction instead of CPU interpolation
-        // For now, fall back to CPU but this could be GPU-accelerated texture readback
-        let sliceData: [Int16]
-        let dimensions: (width: Int, height: Int)
-        
-        switch plane {
-        case .axial:
-            let z = slicePosition * Float(volumeData.dimensions.z - 1)
-            sliceData = volumeData.extractAxialSlice(atZ: z)
-            dimensions = (volumeData.dimensions.x, volumeData.dimensions.y)
-            
-        case .sagittal:
-            let x = slicePosition * Float(volumeData.dimensions.x - 1)
-            sliceData = volumeData.extractSagittalSlice(atX: x)
-            dimensions = (volumeData.dimensions.y, volumeData.dimensions.z)
-            
-        case .coronal:
-            let y = slicePosition * Float(volumeData.dimensions.y - 1)
-            sliceData = volumeData.extractCoronalSlice(atY: y)
-            dimensions = (volumeData.dimensions.x, volumeData.dimensions.z)
-        }
-        
-        // Convert to Data
-        let data = sliceData.withUnsafeBytes { bytes in
-            Data(bytes: bytes.baseAddress!, count: bytes.count)
-        }
-        
-        return PixelData(
-            data: data,
-            rows: dimensions.height,
-            columns: dimensions.width,
-            bitsAllocated: 16,
-            bitsStored: 16,
-            highBit: 15,
-            pixelRepresentation: 1  // Signed
-        )
-    }
-}CompilationFailed:
-            return "Failed to compile hardware-accelerated MPR shaders"
-        case .pipelineCreationFailed:
-            return "Failed to create hardware MPR pipeline"
-        case .textureCreationFailed:
-            return "Failed to create 3D r16Sint texture"
-        case .volumeNotLoaded:
-            return "Volume data not loaded"
-        }
-    }
-}
-
-// MARK: - Testing and Validation (Fixed Hardware Accelerated)
-
-extension MetalVolumeRenderer {
-    
-    /// Test fixed hardware-accelerated MPR functionality with performance measurement
-    public func testFixedHardwareAcceleratedMPR() {
-        guard isVolumeLoaded() else {
-            print("❌ No volume loaded for fixed hardware MPR testing")
-            return
-        }
-        
-        print("🚀 Testing FIXED HARDWARE ACCELERATED MPR slice generation...")
-        
-        let testConfigs = [
-            ("Axial Center", MPRConfig(plane: .axial, sliceIndex: 0.5)),
-            ("Sagittal Center", MPRConfig(plane: .sagittal, sliceIndex: 0.5)),
-            ("Coronal Center", MPRConfig(plane: .coronal, sliceIndex: 0.5))
-        ]
-        
-        for (name, config) in testConfigs {
-            let startTime = CFAbsoluteTimeGetCurrent()
-            
-            generateMPRSlice(config: config) { texture in
-                let renderTime = CFAbsoluteTimeGetCurrent() - startTime
-                
-                if let texture = texture {
-                    let timeMs = renderTime * 1000
-                    let speedStatus = timeMs < 1.5 ? "🚀 EXCELLENT" : timeMs < 3.0 ? "✅ GOOD" : "⚠️ SLOW"
-                    print("   \(speedStatus) \(name): \(texture.width)×\(texture.height) in \(String(format: "%.2f", timeMs))ms")
-                } else {
-                    print("   ❌ \(name): Failed")
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Conversion to PixelData (Updated for r16Sint)
 
 extension MetalVolumeRenderer {
     
