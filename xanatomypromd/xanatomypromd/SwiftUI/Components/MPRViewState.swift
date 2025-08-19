@@ -202,10 +202,19 @@ class MPRViewState: ObservableObject {
 
 struct GestureConfiguration {
     
-    // MARK: - Scroll Settings
+    // MARK: - Scroll Settings (Adaptive to View Size)
     
-    /// Base distance threshold for slice scrolling (pixels)
-    let baseScrollThreshold: CGFloat = 15
+    /// ADAPTIVE: Proportional threshold based on view size (percentage of smallest dimension)
+    let scrollSensitivityRatio: CGFloat = 0.03  // 3% of smallest dimension
+    
+    /// ADAPTIVE: Minimum scroll threshold (safety lower bound)
+    let minimumScrollThreshold: CGFloat = 8     // Minimum 8 pixels
+    
+    /// ADAPTIVE: Maximum scroll threshold (safety upper bound)  
+    let maximumScrollThreshold: CGFloat = 50    // Maximum 50 pixels
+    
+    /// DEPRECATED: Base distance threshold (replaced by adaptive calculation)
+    let baseScrollThreshold: CGFloat = 15  // Kept for backward compatibility
     
     /// Sensitivity multiplier for different planes
     let planeScrollSensitivity: [MPRPlane: Float] = [
@@ -245,4 +254,23 @@ struct GestureConfiguration {
     // MARK: - Default Configuration
     
     static let `default` = GestureConfiguration()
+    
+    // MARK: - Adaptive Threshold Calculation
+    
+    /// Calculate scroll threshold based on view size (FIXES QUAD MODE LAG)
+    func calculateScrollThreshold(for viewSize: CGSize) -> CGFloat {
+        let smallestDimension = min(viewSize.width, viewSize.height)
+        let proportionalThreshold = smallestDimension * scrollSensitivityRatio
+        
+        // Clamp between safety bounds
+        let adaptiveThreshold = max(minimumScrollThreshold, 
+                                   min(proportionalThreshold, maximumScrollThreshold))
+        
+        return adaptiveThreshold
+    }
+    
+    /// Check if a gesture translation qualifies as vertical scrolling
+    func isVerticalScrollGesture(translation: CGPoint) -> Bool {
+        return abs(translation.y) > abs(translation.x) * verticalGestureRatio
+    }
 }
