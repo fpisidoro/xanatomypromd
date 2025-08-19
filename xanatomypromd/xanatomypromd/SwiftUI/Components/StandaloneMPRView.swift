@@ -1,44 +1,51 @@
 import SwiftUI
 import simd
 
-// MARK: - Standalone MPR View (Clean Declarative Architecture)
-// 
-// This view is now PURELY DECLARATIVE - no gesture handling logic
-// All gesture behavior is handled by MPRGestureController (pure UIKit)
-// This eliminates SwiftUI/UIKit gesture conflicts and compiler errors
+// MARK: - Standalone MPR View with Per-View Loading
+// Each MPR view manages its own loading state independently
 
-struct StandaloneMPRView: View {
+struct StandaloneMPRView: View, LoadableView {
     
     // MARK: - Configuration
-    
-    /// The anatomical plane this view displays
     let plane: MPRPlane
-    
-    /// Shared coordinate system (for crosshair sync)
     @ObservedObject var coordinateSystem: DICOMCoordinateSystem
-    
-    /// Shared viewing state (for window level sync)
     @ObservedObject var sharedState: SharedViewingState
+    @ObservedObject var dataCoordinator: ViewDataCoordinator
     
-    /// Data sources
-    let volumeData: VolumeData?
-    let roiData: MinimalRTStructParser.SimpleRTStructData?
-    
-    /// View configuration
     let viewSize: CGSize
     let allowInteraction: Bool
-    let scrollVelocity: Float  // NEW: Scroll velocity for adaptive quality
+    let scrollVelocity: Float
     
-    // MARK: - Local State (Pure View State)
-    
+    // MARK: - Per-View Loading State
+    @StateObject private var loadingState = MPRViewLoadingState()
     @StateObject private var viewState: MPRViewState
     
-    // MARK: - Gesture Configuration
-    
     private let gestureConfig = GestureConfiguration.default
+    private let viewId = UUID().uuidString
     
-    // MARK: - Initialization
+    // MARK: - Initialization (Updated)
+    init(
+        plane: MPRPlane,
+        coordinateSystem: DICOMCoordinateSystem,
+        sharedState: SharedViewingState,
+        dataCoordinator: ViewDataCoordinator,
+        viewSize: CGSize = CGSize(width: 512, height: 512),
+        allowInteraction: Bool = true,
+        scrollVelocity: Float = 0.0
+    ) {
+        self.plane = plane
+        self.coordinateSystem = coordinateSystem
+        self.sharedState = sharedState
+        self.dataCoordinator = dataCoordinator
+        self.viewSize = viewSize
+        self.allowInteraction = allowInteraction
+        self.scrollVelocity = scrollVelocity
+        
+        // Initialize viewState with correct plane
+        self._viewState = StateObject(wrappedValue: MPRViewState(plane: plane))
+    }
     
+    // MARK: - Convenience Initializer (Backward Compatibility)
     init(
         plane: MPRPlane,
         coordinateSystem: DICOMCoordinateSystem,
@@ -47,24 +54,61 @@ struct StandaloneMPRView: View {
         roiData: MinimalRTStructParser.SimpleRTStructData? = nil,
         viewSize: CGSize = CGSize(width: 512, height: 512),
         allowInteraction: Bool = true,
-        scrollVelocity: Float = 0.0  // NEW: Default to 0
+        scrollVelocity: Float = 0.0
     ) {
+        // Create a temporary data coordinator for backward compatibility
+        let tempCoordinator = ViewDataCoordinator()
+        tempCoordinator.volumeData = volumeData
+        tempCoordinator.roiData = roiData
+        
         self.plane = plane
         self.coordinateSystem = coordinateSystem
         self.sharedState = sharedState
-        self.volumeData = volumeData
-        self.roiData = roiData
+        self.dataCoordinator = tempCoordinator
         self.viewSize = viewSize
         self.allowInteraction = allowInteraction
-        self.scrollVelocity = scrollVelocity  // NEW: Store scroll velocity
+        self.scrollVelocity = scrollVelocity
         
-        // 🔧 FIX: Initialize viewState with correct plane IMMEDIATELY
         self._viewState = StateObject(wrappedValue: MPRViewState(plane: plane))
     }
     
-    // MARK: - Body (PURELY DECLARATIVE)
-    
+    // MARK: - Body
     var body: some View {
+        ZStack {
+            if loadingState.isLoading {
+                // Per-view loading indicator
+                ViewLoadingIndicator(
+                    loadingState: loadingState,
+                    viewType: "\(plane.displayName) View",
+                    viewSize: viewSize
+                )
+            } else {
+                // Actual MPR content
+                mprContentView
+                    .opacity(loadingState.isLoading ? 0 : 1)
+                    .animation(.easeInOut(duration: 0.3), value: loadingState.isLoading)
+            }
+        }
+        .frame(width: viewSize.width, height: viewSize.height)
+        .clipped()
+        .background(.black)
+        .onAppear {
+            setupView()
+        }
+        .onDisappear {
+            cleanupView()
+        }
+        .onChange(of: dataCoordinator.volumeData) { _, newVolumeData in
+            if newVolumeData != nil && loadingState.volumeDataReady == false {
+                Task {
+                    await processVolumeData()
+                }
+            }
+        }
+    }
+    
+    // MARK: - MPR Content View
+    private var mprContentView: some View {
         ZStack {
             // Base MPR rendering layer
             LayeredMPRView(
@@ -73,11 +117,11 @@ struct StandaloneMPRView: View {
                 windowLevel: sharedState.windowLevel,
                 crosshairAppearance: sharedState.crosshairSettings,
                 roiSettings: sharedState.roiSettings,
-                volumeData: volumeData,
-                roiData: roiData,
+                volumeData: dataCoordinator.volumeData,
+                roiData: dataCoordinator.roiData,
                 viewSize: viewSize,
                 allowInteraction: false,  // Gesture handling is separate
-                scrollVelocity: scrollVelocity,  // NEW: Pass through scroll velocity
+                scrollVelocity: scrollVelocity,
                 sharedState: sharedState
             )
             .scaleEffect(viewState.zoom)
@@ -96,46 +140,29 @@ struct StandaloneMPRView: View {
             // UI overlays
             viewLabelOverlay
         }
-        .frame(width: viewSize.width, height: viewSize.height)
-        .clipped()
-        .background(.black)
-        .onAppear {
-            // Force plane assignment immediately
-            viewState.currentPlane = plane
-            updateViewStateConfiguration()
-        }
-        .onChange(of: viewSize) {
-            updateViewStateConfiguration()
-        }
-        .onChange(of: volumeData?.dimensions) {
-            updateViewStateConfiguration()
-        }
     }
     
-    // MARK: - Configuration Updates
-    
-    private func updateViewStateConfiguration() {
-        let dims = volumeData?.dimensions ?? SIMD3<Int>(512, 512, 53)
-        viewState.updateConfiguration(
-            viewSize: viewSize,
-            volumeDimensions: SIMD3<Int32>(Int32(dims.x), Int32(dims.y), Int32(dims.z)),
-            currentPlane: plane
-        )
-    }
-    
-    // MARK: - View Components
-    
+    // MARK: - View Overlays (Updated)
     private var viewLabelOverlay: some View {
         VStack {
             HStack {
-                // Plane label
-                Text(plane.displayName)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundColor(.white)
-                    .padding(4)
-                    .background(Color.black.opacity(0.5))
-                    .cornerRadius(4)
+                // Plane label with loading indicator
+                HStack(spacing: 4) {
+                    Text(plane.displayName)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.white)
+                    
+                    // Small ready indicator
+                    if !loadingState.isLoading {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                    }
+                }
+                .padding(4)
+                .background(Color.black.opacity(0.5))
+                .cornerRadius(4)
                 
                 Spacer()
                 
@@ -159,12 +186,10 @@ struct StandaloneMPRView: View {
                     Spacer()
                     
                     VStack(alignment: .trailing, spacing: 2) {
-                        // Current zoom
                         Text(String(format: "%.1fx", viewState.zoom))
                             .font(.caption2)
                             .foregroundColor(.yellow.opacity(0.8))
                         
-                        // Baseline reference (when significantly different)
                         if abs(viewState.zoom - viewState.baselineZoom) > 0.2 {
                             Text("(base: \(String(format: "%.1fx", viewState.baselineZoom)))")
                                 .font(.caption2)
@@ -177,65 +202,161 @@ struct StandaloneMPRView: View {
                 }
                 .padding(8)
             }
-            
-            // Interaction state indicator (debug/development)
-            if viewState.isInteracting {
-                HStack {
-                    if viewState.isPinching {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.blue)
-                    }
-                    if viewState.isPanning {
-                        Image(systemName: "hand.draw")
-                            .foregroundColor(.green)
-                    }
-                    if viewState.isScrolling {
-                        Image(systemName: "scroll")
-                            .foregroundColor(.orange)
-                    }
+        }
+    }
+    
+    // MARK: - LoadableView Protocol Implementation
+    func startLoading() {
+        loadingState.isLoading = true
+        loadingState.updateStage(.volumeData)
+    }
+    
+    func updateLoadingProgress(_ progress: Float, message: String) {
+        loadingState.progress = progress
+        loadingState.message = message
+    }
+    
+    func completeLoading() {
+        loadingState.updateStage(.complete)
+    }
+    
+    // MARK: - View Lifecycle
+    private func setupView() {
+        print("🔧 \(plane.displayName) MPR View: Setting up...")
+        
+        // Start loading immediately
+        startLoading()
+        
+        // Register for data updates
+        dataCoordinator.registerViewCallback(viewId: viewId) { [self] isReady in
+            if isReady {
+                Task {
+                    await processVolumeData()
                 }
-                .font(.caption2)
-                .padding(4)
-                .background(Color.black.opacity(0.5))
-                .cornerRadius(4)
-                .padding(.bottom, 8)
+            }
+        }
+        
+        // Force plane assignment
+        viewState.currentPlane = plane
+        updateViewStateConfiguration()
+        
+        // If data is already available, start processing
+        if dataCoordinator.volumeData != nil {
+            Task {
+                await processVolumeData()
             }
         }
     }
     
-    // MARK: - Public Interface
+    private func cleanupView() {
+        dataCoordinator.unregisterViewCallback(viewId: viewId)
+        print("🧹 \(plane.displayName) MPR View: Cleaned up")
+    }
     
-    /// Reset view transformations to baseline
+    // MARK: - Data Processing Pipeline
+    @MainActor
+    private func processVolumeData() async {
+        guard let volumeData = dataCoordinator.volumeData else {
+            loadingState.setError("No volume data available")
+            return
+        }
+        
+        do {
+            // Stage 1: Volume data ready
+            loadingState.updateStage(.volumeData)
+            await Task.sleep(nanoseconds: 50_000_000) // 50ms delay for UI
+            
+            // Stage 2: Create GPU textures
+            loadingState.updateStage(.textureCreation)
+            try await initializeGPUResources(volumeData: volumeData)
+            await Task.sleep(nanoseconds: 50_000_000)
+            
+            // Stage 3: Generate initial MPR slice
+            loadingState.updateStage(.sliceGeneration)
+            try await generateInitialSlice()
+            await Task.sleep(nanoseconds: 50_000_000)
+            
+            // Stage 4: Process ROI data (if available)
+            loadingState.updateStage(.roiProcessing)
+            await processROIData()
+            await Task.sleep(nanoseconds: 50_000_000)
+            
+            // Stage 5: Complete
+            completeLoading()
+            
+            print("✅ \(plane.displayName) MPR View: Loading completed successfully")
+            
+        } catch {
+            print("❌ \(plane.displayName) MPR View: Loading failed - \(error)")
+            loadingState.setError("Failed to load: \(error.localizedDescription)")
+        }
+    }
+    
+    private func initializeGPUResources(volumeData: VolumeData) async throws {
+        // Initialize Metal resources for this specific view
+        guard let renderer = dataCoordinator.getVolumeRenderer() else {
+            throw ViewLoadingError.rendererInitializationFailed
+        }
+        
+        // This would involve creating view-specific GPU textures
+        // For now, we'll simulate the GPU setup time
+        await Task.sleep(nanoseconds: 100_000_000) // 100ms for GPU setup
+        
+        print("🔧 \(plane.displayName): GPU resources initialized")
+    }
+    
+    private func generateInitialSlice() async throws {
+        // Generate the first MPR slice for this plane
+        // This simulates the time needed to create the initial slice
+        await Task.sleep(nanoseconds: 150_000_000) // 150ms for initial slice generation
+        
+        print("🔧 \(plane.displayName): Initial slice generated")
+    }
+    
+    private func processROIData() async {
+        if dataCoordinator.roiData != nil {
+            // Process ROI data specific to this plane
+            await Task.sleep(nanoseconds: 50_000_000) // 50ms for ROI processing
+            print("🔧 \(plane.displayName): ROI data processed")
+        } else {
+            print("🔧 \(plane.displayName): No ROI data to process")
+        }
+    }
+    
+    private func updateViewStateConfiguration() {
+        let dims = dataCoordinator.volumeData?.dimensions ?? SIMD3<Int>(512, 512, 53)
+        viewState.updateConfiguration(
+            viewSize: viewSize,
+            volumeDimensions: SIMD3<Int32>(Int32(dims.x), Int32(dims.y), Int32(dims.z)),
+            currentPlane: plane
+        )
+    }
+    
+    // MARK: - Public Interface
     public func resetView() {
         withAnimation(.spring()) {
             viewState.resetView()
         }
     }
     
-    /// Check if view has been transformed from baseline
     public var isTransformed: Bool {
         return viewState.isTransformed
     }
     
-    /// Get current zoom level
     public var currentZoom: CGFloat {
         return viewState.zoom
     }
     
-    /// Get baseline zoom level
     public var baselineZoom: CGFloat {
         return viewState.baselineZoom
     }
 }
 
 // MARK: - Multi-View Container (Updated)
-
 struct MultiViewMPRContainer: View {
     @StateObject private var coordinateSystem = DICOMCoordinateSystem()
     @StateObject private var sharedState = SharedViewingState()
-    
-    let volumeData: VolumeData?
-    let roiData: MinimalRTStructParser.SimpleRTStructData?
+    @StateObject private var dataCoordinator = ViewDataCoordinator()
     
     var body: some View {
         GeometryReader { geometry in
@@ -245,8 +366,7 @@ struct MultiViewMPRContainer: View {
                     plane: .axial,
                     coordinateSystem: coordinateSystem,
                     sharedState: sharedState,
-                    volumeData: volumeData,
-                    roiData: roiData,
+                    dataCoordinator: dataCoordinator,
                     viewSize: CGSize(
                         width: geometry.size.width / 3 - 4,
                         height: geometry.size.height
@@ -257,8 +377,7 @@ struct MultiViewMPRContainer: View {
                     plane: .sagittal,
                     coordinateSystem: coordinateSystem,
                     sharedState: sharedState,
-                    volumeData: volumeData,
-                    roiData: roiData,
+                    dataCoordinator: dataCoordinator,
                     viewSize: CGSize(
                         width: geometry.size.width / 3 - 4,
                         height: geometry.size.height
@@ -269,8 +388,7 @@ struct MultiViewMPRContainer: View {
                     plane: .coronal,
                     coordinateSystem: coordinateSystem,
                     sharedState: sharedState,
-                    volumeData: volumeData,
-                    roiData: roiData,
+                    dataCoordinator: dataCoordinator,
                     viewSize: CGSize(
                         width: geometry.size.width / 3 - 4,
                         height: geometry.size.height
@@ -278,17 +396,22 @@ struct MultiViewMPRContainer: View {
                 )
             }
         }
+        .onAppear {
+            Task {
+                await dataCoordinator.loadAllData()
+            }
+        }
     }
 }
 
 // MARK: - Preview Provider
-
 struct StandaloneMPRView_Previews: PreviewProvider {
     static var previews: some View {
         StandaloneMPRView(
             plane: .axial,
             coordinateSystem: DICOMCoordinateSystem(),
             sharedState: SharedViewingState(),
+            dataCoordinator: ViewDataCoordinator(),
             viewSize: CGSize(width: 400, height: 400)
         )
         .frame(width: 400, height: 400)

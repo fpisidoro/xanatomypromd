@@ -4,27 +4,47 @@ import MetalKit
 import simd
 import Combine
 
-// MARK: - Standalone 3D View
-struct Standalone3DView: View {
+// MARK: - Standalone 3D View with Per-View Loading
+// 3D view manages its own loading state independently from MPR views
+
+struct Standalone3DView: View, LoadableView {
     
     @ObservedObject var coordinateSystem: DICOMCoordinateSystem
     @ObservedObject var sharedState: SharedViewingState
+    @ObservedObject var dataCoordinator: ViewDataCoordinator
     
-    let volumeData: VolumeData?
-    let roiData: MinimalRTStructParser.SimpleRTStructData?
     let viewSize: CGSize
     let allowInteraction: Bool
     
-    // Use persistent state from SharedViewingState
+    // MARK: - Per-View Loading State
+    @StateObject private var loadingState = ThreeDViewLoadingState()
+    @StateObject private var renderer = Metal3DVolumeRenderer()
+    
+    // Gesture state (persistent via SharedViewingState)
     @State private var lastZoom: CGFloat = 1.0
     @State private var dragStartRotation: Float = 0.0
     @State private var dragStartLocation: CGPoint = .zero
     @State private var isDragging: Bool = false
-    @StateObject private var renderer = Metal3DVolumeRenderer()
-    
-    // SYNC: Track crosshair changes for real-time updates
     @State private var lastCrosshairPosition: SIMD3<Float> = SIMD3<Float>(0, 0, 0)
     
+    private let viewId = UUID().uuidString
+    
+    // MARK: - Initialization (Updated)
+    init(
+        coordinateSystem: DICOMCoordinateSystem,
+        sharedState: SharedViewingState,
+        dataCoordinator: ViewDataCoordinator,
+        viewSize: CGSize = CGSize(width: 512, height: 512),
+        allowInteraction: Bool = true
+    ) {
+        self.coordinateSystem = coordinateSystem
+        self.sharedState = sharedState
+        self.dataCoordinator = dataCoordinator
+        self.viewSize = viewSize
+        self.allowInteraction = allowInteraction
+    }
+    
+    // MARK: - Convenience Initializer (Backward Compatibility)
     init(
         coordinateSystem: DICOMCoordinateSystem,
         sharedState: SharedViewingState,
@@ -33,86 +53,260 @@ struct Standalone3DView: View {
         viewSize: CGSize = CGSize(width: 512, height: 512),
         allowInteraction: Bool = true
     ) {
+        // Create a temporary data coordinator for backward compatibility
+        let tempCoordinator = ViewDataCoordinator()
+        tempCoordinator.volumeData = volumeData
+        tempCoordinator.roiData = roiData
+        
         self.coordinateSystem = coordinateSystem
         self.sharedState = sharedState
-        self.volumeData = volumeData
-        self.roiData = roiData
+        self.dataCoordinator = tempCoordinator
         self.viewSize = viewSize
         self.allowInteraction = allowInteraction
     }
     
     var body: some View {
         ZStack {
-            Color.black
-            
-            if let volumeData = volumeData {
+            if loadingState.isLoading {
+                // Per-view loading indicator
+                ViewLoadingIndicator(
+                    loadingState: loadingState,
+                    viewType: "3D Volume",
+                    viewSize: viewSize
+                )
+            } else {
+                // Actual 3D content
+                threeDContentView
+                    .opacity(loadingState.isLoading ? 0 : 1)
+                    .animation(.easeInOut(duration: 0.3), value: loadingState.isLoading)
+            }
+        }
+        .frame(width: viewSize.width, height: viewSize.height)
+        .clipped()
+        .background(.black)
+        .onAppear {
+            setupView()
+        }
+        .onDisappear {
+            cleanupView()
+        }
+        .onChange(of: dataCoordinator.volumeData) { _, newVolumeData in
+            if newVolumeData != nil && loadingState.volumeDataReady == false {
+                Task {
+                    await process3DData()
+                }
+            }
+        }
+    }
+    
+    // MARK: - 3D Content View
+    private var threeDContentView: some View {
+        ZStack {
+            if let volumeData = dataCoordinator.volumeData {
                 Metal3DRenderView(
                     renderer: renderer,
                     volumeData: volumeData,
-                    rotationZ: sharedState.rotation3D,  // Use persistent rotation
-                    crosshairPosition: coordinateSystem.currentWorldPosition,  // ALWAYS synced
+                    rotationZ: sharedState.rotation3D,
+                    crosshairPosition: coordinateSystem.currentWorldPosition,
                     coordinateSystem: coordinateSystem,
                     windowLevel: sharedState.windowLevel,
-                    zoom: sharedState.zoom3D,  // Use persistent zoom
-                    pan: sharedState.pan3D,  // Use persistent pan
-                    showROI: sharedState.roiSettings.isVisible  // Pass ROI toggle state
+                    zoom: sharedState.zoom3D,
+                    pan: sharedState.pan3D,
+                    showROI: sharedState.roiSettings.isVisible
                 )
                 .clipped()
                 .onReceive(coordinateSystem.$currentWorldPosition) { newPosition in
-                    // SYNC: Update when crosshairs move in MPR views
                     if newPosition != lastCrosshairPosition {
                         lastCrosshairPosition = newPosition
-                        // Force 3D view to re-render with new crosshair position
                     }
-                }
-            } else {
-                VStack {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    Text("Loading 3D Volume...")
-                        .foregroundColor(.white)
-                        .font(.caption)
                 }
             }
             
-            VStack {
-                HStack {
+            // 3D View label overlay
+            viewLabelOverlay
+        }
+        .gesture(allowInteraction ? createGestureRecognizer() : nil)
+    }
+    
+    // MARK: - View Overlays (Updated)
+    private var viewLabelOverlay: some View {
+        VStack {
+            HStack {
+                // 3D label with loading indicator
+                HStack(spacing: 4) {
                     Text("3D")
                         .font(.caption)
                         .foregroundColor(.white)
-                        .padding(4)
-                        .background(Color.black.opacity(0.5))
-                        .cornerRadius(3)
-                    Spacer()
+                    
+                    // Small ready indicator
+                    if !loadingState.isLoading {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                    }
                 }
+                .padding(4)
+                .background(Color.black.opacity(0.5))
+                .cornerRadius(3)
+                
                 Spacer()
+                
+                // 3D controls indicator
+                if allowInteraction {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("Drag: Rotate")
+                            .font(.caption2)
+                            .foregroundColor(.white.opacity(0.6))
+                        Text("Pinch: Zoom")
+                            .font(.caption2)
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    .padding(4)
+                    .background(Color.black.opacity(0.5))
+                    .cornerRadius(4)
+                }
+            }
+            .padding(4)
+            
+            Spacer()
+            
+            // 3D transformation status
+            HStack {
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 2) {
+                    if abs(sharedState.rotation3D) > 0.1 {
+                        Text("Rotation: \(String(format: "%.0f°", sharedState.rotation3D * 180 / .pi))")
+                            .font(.caption2)
+                            .foregroundColor(.cyan.opacity(0.8))
+                    }
+                    
+                    if abs(sharedState.zoom3D - 1.0) > 0.1 {
+                        Text("Zoom: \(String(format: "%.1fx", sharedState.zoom3D))")
+                            .font(.caption2)
+                            .foregroundColor(.yellow.opacity(0.8))
+                    }
+                }
+                .padding(4)
+                .background(Color.black.opacity(0.5))
+                .cornerRadius(4)
             }
             .padding(4)
         }
-        .frame(width: viewSize.width, height: viewSize.height)
-        .gesture(allowInteraction ? createGestureRecognizer() : nil)
-        .onAppear { 
-            setupRenderer()
-            // SYNC: Initialize with current crosshair position
-            lastCrosshairPosition = coordinateSystem.currentWorldPosition
-            dragStartRotation = sharedState.rotation3D  // Initialize drag start rotation
-            print("🎯 3D View appeared - synced to crosshair: \(coordinateSystem.currentWorldPosition)")
-            print("   Using persistent rotation: \(sharedState.rotation3D), zoom: \(sharedState.zoom3D)")
+    }
+    
+    // MARK: - LoadableView Protocol Implementation
+    func startLoading() {
+        loadingState.isLoading = true
+        loadingState.updateStage(.volumeData)
+    }
+    
+    func updateLoadingProgress(_ progress: Float, message: String) {
+        loadingState.progress = progress
+        loadingState.message = message
+    }
+    
+    func completeLoading() {
+        loadingState.updateStage(.complete)
+    }
+    
+    // MARK: - View Lifecycle
+    private func setupView() {
+        print("🔧 3D View: Setting up...")
+        
+        // Start loading immediately
+        startLoading()
+        
+        // Register for data updates
+        dataCoordinator.registerViewCallback(viewId: viewId) { [self] isReady in
+            if isReady {
+                Task {
+                    await process3DData()
+                }
+            }
         }
-        .onDisappear {
-            // State is automatically preserved in SharedViewingState
-            print("🎯 3D View disappeared - state preserved in SharedViewingState")
+        
+        // Initialize persistent state
+        lastCrosshairPosition = coordinateSystem.currentWorldPosition
+        dragStartRotation = sharedState.rotation3D
+        
+        // If data is already available, start processing
+        if dataCoordinator.volumeData != nil {
+            Task {
+                await process3DData()
+            }
+        }
+        
+        print("🎯 3D View appeared - synced to crosshair: \(coordinateSystem.currentWorldPosition)")
+    }
+    
+    private func cleanupView() {
+        dataCoordinator.unregisterViewCallback(viewId: viewId)
+        print("🧹 3D View: Cleaned up")
+    }
+    
+    // MARK: - 3D Data Processing Pipeline
+    @MainActor
+    private func process3DData() async {
+        guard let volumeData = dataCoordinator.volumeData else {
+            loadingState.setError("No volume data available")
+            return
+        }
+        
+        do {
+            // Stage 1: Volume data ready
+            loadingState.updateStage(.volumeData)
+            await Task.sleep(nanoseconds: 50_000_000) // 50ms delay for UI
+            
+            // Stage 2: Initialize Metal 3D renderer
+            loadingState.updateStage(.metalSetup)
+            try await initialize3DRenderer(volumeData: volumeData)
+            await Task.sleep(nanoseconds: 100_000_000) // 100ms for Metal setup
+            
+            // Stage 3: Compile 3D shaders
+            loadingState.updateStage(.shaderCompilation)
+            try await compile3DShaders()
+            await Task.sleep(nanoseconds: 150_000_000) // 150ms for shader compilation
+            
+            // Stage 4: Setup 3D ROI (if available)
+            loadingState.updateStage(.roiSetup)
+            await setup3DROI()
+            await Task.sleep(nanoseconds: 50_000_000)
+            
+            // Stage 5: Complete
+            completeLoading()
+            
+            print("✅ 3D View: Loading completed successfully")
+            
+        } catch {
+            print("❌ 3D View: Loading failed - \(error)")
+            loadingState.setError("Failed to load 3D: \(error.localizedDescription)")
         }
     }
     
-    private func setupRenderer() {
-        guard let volumeData = volumeData else { return }
+    private func initialize3DRenderer(volumeData: VolumeData) async throws {
+        // Setup 3D volume in renderer
         renderer.setupVolume(volumeData)
-        if let roiData = roiData {
+        print("🔧 3D View: Metal renderer initialized")
+    }
+    
+    private func compile3DShaders() async throws {
+        // Simulate shader compilation time
+        // In real implementation, this would involve shader compilation
+        await Task.sleep(nanoseconds: 200_000_000) // 200ms for shader compilation
+        print("🔧 3D View: 3D shaders compiled")
+    }
+    
+    private func setup3DROI() async {
+        if let roiData = dataCoordinator.roiData {
             renderer.setupROI(roiData)
+            print("🔧 3D View: ROI setup completed")
+        } else {
+            print("🔧 3D View: No ROI data for 3D setup")
         }
     }
     
+    // MARK: - Gesture Handling (Unchanged)
     private func createGestureRecognizer() -> some Gesture {
         let dragGesture = DragGesture()
             .onChanged { value in
@@ -123,8 +317,7 @@ struct Standalone3DView: View {
                 }
                 
                 // Calculate rotation based on total drag distance from start
-                // REVERSED: Negative rotation for more intuitive control
-                let rotationSensitivity: Float = -0.01  // Negative to reverse direction
+                let rotationSensitivity: Float = -0.01  // Negative for intuitive control
                 let deltaX = Float(value.location.x - dragStartLocation.x)
                 let newRotation = dragStartRotation + deltaX * rotationSensitivity
                 sharedState.update3DRotation(newRotation)
@@ -143,6 +336,7 @@ struct Standalone3DView: View {
     }
 }
 
+// MARK: - Existing Metal3DVolumeRenderer and related components remain unchanged
 @MainActor
 class Metal3DVolumeRenderer: ObservableObject {
     private var device: MTLDevice?

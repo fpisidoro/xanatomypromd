@@ -1,23 +1,21 @@
 import SwiftUI
 import simd
 
-// MARK: - Main Application Integration
-// Replaces the complex DICOMViewerView with clean layered architecture
+// MARK: - Updated Main Application View
+// No more global loading overlay - each view manages its own loading
 
 struct XAnatomyProMainView: View {
     
     // MARK: - State Management
-    
     @StateObject var coordinateSystem = DICOMCoordinateSystem()
-    @StateObject var dataManager = XAnatomyDataManager()
-    @StateObject var sharedViewingState = SharedViewingState()  // Shared across all views
+    @StateObject var sharedViewingState = SharedViewingState()
+    @StateObject var dataCoordinator = ViewDataCoordinator()  // NEW: Centralized data coordinator
     
     @State private var currentPlane: MPRPlane = .axial
     @State private var show3D: Bool = false
-    @State private var isLoading = true
     @State private var showingControls = true
     
-    // View configuration (updated for unified gesture system)
+    // View configuration (unified gesture system)
     @State private var scale: CGFloat = 1.0
     @State private var dragOffset: CGSize = .zero
     
@@ -46,35 +44,11 @@ struct XAnatomyProMainView: View {
                     // Header
                     headerView
                     
-                    // Main viewing area
+                    // Main viewing area - NO MORE GLOBAL LOADING OVERLAY
                     mainViewingArea(geometry: geometry)
                     
-                    // TEST BUTTONS
-                    HStack {
-                        Button("AXIAL") { currentPlane = .axial; show3D = false }
-                            .foregroundColor(.blue)
-                            .padding()
-                        Button("SAGITTAL") { currentPlane = .sagittal; show3D = false }
-                            .foregroundColor(.blue)
-                            .padding()
-                        Button("CORONAL") { currentPlane = .coronal; show3D = false }
-                            .foregroundColor(.blue)
-                            .padding()
-                        Button("3D") { show3D = true }
-                            .foregroundColor(.blue)
-                            .padding()
-                        
-                        Button("BONE") { sharedViewingState.setWindowLevel(.bone) }
-                            .foregroundColor(.red)
-                            .padding()
-                        Button("LUNG") { sharedViewingState.setWindowLevel(.lung) }
-                            .foregroundColor(.red)
-                            .padding()
-                        Button("SOFT") { sharedViewingState.setWindowLevel(.softTissue) }
-                            .foregroundColor(.red)
-                            .padding()
-                    }
-                    .background(Color.white)
+                    // Control buttons
+                    controlButtons
                 }
                 .background(Color.black)
                 .navigationBarHidden(true)
@@ -88,7 +62,6 @@ struct XAnatomyProMainView: View {
     }
     
     // MARK: - Header View
-    
     private var headerView: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
@@ -96,7 +69,7 @@ struct XAnatomyProMainView: View {
                     .font(.headline)
                     .foregroundColor(.white)
                 
-                if let patientInfo = dataManager.patientInfo {
+                if let patientInfo = dataCoordinator.patientInfo {
                     Text(patientInfo.name)
                         .font(.subheadline)
                         .foregroundColor(.gray)
@@ -106,19 +79,42 @@ struct XAnatomyProMainView: View {
             Spacer()
             
             VStack(alignment: .trailing, spacing: 4) {
-                Text(currentPlane.displayName)
+                Text(show3D ? "3D Volume" : currentPlane.displayName)
                     .font(.headline)
                     .foregroundColor(.blue)
                 
-                let sliceIndex = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
-                let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
-                Text("Slice \(sliceIndex + 1)/\(maxSlices)")
-                    .font(.caption)
-                    .foregroundColor(.white)
+                if !show3D {
+                    let sliceIndex = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
+                    let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
+                    Text("Slice \(sliceIndex + 1)/\(maxSlices)")
+                        .font(.caption)
+                        .foregroundColor(.white)
+                }
                 
                 Text(sharedViewingState.windowLevel.name)
                     .font(.caption2)
                     .foregroundColor(.gray)
+                
+                // Global data status
+                HStack(spacing: 4) {
+                    if dataCoordinator.volumeData != nil {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                        Text("Volume")
+                            .font(.caption2)
+                            .foregroundColor(.green)
+                    }
+                    
+                    if dataCoordinator.roiData != nil {
+                        Circle()
+                            .fill(Color.cyan)
+                            .frame(width: 6, height: 6)
+                        Text("ROI")
+                            .font(.caption2)
+                            .foregroundColor(.cyan)
+                    }
+                }
             }
             
             Button(action: { showingControls.toggle() }) {
@@ -131,368 +127,191 @@ struct XAnatomyProMainView: View {
         .background(Color.black.opacity(0.8))
     }
     
-    // MARK: - Main Viewing Area
-    
+    // MARK: - Main Viewing Area (Per-View Loading)
     private func mainViewingArea(geometry: GeometryProxy) -> some View {
         ZStack {
-            if isLoading {
-                loadingView
-            } else {
-                // THE CLEAN LAYERED SYSTEM
-                Group {
-                    if show3D {
-                        Standalone3DView(
-                            coordinateSystem: coordinateSystem,
-                            sharedState: sharedViewingState,  // Use the shared instance
-                            volumeData: dataManager.volumeData,
-                            roiData: dataManager.roiData,
-                            viewSize: CGSize(
-                                width: geometry.size.width,
-                                height: geometry.size.height * 0.7
-                            ),
-                            allowInteraction: true
-                        )
-                    } else {
-                        LayeredMPRView(
-                            coordinateSystem: coordinateSystem,
-                            plane: currentPlane,
-                            windowLevel: sharedViewingState.windowLevel,
-                            crosshairAppearance: sharedViewingState.crosshairSettings,
-                            roiSettings: sharedViewingState.roiSettings,
-                            volumeData: dataManager.volumeData,
-                            roiData: dataManager.roiData,
-                            viewSize: CGSize(
-                                width: geometry.size.width,
-                                height: geometry.size.height * 0.7
-                            ),
-                            allowInteraction: true,
-                            scrollVelocity: scrollVelocity
-                        )
-                    }
-                }
-                .scaleEffect(scale)
-                .offset(dragOffset)
-                .clipped()
-                .overlay(
-                    // PURE UIKIT GESTURE HANDLING
-                    UnifiedGestureHandler(
-                        onGesture: handleUnifiedGesture,
-                        onZoomChange: handleZoomChange,
+            // Each view now manages its own loading state
+            Group {
+                if show3D {
+                    Standalone3DView(
+                        coordinateSystem: coordinateSystem,
+                        sharedState: sharedViewingState,
+                        dataCoordinator: dataCoordinator,  // Pass data coordinator
                         viewSize: CGSize(
                             width: geometry.size.width,
                             height: geometry.size.height * 0.7
                         ),
-                        volumeDimensions: {
-                            let dims = dataManager.volumeData?.dimensions ?? SIMD3<Int>(512, 512, 53)
-                            return SIMD3<Int32>(Int32(dims.x), Int32(dims.y), Int32(dims.z))
-                        }(),
-                        currentPlane: currentPlane
+                        allowInteraction: true
                     )
-                )
-                .onAppear {
-                    // Initialize coordinate system when volume data is loaded
-                    if let volumeData = dataManager.volumeData {
-                        coordinateSystem.initializeFromVolumeData(volumeData)
-                        print("✅ Coordinate system initialized with volume dimensions: \(volumeData.dimensions)")
-                    }
+                } else {
+                    StandaloneMPRView(
+                        plane: currentPlane,
+                        coordinateSystem: coordinateSystem,
+                        sharedState: sharedViewingState,
+                        dataCoordinator: dataCoordinator,  // Pass data coordinator
+                        viewSize: CGSize(
+                            width: geometry.size.width,
+                            height: geometry.size.height * 0.7
+                        ),
+                        allowInteraction: true,
+                        scrollVelocity: scrollVelocity
+                    )
                 }
-                .onChange(of: dataManager.isVolumeLoaded) { _, isLoaded in
-                    // Update coordinate system when volume data becomes available
-                    if isLoaded, let volumeData = dataManager.volumeData {
-                        coordinateSystem.initializeFromVolumeData(volumeData)
-                        print("✅ Coordinate system updated with new volume data")
-                    }
+            }
+            .scaleEffect(scale)
+            .offset(dragOffset)
+            .clipped()
+            .overlay(
+                // PURE UIKIT GESTURE HANDLING (only when not loading)
+                UnifiedGestureHandler(
+                    onGesture: handleUnifiedGesture,
+                    onZoomChange: handleZoomChange,
+                    viewSize: CGSize(
+                        width: geometry.size.width,
+                        height: geometry.size.height * 0.7
+                    ),
+                    volumeDimensions: {
+                        let dims = dataCoordinator.volumeData?.dimensions ?? SIMD3<Int>(512, 512, 53)
+                        return SIMD3<Int32>(Int32(dims.x), Int32(dims.y), Int32(dims.z))
+                    }(),
+                    currentPlane: currentPlane
+                )
+            )
+            .onAppear {
+                // Initialize coordinate system when volume data is loaded
+                if let volumeData = dataCoordinator.volumeData {
+                    coordinateSystem.initializeFromVolumeData(volumeData)
+                    print("✅ Coordinate system initialized with volume dimensions: \(volumeData.dimensions)")
+                }
+            }
+            .onChange(of: dataCoordinator.volumeData) { _, volumeData in
+                // Update coordinate system when volume data becomes available
+                if let volumeData = volumeData {
+                    coordinateSystem.initializeFromVolumeData(volumeData)
+                    print("✅ Coordinate system updated with new volume data")
                 }
             }
         }
         .frame(height: geometry.size.height * 0.7)
     }
     
-    private var controlsArea: some View {
-        HStack(spacing: 20) {
-            Button("Axial") { currentPlane = .axial; show3D = false }
+    // MARK: - Control Buttons
+    private var controlButtons: some View {
+        VStack(spacing: 8) {
+            // Plane selection buttons
+            HStack {
+                Button("AXIAL") { 
+                    currentPlane = .axial
+                    show3D = false 
+                }
                 .foregroundColor(currentPlane == .axial && !show3D ? .blue : .white)
-            Button("Sagittal") { currentPlane = .sagittal; show3D = false }
+                .padding()
+                
+                Button("SAGITTAL") { 
+                    currentPlane = .sagittal
+                    show3D = false 
+                }
                 .foregroundColor(currentPlane == .sagittal && !show3D ? .blue : .white)
-            Button("Coronal") { currentPlane = .coronal; show3D = false }
+                .padding()
+                
+                Button("CORONAL") { 
+                    currentPlane = .coronal
+                    show3D = false 
+                }
                 .foregroundColor(currentPlane == .coronal && !show3D ? .blue : .white)
-            Button("3D") { show3D = true }
-                .foregroundColor(show3D ? .blue : .white)
+                .padding()
+                
+                Button("3D") { show3D = true }
+                    .foregroundColor(show3D ? .blue : .white)
+                    .padding()
+            }
             
-            Spacer()
+            // Window level buttons
+            HStack {
+                Button("BONE") { sharedViewingState.setWindowLevel(.bone) }
+                    .foregroundColor(.red)
+                    .padding()
+                Button("LUNG") { sharedViewingState.setWindowLevel(.lung) }
+                    .foregroundColor(.red)
+                    .padding()
+                Button("SOFT") { sharedViewingState.setWindowLevel(.softTissue) }
+                    .foregroundColor(.red)
+                    .padding()
+            }
             
-            Button("Bone") { sharedViewingState.setWindowLevel(.bone) }
-                .foregroundColor(.white)
-            Button("Lung") { sharedViewingState.setWindowLevel(.lung) }
-                .foregroundColor(.white)
-            Button("Soft") { sharedViewingState.setWindowLevel(.softTissue) }
-                .foregroundColor(.white)
+            // Action buttons
+            HStack {
+                Button("Reset View") { resetViewTransform() }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.gray.opacity(0.3))
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+                
+                Button("Center") { centerCrosshair() }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.blue.opacity(0.6))
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+                
+                Button("Test RTStruct") { testRTStructParsing() }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.green.opacity(0.6))
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+                
+                Spacer()
+                
+                // Global loading status (if any views are still loading)
+                if dataCoordinator.isVolumeLoading {
+                    HStack {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .cyan))
+                            .scaleEffect(0.8)
+                        Text("Loading data...")
+                            .font(.caption2)
+                            .foregroundColor(.cyan)
+                    }
+                }
+            }
         }
         .padding()
         .background(Color.black.opacity(0.8))
     }
     
-    // MARK: - Control Sections
-    
-    private var planeSelectionControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Anatomical Plane")
-                .font(.headline)
-                .foregroundColor(.white)
-            
-            HStack(spacing: 12) {
-                ForEach([MPRPlane.axial, MPRPlane.sagittal, MPRPlane.coronal], id: \.self) { plane in
-                    Button(action: { 
-                        currentPlane = plane
-                        sharedViewingState.lastActivePlane = plane
-                        show3D = false
-                    }) {
-                        VStack(spacing: 4) {
-                            Text(plane.displayName)
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(.white)
-                            
-                            Text(getPlaneDescription(plane))
-                                .font(.caption2)
-                                .foregroundColor(.gray)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(!show3D && currentPlane == plane ? Color.blue : Color.gray.opacity(0.3))
-                        .cornerRadius(8)
-                    }
-                }
-                
-                // 3D Button
-                Button(action: { show3D = true }) {
-                    VStack(spacing: 4) {
-                        Text("3D")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.white)
-                        
-                        Text("Volume")
-                            .font(.caption2)
-                            .foregroundColor(.gray)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(show3D ? Color.blue : Color.gray.opacity(0.3))
-                    .cornerRadius(8)
-                }
-            }
-        }
-    }
-    
-    private var windowingControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("CT Windowing")
-                .font(.headline)
-                .foregroundColor(.white)
-            
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(CTWindowLevel.allPresets, id: \.name) { preset in
-                        Button(action: { sharedViewingState.setWindowLevel(preset) }) {
-                            VStack(spacing: 4) {
-                                Text(preset.name)
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.white)
-                                
-                                Text("C:\(Int(preset.center)) W:\(Int(preset.width))")
-                                    .font(.caption2)
-                                    .foregroundColor(.gray)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(sharedViewingState.windowLevel.name == preset.name ? Color.blue : Color.gray.opacity(0.3))
-                            .cornerRadius(8)
-                        }
-                    }
-                }
-                .padding(.horizontal)
-            }
-        }
-    }
-    
-    private var sliceNavigationControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Slice Navigation")
-                .font(.headline)
-                .foregroundColor(.white)
-            
-            HStack {
-                Button("←") { previousSlice() }
-                    .disabled(!canNavigateToPreviousSlice())
-                    .foregroundColor(.white)
-                
-                Slider(
-                    value: Binding(
-                        get: { Double(coordinateSystem.getCurrentSliceIndex(for: currentPlane)) },
-                        set: { newValue in
-                            let sliceIndex = Int(newValue)
-                            coordinateSystem.updateFromSliceScroll(plane: currentPlane, sliceIndex: sliceIndex)
-                        }
-                    ),
-                    in: 0...Double(coordinateSystem.getMaxSlices(for: currentPlane) - 1),
-                    step: 1
-                )
-                .accentColor(.blue)
-                
-                Button("→") { nextSlice() }
-                    .disabled(!canNavigateToNextSlice())
-                    .foregroundColor(.white)
-            }
-        }
-    }
-    
-    private var displayOptionsControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Display Options")
-                .font(.headline)
-                .foregroundColor(.white)
-            
-            HStack {
-                Toggle("Crosshairs", isOn: Binding(
-                    get: { sharedViewingState.crosshairSettings.isVisible },
-                    set: { _ in sharedViewingState.toggleCrosshairs() }
-                ))
-                .toggleStyle(SwitchToggleStyle(tint: .blue))
-                
-                Spacer()
-                
-                Toggle("ROI Overlay", isOn: Binding(
-                    get: { sharedViewingState.roiSettings.isVisible },
-                    set: { _ in sharedViewingState.toggleROIOverlay() }
-                ))
-                .toggleStyle(SwitchToggleStyle(tint: .blue))
-            }
-            .foregroundColor(.white)
-        }
-    }
-    
-    private var actionButtons: some View {
-        HStack(spacing: 16) {
-            Button("Reset View") { resetViewTransform() }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.gray.opacity(0.3))
-                .foregroundColor(.white)
-                .cornerRadius(8)
-            
-            Button("Center") { centerCrosshair() }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.blue.opacity(0.6))
-                .foregroundColor(.white)
-                .cornerRadius(8)
-            
-            Button("Test RTStruct") { testRTStructParsing() }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.green.opacity(0.6))
-                .foregroundColor(.white)
-                .cornerRadius(8)
-            
-            Spacer()
-            
-            statusIndicator
-        }
-    }
-    
-    // MARK: - Helper Views
-    
-    private var loadingView: some View {
-        MedicalProgressView(
-            current: dataManager.loadingCurrent,
-            total: dataManager.loadingTotal,
-            message: dataManager.loadingProgress.isEmpty ? "Initializing..." : dataManager.loadingProgress
-        )
-    }
-    
-    private var statusIndicator: some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            if dataManager.isVolumeLoaded {
-                Text("✅ Volume")
-                    .font(.caption)
-                    .foregroundColor(.green)
-            }
-            
-            if dataManager.isROILoaded {
-                Text("✅ ROI")
-                    .font(.caption)
-                    .foregroundColor(.green)
-            }
-        }
-    }
-    
-    private func sliceNavigationOverlay(geometry: GeometryProxy) -> some View {
-        HStack {
-            Button(action: previousSlice) {
-                Image(systemName: "chevron.left")
-                    .font(.title)
-                    .foregroundColor(.white.opacity(0.7))
-            }
-            .frame(width: geometry.size.width * 0.2)
-            .disabled(!canNavigateToPreviousSlice())
-            
-            Spacer()
-            
-            Button(action: nextSlice) {
-                Image(systemName: "chevron.right")
-                    .font(.title)
-                    .foregroundColor(.white.opacity(0.7))
-            }
-            .frame(width: geometry.size.width * 0.2)
-            .disabled(!canNavigateToNextSlice())
-        }
-    }
-    
-    // MARK: - Unified Gesture Handlers (Pure UIKit)
-    
+    // MARK: - Unified Gesture Handlers (unchanged)
     private func handleUnifiedGesture(_ type: UnifiedGestureHandler.GestureType, _ data: UnifiedGestureHandler.GestureData) {
         switch type {
         case .pan:
             handlePanGesture(data)
-            
         case .pinch:
-            // Pinch is now handled internally by UnifiedGestureHandler
-            // Scale is updated via handleZoomChange callback
-            break
-            
+            break // Handled by handleZoomChange
         case .twoFingerScroll:
             handleTwoFingerScroll(data)
-            
         case .oneFingerScroll:
             handleOneFingerScroll(data)
-            
         case .scrollEnd:
             handleScrollEnd(data)
-            
         case .zoomEnd:
             handleZoomEnd(data)
         }
     }
     
     private func handleZoomChange(_ newZoom: CGFloat) {
-        // Direct zoom update from UnifiedGestureHandler
         scale = newZoom
     }
     
     private func handlePanGesture(_ data: UnifiedGestureHandler.GestureData) {
-        // Handle pan/drag for view movement (convert CGPoint to CGSize)
         dragOffset = CGSize(width: data.translation.x, height: data.translation.y)
     }
     
     private func handleTwoFingerScroll(_ data: UnifiedGestureHandler.GestureData) {
-        // Update scroll velocity for adaptive quality
         updateScrollVelocity(Float(data.speed))
         
-        // Navigate slices
         let currentSlice = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
-        let newSlice = currentSlice - data.direction  // Negative for natural scrolling
+        let newSlice = currentSlice - data.direction
         let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
         let clampedSlice = max(0, min(newSlice, maxSlices - 1))
         
@@ -502,7 +321,6 @@ struct XAnatomyProMainView: View {
     }
     
     private func handleOneFingerScroll(_ data: UnifiedGestureHandler.GestureData) {
-        // Same logic as two-finger scroll (1-finger scroll at low zoom)
         updateScrollVelocity(Float(data.speed))
         
         let currentSlice = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
@@ -516,7 +334,6 @@ struct XAnatomyProMainView: View {
     }
     
     private func handleScrollEnd(_ data: UnifiedGestureHandler.GestureData) {
-        // Restore quality after scroll stops
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             withAnimation(.easeOut(duration: 0.2)) {
                 self.scrollVelocity = 0.0
@@ -526,51 +343,15 @@ struct XAnatomyProMainView: View {
     }
     
     private func handleZoomEnd(_ data: UnifiedGestureHandler.GestureData) {
-        // Any cleanup after zoom gesture ends
         print("🔄 Zoom gesture completed at \(String(format: "%.2f", data.zoomLevel))x")
     }
     
-    // MARK: - Action Methods
-    
-    private func previousSlice() {
-        let currentSlice = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
-        if currentSlice > 0 {
-            coordinateSystem.updateFromSliceScroll(plane: currentPlane, sliceIndex: currentSlice - 1)
-        }
-    }
-    
-    private func nextSlice() {
-        let currentSlice = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
-        let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
-        if currentSlice < maxSlices - 1 {
-            coordinateSystem.updateFromSliceScroll(plane: currentPlane, sliceIndex: currentSlice + 1)
-        }
-    }
-    
-
-    
-    private func canNavigateToPreviousSlice() -> Bool {
-        return coordinateSystem.getCurrentSliceIndex(for: currentPlane) > 0
-    }
-    
-    private func canNavigateToNextSlice() -> Bool {
-        let currentSlice = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
-        let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
-        return currentSlice < maxSlices - 1
-    }
-    
+    // MARK: - Action Methods (unchanged)
     private func resetViewTransform() {
         withAnimation(.spring()) {
-            // Reset drag offset immediately
             dragOffset = .zero
         }
-        
-        // Reset zoom to baseline (will be handled by UnifiedGestureHandler)
-        // Note: The gesture handler will automatically reset to its calculated baseline
         print("🔄 Reset View Transform requested")
-        
-        // TODO: Add method to access gesture handler coordinator for baseline reset
-        // For now, scale will reset to baseline on next gesture or view update
     }
     
     private func centerCrosshair() {
@@ -583,76 +364,13 @@ struct XAnatomyProMainView: View {
     
     private func loadApplicationData() {
         Task {
-            await dataManager.loadAllData()
-            isLoading = false
-        }
-    }
-    
-    private func getPlaneDescription(_ plane: MPRPlane) -> String {
-        switch plane {
-        case .axial: return "Top-Down"
-        case .sagittal: return "Side View"
-        case .coronal: return "Front View"
-        }
-    }
-    
-    // MARK: - Scroll Wheel Support
-    
-    private func handleScrollWheel(delta: CGFloat) {
-        // Update scroll velocity for adaptive quality
-        let wheelVelocity = abs(delta) / 10.0  // Scale wheel sensitivity
-        updateScrollVelocity(Float(wheelVelocity))
-        
-        // Scroll wheel delta: positive = scroll up = next slice
-        let sensitivity: CGFloat = 10.0  // Adjust for scroll wheel sensitivity
-        let sliceDelta = Int(delta / sensitivity)
-        
-        if sliceDelta != 0 {
-            let currentSlice = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
-            let newSlice = currentSlice + sliceDelta
-            let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
-            let clampedSlice = max(0, min(newSlice, maxSlices - 1))
-            
-            if clampedSlice != currentSlice {
-                coordinateSystem.updateFromSliceScroll(plane: currentPlane, sliceIndex: clampedSlice)
-            }
-        }
-    }
-    
-    // MARK: - Adaptive Quality Methods
-    
-    private func updateScrollVelocity(_ velocity: Float) {
-        scrollVelocity = velocity
-        
-        // Determine quality based on velocity
-        if velocity < 2.0 {
-            currentQuality = .full
-        } else if velocity < 5.0 {
-            currentQuality = .half
-        } else {
-            currentQuality = .quarter
-        }
-        
-        if currentQuality != .full {
-            print("🎯 Adaptive Quality: \(currentQuality.description) (velocity: \(velocity))")
-        }
-        
-        // Reset quality timer
-        qualityTimer?.invalidate()
-        qualityTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
-            // Restore full quality after scroll stops
-            DispatchQueue.main.async {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    self.scrollVelocity = 0.0
-                    self.currentQuality = .full
-                }
-            }
+            await dataCoordinator.loadAllData()
         }
     }
     
     private func testRTStructParsing() {
         print("\n🧪 MANUAL RTStruct Test Called")
-        debugROISystem()  // Call comprehensive debug
+        debugROISystem()
         
         Task {
             let rtStructFiles = DICOMFileManager.getRTStructFiles()
@@ -694,250 +412,35 @@ struct XAnatomyProMainView: View {
             }
         }
     }
-}
-
-// MARK: - Data Manager
-
-@MainActor
-class XAnatomyDataManager: ObservableObject {
-    @Published var volumeData: VolumeData?
-    @Published var roiData: MinimalRTStructParser.SimpleRTStructData?
-    @Published var patientInfo: PatientInfo?
-    @Published var isLoading = false
-    @Published var loadingProgress: String = ""
-    @Published var loadingCurrent: Int = 0
-    @Published var loadingTotal: Int = 0
-    @Published var isAxialReady = false
     
-    private var volumeRenderer: MetalVolumeRenderer?
-    
-    var isVolumeLoaded: Bool { volumeData != nil }
-    var isROILoaded: Bool { roiData != nil }
-    
-    init() {
-        // Initialize volume renderer
-        do {
-            volumeRenderer = try MetalVolumeRenderer()
-            print("✅ MetalVolumeRenderer initialized")
-        } catch {
-            print("❌ Failed to initialize MetalVolumeRenderer: \(error)")
-        }
-    }
-    
-    func loadAllData() async {
-        isLoading = true
-        loadingProgress = "Initializing..."
+    private func updateScrollVelocity(_ velocity: Float) {
+        scrollVelocity = velocity
         
-        await loadVolumeData()
-        await loadROIData()
-        await loadPatientInfo()
-        
-        isLoading = false
-        loadingProgress = "Complete"
-    }
-    
-    private func loadVolumeData() async {
-        loadingProgress = "Loading DICOM files..."
-        
-        do {
-            // Get DICOM files from bundle
-            let dicomFiles = getDICOMFiles()
-            debugLog("Found \(dicomFiles.count) DICOM files", category: .volume)
-            
-            guard !dicomFiles.isEmpty else {
-                debugLog("No DICOM files found in bundle", category: .volume)
-                return
-            }
-            
-            // Set total for progress tracking
-            loadingTotal = dicomFiles.count
-            loadingProgress = "Processing \(dicomFiles.count) DICOM files..."
-            
-            // Simulate progress updates (in real implementation, update during actual loading)
-            for (index, _) in dicomFiles.enumerated() {
-                loadingCurrent = index + 1
-                // Small delay to show progress animation
-                try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
-            }
-            
-            // Load volume using MetalVolumeRenderer
-            if let renderer = volumeRenderer {
-                let loadedVolumeData = try await renderer.loadVolumeFromDICOMFiles(dicomFiles)
-                
-                // Update published property on main actor
-                volumeData = loadedVolumeData
-                
-                loadingProgress = "Volume loaded successfully"
-                debugLog("Volume data loaded: \(loadedVolumeData.dimensions)", category: .volume)
-                
-                // Log volume info
-                if let info = renderer.getVolumeInfo() {
-                    debugLog("Volume Info: \(info)", category: .volume)
-                }
-            }
-            
-        } catch {
-            print("❌ Failed to load volume data: \(error)")
-            loadingProgress = "Failed to load volume: \(error.localizedDescription)"
-        }
-    }
-    
-    private func loadROIData() async {
-        loadingProgress = "Loading ROI structures..."
-        
-        // Use the new DICOMFileManager to find RTStruct files
-        let rtStructFiles = DICOMFileManager.getRTStructFiles()
-        
-        if !rtStructFiles.isEmpty {
-            print("🎯 Found \(rtStructFiles.count) RTStruct files:")
-            for file in rtStructFiles {
-                let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-                print("   - \(file.lastPathComponent) (\(size) bytes)")
-            }
-            
-            // Try to parse the first RTStruct file (prioritized by DICOMFileManager)
-            let rtStructFile = rtStructFiles[0]
-            
-            do {
-                print("\n📋 PARSING RTStruct file: \(rtStructFile.lastPathComponent)")
-                print("📂 File path: \(rtStructFile.path)")
-                
-                let data = try Data(contentsOf: rtStructFile)
-                print("📊 File size: \(data.count) bytes")
-                
-                let dataset = try DICOMParser.parse(data)
-                print("✅ DICOM parsing successful - \(dataset.elements.count) elements")
-                
-                // Check modality
-                if let modality = dataset.getString(tag: .modality) {
-                    print("🏷️ Modality confirmed: \(modality)")
-                }
-                
-                // Use the new direct parser to extract ROI data
-                print("\n🔍 Starting RTStruct parsing...")
-                if let simpleRTStruct = MinimalRTStructParser.parseSimpleRTStruct(from: dataset) {
-                    // Update published property on main actor
-                    roiData = simpleRTStruct
-                    
-                    print("\n✅ RTStruct SUCCESS: \(simpleRTStruct.roiStructures.count) ROI structures loaded")
-                    for roi in simpleRTStruct.roiStructures {
-                        print("   📊 ROI \(roi.roiNumber): '\(roi.roiName)' - \(roi.contours.count) contours")
-                    }
-                    loadingProgress = "RTStruct loaded: \(simpleRTStruct.roiStructures.count) ROIs"
-                } else {
-                    print("\n❌ RTStruct parsing returned no data")
-                    loadingProgress = "RTStruct parsing failed - no geometry found"
-                }
-                
-            } catch {
-                print("\n❌ Failed to load RTStruct file: \(error)")
-                loadingProgress = "Failed to load RTStruct: \(error.localizedDescription)"
-            }
+        if velocity < 2.0 {
+            currentQuality = .full
+        } else if velocity < 5.0 {
+            currentQuality = .half
         } else {
-            print("📝 No RTStruct files found - continuing without ROI")
-            loadingProgress = "No RTStruct files found"
+            currentQuality = .quarter
         }
-    }
-    
-    private func loadPatientInfo() async {
-        loadingProgress = "Loading patient information..."
         
-        // Extract patient info from first DICOM file
-        let dicomFiles = getDICOMFiles()
-        if let firstFile = dicomFiles.first {
-            do {
-                let data = try Data(contentsOf: firstFile)
-                let dataset = try DICOMParser.parse(data)
-                
-                let patientName = dataset.getString(tag: DICOMTag.patientName) ?? "Unknown Patient"
-                let studyDate = dataset.getString(tag: DICOMTag.studyDate) ?? "Unknown Date"
-                let modality = dataset.getString(tag: DICOMTag.modality) ?? "CT"
-                
-                patientInfo = PatientInfo(
-                    name: patientName,
-                    studyDate: studyDate,
-                    modality: modality
-                )
-                
-                print("👤 Patient info loaded: \(patientName)")
-                loadingProgress = "Patient information loaded"
-                
-            } catch {
-                print("❌ Failed to extract patient info: \(error)")
-                // Use fallback
-                patientInfo = PatientInfo(
-                    name: "Test Patient XAPV2",
-                    studyDate: "2025-01-28",
-                    modality: "CT"
-                )
+        if currentQuality != .full {
+            print("🎯 Adaptive Quality: \(currentQuality.description) (velocity: \(velocity))")
+        }
+        
+        qualityTimer?.invalidate()
+        qualityTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
+            DispatchQueue.main.async {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    self.scrollVelocity = 0.0
+                    self.currentQuality = .full
+                }
             }
         }
     }
-    
-    // MARK: - File Discovery
-    
-    private func getDICOMFiles() -> [URL] {
-        guard let bundlePath = Bundle.main.resourcePath else {
-            print("❌ Could not find bundle resource path")
-            return []
-        }
-        
-        do {
-            let fileURLs = try FileManager.default.contentsOfDirectory(
-                at: URL(fileURLWithPath: bundlePath),
-                includingPropertiesForKeys: nil,
-                options: .skipsHiddenFiles
-            )
-            
-            let dicomFiles = fileURLs.filter { url in
-                let filename = url.lastPathComponent
-                return (url.pathExtension.lowercased() == "dcm" ||
-                        filename.contains("2.16.840.1.114362")) &&
-                       !filename.contains("rtstruct") &&
-                       !filename.contains("test_")
-            }.sorted { $0.lastPathComponent < $1.lastPathComponent }
-            
-            print("📂 Found \(dicomFiles.count) DICOM files in bundle root")
-            return dicomFiles
-            
-        } catch {
-            print("❌ Error reading bundle root: \(error)")
-            return []
-        }
-    }
-    
-    private func getRTStructFiles() -> [URL] {
-        guard let bundlePath = Bundle.main.resourcePath else { return [] }
-        
-        let testDataPath = (bundlePath as NSString).appendingPathComponent("TestData")
-        
-        // Check for both RTStruct files, prioritize test_rtstruct2.dcm
-        var rtStructFiles: [URL] = []
-        
-        let rtStruct2Path = (testDataPath as NSString).appendingPathComponent("test_rtstruct2.dcm")
-        if FileManager.default.fileExists(atPath: rtStruct2Path) {
-            rtStructFiles.append(URL(fileURLWithPath: rtStruct2Path))
-            print("📄 Found test_rtstruct2.dcm (priority file with geometry)")
-        }
-        
-        let rtStructPath = (testDataPath as NSString).appendingPathComponent("test_rtstruct.dcm")
-        if FileManager.default.fileExists(atPath: rtStructPath) {
-            rtStructFiles.append(URL(fileURLWithPath: rtStructPath))
-            print("📄 Found test_rtstruct.dcm (backup file)")
-        }
-        
-        return rtStructFiles
-    }
-    
-    // MARK: - Volume Renderer Access
-    
-    func getVolumeRenderer() -> MetalVolumeRenderer? {
-        return volumeRenderer
-    }
 }
 
-// MARK: - Supporting Types
-
+// MARK: - Supporting Types (unchanged)
 struct PatientInfo {
     let name: String
     let studyDate: String
