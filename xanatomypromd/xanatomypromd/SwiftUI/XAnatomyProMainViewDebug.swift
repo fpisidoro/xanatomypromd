@@ -9,7 +9,7 @@ extension XAnatomyProMainView {
         
         // 1. Check if ROI data is loaded
         print("\n1️⃣ ROI DATA LOADING:")
-        if let roiData = dataManager.roiData {
+        if let roiData = dataCoordinator.roiData {
             print("   ✅ ROI data loaded")
             print("   Structure Set: \(roiData.structureSetName ?? "Unknown")")
             print("   Patient: \(roiData.patientName ?? "Unknown")")
