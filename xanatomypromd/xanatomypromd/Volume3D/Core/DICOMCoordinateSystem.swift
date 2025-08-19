@@ -346,10 +346,15 @@ class DICOMCoordinateSystem: ObservableObject {
             max(bounds.min.z, min(newPosition.z, bounds.max.z))
         )
         
+        // Store previous position for delta calculation
+        let previousPosition = currentWorldPosition
         currentWorldPosition = clampedPosition
         
-        print("🎯 Position updated: \(clampedPosition) mm")
-        print("   📐 Slices: AX=\(getCurrentSliceIndex(for: .axial)), SAG=\(getCurrentSliceIndex(for: .sagittal)), COR=\(getCurrentSliceIndex(for: .coronal))")
+        // Reduced logging for performance - only log significant changes
+        let positionDelta = length(clampedPosition - previousPosition)
+        if positionDelta > 5.0 {  // Only log moves > 5mm
+            print("🎯 Position updated: \(clampedPosition) mm")
+        }
     }
     
     /// Update position from slice scrolling in specific plane
@@ -357,7 +362,7 @@ class DICOMCoordinateSystem: ObservableObject {
         let maxSlice = getMaxSlices(for: plane) - 1
         let clampedIndex = max(0, min(sliceIndex, maxSlice))
         
-        // Calculate velocity
+        // Calculate velocity (reduced logging for performance)
         let now = Date()
         let timeDelta = now.timeIntervalSince(lastSliceUpdateTime)
         
@@ -369,7 +374,10 @@ class DICOMCoordinateSystem: ObservableObject {
                 // Update velocity if significant change
                 if abs(velocity - scrollVelocity) > 0.1 || velocity < 0.1 {
                     scrollVelocity = velocity
-                    print("🎯 Scroll velocity: \(String(format: "%.1f", velocity)) slices/sec")
+                    // Reduced logging: only log significant velocity changes
+                    if velocity > 1.0 {
+                        print("🎯 Scroll velocity: \(String(format: "%.1f", velocity)) slices/sec")
+                    }
                 }
             }
         }
@@ -382,7 +390,6 @@ class DICOMCoordinateSystem: ObservableObject {
         velocityTimer?.invalidate()
         velocityTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in
             self?.scrollVelocity = 0.0
-            print("🎯 Scroll stopped, velocity reset")
         }
         
         // Convert slice index to voxel coordinate
@@ -392,11 +399,15 @@ class DICOMCoordinateSystem: ObservableObject {
         let sliceAxis = plane.sliceAxis
         let worldCoord = volumeOrigin[sliceAxis] + (voxelCoord * volumeSpacing[sliceAxis])
         
-        // Update position
+        // OPTIMIZED: Only update if position actually changed significantly
         var newPosition = currentWorldPosition
+        let previousCoord = newPosition[sliceAxis]
         newPosition[sliceAxis] = worldCoord
         
-        updateWorldPosition(newPosition)
+        // Only trigger @Published update if change is significant (> 0.1mm)
+        if abs(worldCoord - previousCoord) > 0.1 {
+            updateWorldPosition(newPosition)
+        }
     }
     
 

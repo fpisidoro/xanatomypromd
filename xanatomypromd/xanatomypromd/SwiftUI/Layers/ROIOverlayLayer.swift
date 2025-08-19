@@ -28,20 +28,14 @@ struct ROIOverlayLayer: View {
     
     var body: some View {
         Canvas { context, size in
-            print("🎨 ROIOverlayLayer.body called - roiData: \(roiData != nil ? "EXISTS" : "NIL"), isVisible: \(roiSettings.isVisible)")
+            // Removed excessive debug logging for performance
             
             guard let roiData = roiData, roiSettings.isVisible else { 
-                print("   ❌ ROI not rendering: data=\(roiData != nil), visible=\(roiSettings.isVisible)")
                 return 
             }
             
-            print("🎨 ROI Drawing on \(plane): \(roiData.roiStructures.count) ROI structures, world pos: \(coordinateSystem.currentWorldPosition)")
-            
             // Render each ROI structure
-            var totalContoursDrawn = 0
             for roiStructure in roiData.roiStructures {
-                // SimpleROIStructure doesn't have isVisible, assume all are visible
-                
                 // Get contours for current slice
                 let contours = getContoursForCurrentSlice(
                     roiStructure: roiStructure,
@@ -49,28 +43,21 @@ struct ROIOverlayLayer: View {
                     plane: plane
                 )
                 
-                print("   📊 ROI \(roiStructure.roiNumber): '\(roiStructure.roiName)' - \(contours.count) contours")
-                
                 // Only draw if we have actual contours at this position
                 guard !contours.isEmpty else {
-                    print("      ⚠️ No contours at current position - skipping")
                     continue
                 }
                 
                 // Draw each contour
-                for (index, contour) in contours.enumerated() {
-                    print("      📐 Drawing contour \(index): \(contour.points.count) points")
+                for contour in contours {
                     drawContour(
                         contour: contour,
                         roiStructure: roiStructure,
                         context: context,
                         size: size
                     )
-                    totalContoursDrawn += 1
                 }
             }
-            
-            print("🎨 ROI Drawing Complete: \(totalContoursDrawn) contours drawn")
         }
         .allowsHitTesting(false) // Allow touches to pass through
         .opacity(roiSettings.globalOpacity)
@@ -102,40 +89,18 @@ struct ROIOverlayLayer: View {
             print("   🔍 Axial slice Z-matching:")
             print("      📍 Current slice Z: \(currentZ)mm")
             print("      📏 Tolerance: ±\(tolerance)mm")
-            print("      🎯 Looking for contours between \(currentZ - tolerance)mm and \(currentZ + tolerance)mm")
-            
-            // Debug: Show all contour Z-positions
-            let allZPositions = roiStructure.contours.map { $0.slicePosition }.sorted()
-            print("      📊 Available contour Z-positions: \(allZPositions)")
             
             // Filter contours that match current Z within tolerance
             let matchingContours = roiStructure.contours.filter { contour in
                 let zDifference = abs(contour.slicePosition - currentZ)
-                let matches = zDifference <= tolerance
-                
-                if matches {
-                    print("      ✅ Contour at Z=\(contour.slicePosition)mm matches (diff: \(zDifference)mm)")
-                }
-                
-                return matches
+                return zDifference <= tolerance
             }
             
-            print("      📦 Result: \(matchingContours.count) matching contours")
-            
-            // If no exact match, find nearest contour for debugging
+            // Debug only if no matches found (error condition)
             if matchingContours.isEmpty && !roiStructure.contours.isEmpty {
                 let nearestContour = roiStructure.contours.min { abs($0.slicePosition - currentZ) < abs($1.slicePosition - currentZ) }!
                 let distance = abs(nearestContour.slicePosition - currentZ)
                 print("      ⚠️ No matching contours! Nearest is at Z=\(nearestContour.slicePosition)mm (distance: \(distance)mm)")
-                
-                // Check if this is a coordinate system alignment issue
-                let volumeBounds = coordinateSystem.volumeBounds
-                print("      🔍 Volume Z-bounds: \(volumeBounds.min.z)mm to \(volumeBounds.max.z)mm")
-                
-                if nearestContour.slicePosition < volumeBounds.min.z || nearestContour.slicePosition > volumeBounds.max.z {
-                    print("      ❌ ERROR: ROI Z-position is outside volume bounds!")
-                    print("      💡 This suggests a coordinate system mismatch")
-                }
             }
             
             return matchingContours
@@ -362,12 +327,8 @@ struct ROIOverlayLayer: View {
         size: CGSize
     ) {
         guard contour.points.count >= 3 else { 
-            print("         ⚠️ Skipping contour with only \(contour.points.count) points")
             return 
         }
-        
-        // Debug: Show first few points
-        print("         📍 Sample world coord: \(contour.points.first ?? SIMD3<Float>(0,0,0))")
         
         // Convert 3D contour points to 2D screen coordinates using coordinate system
         let screenPoints = contour.points.map { point3D in
@@ -378,9 +339,6 @@ struct ROIOverlayLayer: View {
             )
         }
         
-        // Debug: Show converted screen points
-        print("         🖥️ Sample screen coord: \(screenPoints.first ?? CGPoint(x: 0, y: 0))")
-        
         // Filter out invalid screen points (outside reasonable bounds)
         let validScreenPoints = screenPoints.filter { point in
             point.x.isFinite && point.y.isFinite &&
@@ -389,7 +347,6 @@ struct ROIOverlayLayer: View {
         }
         
         guard validScreenPoints.count >= 3 else {
-            print("         ⚠️ Only \(validScreenPoints.count) valid screen points, skipping")
             return
         }
         
@@ -409,8 +366,6 @@ struct ROIOverlayLayer: View {
             green: Double(roiStructure.displayColor.y),
             blue: Double(roiStructure.displayColor.z)
         )
-        
-        print("         🎨 Drawing path with \(validScreenPoints.count) points, color: \(roiStructure.displayColor)")
         
         // Draw filled contour if enabled
         if roiSettings.showFilled {
