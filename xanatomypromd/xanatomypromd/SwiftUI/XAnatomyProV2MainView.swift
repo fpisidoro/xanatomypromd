@@ -221,7 +221,7 @@ struct XAnatomyProV2MainView: View {
                     .font(.headline)
                     .foregroundColor(.white)
                 
-                if let patientInfo = dataManager.patientInfo {
+                if let patientInfo = dataCoordinator.patientInfo {
                     Text(patientInfo.name)
                         .font(.subheadline)
                         .foregroundColor(.gray)
