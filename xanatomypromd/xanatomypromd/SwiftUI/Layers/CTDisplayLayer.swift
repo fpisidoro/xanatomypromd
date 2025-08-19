@@ -2,40 +2,6 @@ import SwiftUI
 import MetalKit
 import Metal
 
-// MARK: - Shared Metal Volume Renderer
-// Singleton to avoid GPU resource contention in quad mode
-class SharedMetalVolumeRenderer {
-    static let shared = SharedMetalVolumeRenderer()
-    
-    private(set) var renderer: MetalVolumeRenderer?
-    private let initQueue = DispatchQueue(label: "SharedRenderer", qos: .userInitiated)
-    
-    private init() {
-        // Initialize renderer synchronously on background queue
-        initQueue.sync {
-            do {
-                self.renderer = try MetalVolumeRenderer()
-                print("✅ Shared MetalVolumeRenderer created - eliminating GPU contention")
-            } catch {
-                print("❌ Failed to create shared MetalVolumeRenderer: \(error)")
-            }
-        }
-    }
-    
-    func loadVolumeIfNeeded(_ volumeData: VolumeData) {
-        guard let renderer = renderer else { return }
-        
-        if !renderer.isVolumeLoaded() {
-            do {
-                try renderer.loadVolume(volumeData)
-                print("✅ Volume loaded into shared renderer")
-            } catch {
-                print("❌ Failed to load volume into shared renderer: \(error)")
-            }
-        }
-    }
-}
-
 // MARK: - Layer 1: CT Display Layer (MEDICAL-ACCURATE)
 // AUTHORITATIVE layer that renders DICOM slices with EXACT physical spacing
 // MEDICAL PRINCIPLE: Accuracy > Screen Aesthetics - Never compromise DICOM data
@@ -104,7 +70,8 @@ struct CTDisplayLayer: UIViewRepresentable {
     
     class Coordinator: NSObject, MTKViewDelegate {
         
-        // REMOVED: Individual volumeRenderer - now uses shared instance
+        // Individual MetalVolumeRenderer per view (restored)
+        private var volumeRenderer: MetalVolumeRenderer?
         private var displayPipelineState: MTLRenderPipelineState?
         
         // MEDICAL-ACCURATE: Vertex buffer with proper physical spacing
@@ -133,11 +100,18 @@ struct CTDisplayLayer: UIViewRepresentable {
         
         override init() {
             super.init()
-            // REMOVED: setupRenderer() - now uses shared instance
+            setupRenderer()
             setupDisplayPipeline()
         }
         
-        // REMOVED: setupRenderer() method - now uses SharedMetalVolumeRenderer
+        private func setupRenderer() {
+            do {
+                volumeRenderer = try MetalVolumeRenderer()
+                print("✅ Individual MetalVolumeRenderer created for view")
+            } catch {
+                print("❌ Failed to create MetalVolumeRenderer: \(error)")
+            }
+        }
         
         private func setupDisplayPipeline() {
             guard let device = MTLCreateSystemDefaultDevice(),
@@ -351,12 +325,17 @@ struct CTDisplayLayer: UIViewRepresentable {
                 }
             }
             
-            // Load volume data into shared renderer if provided
+            // Load volume data into individual renderer if provided
             if let volumeData = volumeData {
                 if currentVolumeData == nil {
-                    print("🔍 CT Medical Display: Loading volume data into shared renderer...")
-                    SharedMetalVolumeRenderer.shared.loadVolumeIfNeeded(volumeData)
-                    self.currentVolumeData = volumeData
+                    print("🔍 CT Medical Display: Loading volume data into individual renderer...")
+                    do {
+                        try volumeRenderer?.loadVolume(volumeData)
+                        print("✅ Volume loaded into individual renderer")
+                        self.currentVolumeData = volumeData
+                    } catch {
+                        print("❌ Failed to load volume: \(error)")
+                    }
                 } else {
                     self.currentVolumeData = volumeData
                 }
@@ -404,8 +383,8 @@ struct CTDisplayLayer: UIViewRepresentable {
                     return
                 }
                 
-                // RESTORED: Direct synchronous access to shared renderer
-                guard let sharedRenderer = SharedMetalVolumeRenderer.shared.renderer else {
+                // Use individual MetalVolumeRenderer instead of shared renderer
+                guard let individualRenderer = volumeRenderer else {
                     displayLoadingState(drawable: drawable, commandQueue: commandQueue)
                     return
                 }
@@ -431,7 +410,7 @@ struct CTDisplayLayer: UIViewRepresentable {
                 
                 if isActiveScrollingView {
                     // PRIORITY: Immediate generation for the actively scrolled view
-                    sharedRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
+                    individualRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
                         guard let self = self else { return }
                         self.cachedTexture = mprTexture
                         
@@ -451,7 +430,7 @@ struct CTDisplayLayer: UIViewRepresentable {
                 } else {
                     // DEFERRED: Slight delay for non-active views to prioritize the scrolling view
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        sharedRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
+                        individualRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
                             guard let self = self else { return }
                             self.cachedTexture = mprTexture
                             
