@@ -261,17 +261,17 @@ struct Standalone3DView: View, LoadableView {
             // Stage 2: Initialize Metal 3D renderer
             loadingState.updateStage(.metalSetup)
             try await initialize3DRenderer(volumeData: volumeData)
-            await Task.sleep(nanoseconds: 100_000_000) // 100ms for Metal setup
+            try await Task.sleep(nanoseconds: 100_000_000) // 100ms for Metal setup
             
             // Stage 3: Compile 3D shaders
             loadingState.updateStage(.shaderCompilation)
             try await compile3DShaders()
-            await Task.sleep(nanoseconds: 150_000_000) // 150ms for shader compilation
+            try await Task.sleep(nanoseconds: 150_000_000) // 150ms for shader compilation
             
             // Stage 4: Setup 3D ROI (if available)
             loadingState.updateStage(.roiSetup)
             try await setup3DROI()
-            await Task.sleep(nanoseconds: 50_000_000)
+            try await Task.sleep(nanoseconds: 50_000_000)
             
             // Stage 5: Complete
             completeLoading()
@@ -293,7 +293,7 @@ struct Standalone3DView: View, LoadableView {
     private func compile3DShaders() async throws {
         // Simulate shader compilation time
         // In real implementation, this would involve shader compilation
-        await Task.sleep(nanoseconds: 200_000_000) // 200ms for shader compilation
+        try await Task.sleep(nanoseconds: 200_000_000) // 200ms for shader compilation
         print("🔧 3D View: 3D shaders compiled")
     }
     
