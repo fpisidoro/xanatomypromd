@@ -330,14 +330,14 @@ public class MetalVolumeRenderer {
         encoder.dispatchThreadgroups(threadgroupCount, threadsPerThreadgroup: threadgroupSize)
         encoder.endEncoding()
         
-        commandBuffer.addCompletedHandler { _ in
-            completion(true)
-        }
-        
-        // Add error handler before commit to catch failures
-        commandBuffer.addErrorHandler { commandBuffer in
-            print("❌ METAL ERROR: Command buffer failed with error: \(commandBuffer.error?.localizedDescription ?? "Unknown")")
-            completion(false)
+        commandBuffer.addCompletedHandler { [weak self] commandBuffer in
+            // Check for errors in completion handler
+            if let error = commandBuffer.error {
+                print("❌ METAL ERROR: Command buffer failed with error: \(error.localizedDescription)")
+                completion(false)
+            } else {
+                completion(true)
+            }
         }
         
         // Validate command buffer before commit
