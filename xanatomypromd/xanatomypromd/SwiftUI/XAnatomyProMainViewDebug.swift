@@ -65,7 +65,7 @@ extension XAnatomyProMainView {
         
         // 5. Check Z-coordinate alignment
         print("\n5️⃣ Z-COORDINATE ALIGNMENT CHECK:")
-        if let roiData = dataManager.roiData, let volumeData = dataManager.volumeData {
+        if let roiData = dataCoordinator.roiData, let volumeData = dataCoordinator.volumeData {
             let volumeMinZ = volumeData.origin.z
             let volumeMaxZ = volumeData.origin.z + Float(volumeData.dimensions.z - 1) * volumeData.spacing.z
             
