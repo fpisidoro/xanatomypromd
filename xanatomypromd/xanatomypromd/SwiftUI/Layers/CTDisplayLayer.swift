@@ -410,7 +410,14 @@ struct CTDisplayLayer: UIViewRepresentable {
                 
                 if isActiveScrollingView {
                     // PRIORITY: Immediate generation for the actively scrolled view
+                    let startTime = Date()
+                    print("⏱️ TIMING START: \(currentPlane) texture generation")
+                    
                     individualRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
+                        let endTime = Date()
+                        let durationMs = endTime.timeIntervalSince(startTime) * 1000
+                        print("⏱️ TIMING END: \(currentPlane) took \(String(format: "%.1f", durationMs))ms")
+                        
                         guard let self = self else { return }
                         self.cachedTexture = mprTexture
                         
@@ -423,14 +430,24 @@ struct CTDisplayLayer: UIViewRepresentable {
                         }
                         
                         // IMMEDIATE: Update without delay for active view
+                        let displayStartTime = Date()
                         DispatchQueue.main.async {
+                            let displayEndTime = Date()
+                            let displayMs = displayEndTime.timeIntervalSince(displayStartTime) * 1000
+                            print("⏱️ DISPLAY: \(currentPlane) UI update took \(String(format: "%.1f", displayMs))ms")
                             view.setNeedsDisplay()
                         }
                     }
                 } else {
                     // DEFERRED: Slight delay for non-active views to prioritize the scrolling view
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        let startTime = Date()
+                        print("⏱️ TIMING START (deferred): \(currentPlane) texture generation")
+                        
                         individualRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
+                            let endTime = Date()
+                            let durationMs = endTime.timeIntervalSince(startTime) * 1000
+                            print("⏱️ TIMING END (deferred): \(currentPlane) took \(String(format: "%.1f", durationMs))ms")
                             guard let self = self else { return }
                             self.cachedTexture = mprTexture
                             
