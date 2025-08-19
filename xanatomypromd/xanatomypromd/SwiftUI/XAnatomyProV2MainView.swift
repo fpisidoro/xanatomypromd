@@ -350,8 +350,7 @@ struct XAnatomyProV2MainView: View {
                 Standalone3DView(
                     coordinateSystem: coordinateSystem,
                     sharedState: sharedState,
-                    volumeData: dataCoordinator.volumeData,
-                    roiData: dataCoordinator.roiData,
+                    dataCoordinator: dataCoordinator,
                     viewSize: viewSize,
                     allowInteraction: true
                 )
