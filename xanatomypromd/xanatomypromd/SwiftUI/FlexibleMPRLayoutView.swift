@@ -9,7 +9,7 @@ struct FlexibleMPRLayoutView: View {
     // MARK: - Shared State
     @StateObject private var coordinateSystem = DICOMCoordinateSystem()
     @StateObject private var sharedState = SharedViewingState()
-    @StateObject private var dataManager = XAnatomyDataManager()
+    @StateObject private var dataCoordinator = ViewDataCoordinator()
     
     // MARK: - Layout Configuration
     @State private var layoutMode: LayoutMode = .automatic
@@ -42,7 +42,7 @@ struct FlexibleMPRLayoutView: View {
                 headerControls
                 
                 // Main viewing area
-                if dataManager.isVolumeLoaded {
+                if dataCoordinator.volumeData != nil {
                     viewingArea(in: geometry)
                 } else {
                     loadingView
@@ -95,8 +95,7 @@ struct FlexibleMPRLayoutView: View {
                 plane: selectedPlane,
                 coordinateSystem: coordinateSystem,
                 sharedState: sharedState,
-                volumeData: dataManager.volumeData,
-                roiData: dataManager.roiData,
+                dataCoordinator: dataCoordinator,
                 viewSize: CGSize(
                     width: geometry.size.width - 20,
                     height: geometry.size.height - 150
@@ -112,8 +111,7 @@ struct FlexibleMPRLayoutView: View {
                 plane: .axial,
                 coordinateSystem: coordinateSystem,
                 sharedState: sharedState,
-                volumeData: dataManager.volumeData,
-                roiData: dataManager.roiData,
+                dataCoordinator: dataCoordinator,
                 viewSize: CGSize(
                     width: (geometry.size.width - 4) / 2,
                     height: geometry.size.height - 100
@@ -124,8 +122,7 @@ struct FlexibleMPRLayoutView: View {
                 plane: .sagittal,
                 coordinateSystem: coordinateSystem,
                 sharedState: sharedState,
-                volumeData: dataManager.volumeData,
-                roiData: dataManager.roiData,
+                dataCoordinator: dataCoordinator,
                 viewSize: CGSize(
                     width: (geometry.size.width - 4) / 2,
                     height: geometry.size.height - 100
@@ -140,8 +137,7 @@ struct FlexibleMPRLayoutView: View {
                 plane: .axial,
                 coordinateSystem: coordinateSystem,
                 sharedState: sharedState,
-                volumeData: dataManager.volumeData,
-                roiData: dataManager.roiData,
+                dataCoordinator: dataCoordinator,
                 viewSize: CGSize(
                     width: (geometry.size.width - 6) / 3,
                     height: geometry.size.height - 100
@@ -152,8 +148,7 @@ struct FlexibleMPRLayoutView: View {
                 plane: .sagittal,
                 coordinateSystem: coordinateSystem,
                 sharedState: sharedState,
-                volumeData: dataManager.volumeData,
-                roiData: dataManager.roiData,
+                dataCoordinator: dataCoordinator,
                 viewSize: CGSize(
                     width: (geometry.size.width - 6) / 3,
                     height: geometry.size.height - 100
@@ -164,8 +159,7 @@ struct FlexibleMPRLayoutView: View {
                 plane: .coronal,
                 coordinateSystem: coordinateSystem,
                 sharedState: sharedState,
-                volumeData: dataManager.volumeData,
-                roiData: dataManager.roiData,
+                dataCoordinator: dataCoordinator,
                 viewSize: CGSize(
                     width: (geometry.size.width - 6) / 3,
                     height: geometry.size.height - 100
@@ -181,8 +175,7 @@ struct FlexibleMPRLayoutView: View {
                     plane: .axial,
                     coordinateSystem: coordinateSystem,
                     sharedState: sharedState,
-                    volumeData: dataManager.volumeData,
-                    roiData: dataManager.roiData,
+                    dataCoordinator: dataCoordinator,
                     viewSize: CGSize(
                         width: (geometry.size.width - 4) / 2,
                         height: (geometry.size.height - 104) / 2
@@ -193,8 +186,7 @@ struct FlexibleMPRLayoutView: View {
                     plane: .sagittal,
                     coordinateSystem: coordinateSystem,
                     sharedState: sharedState,
-                    volumeData: dataManager.volumeData,
-                    roiData: dataManager.roiData,
+                    dataCoordinator: dataCoordinator,
                     viewSize: CGSize(
                         width: (geometry.size.width - 4) / 2,
                         height: (geometry.size.height - 104) / 2
@@ -207,8 +199,7 @@ struct FlexibleMPRLayoutView: View {
                     plane: .coronal,
                     coordinateSystem: coordinateSystem,
                     sharedState: sharedState,
-                    volumeData: dataManager.volumeData,
-                    roiData: dataManager.roiData,
+                    dataCoordinator: dataCoordinator,
                     viewSize: CGSize(
                         width: (geometry.size.width - 4) / 2,
                         height: (geometry.size.height - 104) / 2
@@ -216,12 +207,10 @@ struct FlexibleMPRLayoutView: View {
                 )
                 
                 // Fourth view - could be 3D or duplicate view
-                StandaloneMPRView(
-                    plane: .axial,  // Or could be a 3D view in future
+                Standalone3DView(
                     coordinateSystem: coordinateSystem,
                     sharedState: sharedState,
-                    volumeData: dataManager.volumeData,
-                    roiData: dataManager.roiData,
+                    dataCoordinator: dataCoordinator,
                     viewSize: CGSize(
                         width: (geometry.size.width - 4) / 2,
                         height: (geometry.size.height - 104) / 2
@@ -289,12 +278,12 @@ struct FlexibleMPRLayoutView: View {
             Spacer()
             
             // Status indicators
-            if dataManager.isVolumeLoaded {
+            if dataCoordinator.volumeData != nil {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundColor(.green)
             }
             
-            if dataManager.isROILoaded {
+            if dataCoordinator.roiData != nil {
                 Image(systemName: "brain.head.profile")
                     .foregroundColor(.green)
             }
@@ -309,9 +298,11 @@ struct FlexibleMPRLayoutView: View {
                 .progressViewStyle(CircularProgressViewStyle(tint: .white))
                 .foregroundColor(.white)
             
-            Text(dataManager.loadingProgress)
-                .font(.caption)
-                .foregroundColor(.gray)
+            if dataCoordinator.isVolumeLoading {
+                Text("Loading volume: \(Int(dataCoordinator.volumeLoadingProgress * 100))%")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -352,10 +343,10 @@ struct FlexibleMPRLayoutView: View {
     
     private func loadData() {
         Task {
-            await dataManager.loadAllData()
+            await dataCoordinator.loadAllData()
             
             // Initialize coordinate system when data loads
-            if let volumeData = dataManager.volumeData {
+            if let volumeData = dataCoordinator.volumeData {
                 coordinateSystem.initializeFromVolumeData(volumeData)
             }
         }

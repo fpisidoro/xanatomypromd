@@ -17,7 +17,7 @@ struct Standalone3DView: View, LoadableView {
     let allowInteraction: Bool
     
     // MARK: - Per-View Loading State
-    @StateObject private var loadingState = ThreeDViewLoadingState()
+    @StateObject internal var loadingState = ThreeDViewLoadingState()
     @StateObject private var renderer = Metal3DVolumeRenderer()
     
     // Gesture state (persistent via SharedViewingState)

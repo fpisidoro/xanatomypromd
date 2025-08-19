@@ -4,10 +4,23 @@
 import SwiftUI
 import Combine
 
+// MARK: - Patient Information Structure
+struct PatientInfo {
+    let name: String
+    let studyDate: String
+    let modality: String
+    
+    init(name: String, studyDate: String, modality: String) {
+        self.name = name
+        self.studyDate = studyDate
+        self.modality = modality
+    }
+}
+
 /// Protocol for views that need to manage their own loading state
 protocol LoadableView {
     associatedtype LoadingState: ViewLoadingState
-    var loadingState: LoadingState { get }
+    internal var loadingState: LoadingState { get }
     func startLoading()
     func updateLoadingProgress(_ progress: Float, message: String)
     func completeLoading()

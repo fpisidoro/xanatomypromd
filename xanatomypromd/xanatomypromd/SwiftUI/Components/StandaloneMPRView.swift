@@ -17,7 +17,7 @@ struct StandaloneMPRView: View, LoadableView {
     let scrollVelocity: Float
     
     // MARK: - Per-View Loading State
-    @StateObject private var loadingState = MPRViewLoadingState()
+    @StateObject internal var loadingState = MPRViewLoadingState()
     @StateObject private var viewState: MPRViewState
     
     private let gestureConfig = GestureConfiguration.default
