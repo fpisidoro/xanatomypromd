@@ -7,29 +7,23 @@ import Metal
 class SharedMetalVolumeRenderer {
     static let shared = SharedMetalVolumeRenderer()
     
-    private var renderer: MetalVolumeRenderer?
+    private(set) var renderer: MetalVolumeRenderer?
     private let initQueue = DispatchQueue(label: "SharedRenderer", qos: .userInitiated)
     
-    private init() {}
-    
-    func getRenderer() async -> MetalVolumeRenderer? {
-        return await withCheckedContinuation { continuation in
-            initQueue.async {
-                if self.renderer == nil {
-                    do {
-                        self.renderer = try MetalVolumeRenderer()
-                        print("✅ Shared MetalVolumeRenderer created - eliminating GPU contention")
-                    } catch {
-                        print("❌ Failed to create shared MetalVolumeRenderer: \(error)")
-                    }
-                }
-                continuation.resume(returning: self.renderer)
+    private init() {
+        // Initialize renderer synchronously on background queue
+        initQueue.sync {
+            do {
+                self.renderer = try MetalVolumeRenderer()
+                print("✅ Shared MetalVolumeRenderer created - eliminating GPU contention")
+            } catch {
+                print("❌ Failed to create shared MetalVolumeRenderer: \(error)")
             }
         }
     }
     
-    func loadVolumeIfNeeded(_ volumeData: VolumeData) async {
-        guard let renderer = await getRenderer() else { return }
+    func loadVolumeIfNeeded(_ volumeData: VolumeData) {
+        guard let renderer = renderer else { return }
         
         if !renderer.isVolumeLoaded() {
             do {
@@ -354,9 +348,7 @@ struct CTDisplayLayer: UIViewRepresentable {
             if let volumeData = volumeData {
                 if currentVolumeData == nil {
                     print("🔍 CT Medical Display: Loading volume data into shared renderer...")
-                    Task {
-                        await SharedMetalVolumeRenderer.shared.loadVolumeIfNeeded(volumeData)
-                    }
+                    SharedMetalVolumeRenderer.shared.loadVolumeIfNeeded(volumeData)
                     self.currentVolumeData = volumeData
                 } else {
                     self.currentVolumeData = volumeData
@@ -405,79 +397,42 @@ struct CTDisplayLayer: UIViewRepresentable {
                     return
                 }
                 
-                // Use shared renderer to avoid GPU contention
-                Task {
-                    guard let sharedRenderer = await SharedMetalVolumeRenderer.shared.getRenderer() else {
-                        await MainActor.run {
-                            self.displayLoadingState(drawable: drawable, commandQueue: commandQueue)
+                // RESTORED: Direct synchronous access to shared renderer
+                guard let sharedRenderer = SharedMetalVolumeRenderer.shared.renderer else {
+                    displayLoadingState(drawable: drawable, commandQueue: commandQueue)
+                    return
+                }
+                
+                // Calculate normalized slice position using coordinate system
+                let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
+                let normalizedSliceIndex = Float(currentSliceIndex) / Float(maxSlices - 1)
+                
+                let config = MetalVolumeRenderer.MPRConfig(
+                    plane: currentPlane,
+                    sliceIndex: normalizedSliceIndex,
+                    windowCenter: currentWindowLevel.center,
+                    windowWidth: currentWindowLevel.width,
+                    quality: currentQuality  // Use adaptive quality
+                )
+                
+                print("🛠️ Generating MPR slice: \(currentPlane) slice \(currentSliceIndex) quality \(currentQuality)")
+                
+                // RESTORED: Simple immediate generation like before
+                sharedRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
+                    guard let self = self else { return }
+                    self.cachedTexture = mprTexture
+                    
+                    // OPTIMIZED: Only regenerate vertex buffer if texture size actually changed
+                    if let texture = mprTexture {
+                        let newTextureSize = CGSize(width: texture.width, height: texture.height)
+                        if newTextureSize != self.lastTextureSize {
+                            self.vertexBuffer = nil
                         }
-                        return
                     }
                     
-                    // Calculate normalized slice position using coordinate system
-                    let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
-                    let normalizedSliceIndex = Float(currentSliceIndex) / Float(maxSlices - 1)
-                    
-                    let config = MetalVolumeRenderer.MPRConfig(
-                        plane: currentPlane,
-                        sliceIndex: normalizedSliceIndex,
-                        windowCenter: currentWindowLevel.center,
-                        windowWidth: currentWindowLevel.width,
-                        quality: currentQuality  // Use adaptive quality
-                    )
-                    
-                    print("🛠️ Generating MPR slice: \(currentPlane) slice \(currentSliceIndex) quality \(currentQuality)")
-                    
-                    // TEMPORARY: Use simple velocity check for now
-                    // TODO: Implement proper per-view active state tracking
-                    let isActiveScrollingView = coordinateSystem.scrollVelocity > 0.1
-                    
-                    print("🚀 Priority check: plane=\(currentPlane), velocity=\(coordinateSystem.scrollVelocity), priority=\(isActiveScrollingView)")
-                    
-                    if isActiveScrollingView {
-                        // PRIORITY: Immediate generation for scrolling view
-                        sharedRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
-                            guard let self = self else { return }
-                            self.cachedTexture = mprTexture
-                            
-                            // OPTIMIZED: Only regenerate vertex buffer if texture size actually changed
-                            if let texture = mprTexture {
-                                let newTextureSize = CGSize(width: texture.width, height: texture.height)
-                                if newTextureSize != self.lastTextureSize {
-                                    self.vertexBuffer = nil
-                                }
-                            }
-                            
-                            // IMMEDIATE: Update without additional dispatch delay
-                            DispatchQueue.main.async {
-                                view.setNeedsDisplay()
-                            }
-                        }
-                    } else {
-                        // DEFERRED: Delay generation for non-scrolling views to reduce load
-                        do {
-                            try await Task.sleep(nanoseconds: 50_000_000) // 50ms delay
-                        } catch {
-                            // Task was cancelled, continue anyway
-                        }
-                        
-                        sharedRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
-                            guard let self = self else { return }
-                            self.cachedTexture = mprTexture
-                            
-                            // OPTIMIZED: Only regenerate vertex buffer if texture size actually changed
-                            if let texture = mprTexture {
-                                let newTextureSize = CGSize(width: texture.width, height: texture.height)
-                                if newTextureSize != self.lastTextureSize {
-                                    self.vertexBuffer = nil
-                                }
-                            }
-                            
-                            // Update view when ready
-                            DispatchQueue.main.async {
-                                view.setNeedsDisplay()
-                            }
-                        }
+                    // Update view when ready
+                    DispatchQueue.main.async {
+                        view.setNeedsDisplay()
                     }
                 }
                 return
