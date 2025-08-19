@@ -245,6 +245,11 @@ struct CTDisplayLayer: UIViewRepresentable {
             print("🔍 CT Medical Display: updateRenderingParameters called")
             print("   Plane: \(plane), VolumeData: \(volumeData != nil ? "present" : "nil")")
             
+            // Store previous state for smart cache management
+            let previousPlane = currentPlane
+            let previousWindowLevel = currentWindowLevel
+            let previousQuality = currentQuality
+            
             self.currentCoordinateSystem = coordinateSystem
             self.currentPlane = plane
             self.currentWindowLevel = windowLevel
@@ -274,11 +279,33 @@ struct CTDisplayLayer: UIViewRepresentable {
                 newQuality = .full
             }
             
+            // SMART CACHE: Only clear cache when necessary
+            var shouldClearCache = false
+            
             if newQuality != currentQuality {
                 currentQuality = newQuality
                 print("🎯 Quality: \(currentQuality) for plane \(plane) (plane-specific)")
-                cachedTexture = nil  // Force regeneration at new quality
-                cacheKey = ""  // Clear cache key
+                shouldClearCache = true  // Quality change requires new texture
+            }
+            
+            if plane != previousPlane {
+                print("🔍 Plane changed: \(previousPlane) → \(plane)")
+                shouldClearCache = true  // Plane change requires new texture
+                vertexBuffer = nil  // Only regenerate vertex buffer on plane change
+            }
+            
+            if windowLevel.center != previousWindowLevel.center || windowLevel.width != previousWindowLevel.width {
+                print("🔍 Window level changed")
+                shouldClearCache = true  // Window level change requires new texture
+            }
+            
+            // SMART CACHE: Only clear when actually needed
+            if shouldClearCache {
+                cachedTexture = nil
+                cacheKey = ""
+                print("🛠️ Cache cleared due to parameter change")
+            } else {
+                print("⚙️ Cache preserved - no significant changes")
             }
             
             // Reset quality timer
@@ -309,17 +336,7 @@ struct CTDisplayLayer: UIViewRepresentable {
                 }
             }
             
-            // Clear cache to force regeneration
-            cachedTexture = nil
-            cacheKey = ""
-            
-            // MEDICAL-CRITICAL: Force vertex buffer regeneration for plane changes
-            if plane != lastPlane {
-                vertexBuffer = nil
-                print("🔍 CT Medical: Plane changed, forcing vertex buffer regeneration")
-            }
-            
-            print("🔍 CT Medical Display: Parameters updated, cache cleared")
+            print("🔍 CT Medical Display: Parameters updated")
         }
         
         // MARK: - MTKViewDelegate
@@ -374,19 +391,22 @@ struct CTDisplayLayer: UIViewRepresentable {
                     quality: currentQuality  // Use adaptive quality
                 )
                 
+                print("🛠️ Generating MPR slice: \(currentPlane) slice \(currentSliceIndex) quality \(currentQuality)")
+                
                 volumeRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
                     guard let self = self else { return }
                     self.cachedTexture = mprTexture
                     
-                    // MEDICAL-CRITICAL: Force vertex buffer regeneration for new texture
+                    // OPTIMIZED: Only regenerate vertex buffer if texture size actually changed
                     if let texture = mprTexture {
                         let newTextureSize = CGSize(width: texture.width, height: texture.height)
                         if newTextureSize != self.lastTextureSize {
                             self.vertexBuffer = nil
+                            print("🔄 Vertex buffer invalidated: texture size changed")
                         }
                     }
                     
-                    // Trigger redraw on main thread
+                    // OPTIMIZED: Reduce main thread dispatch overhead
                     DispatchQueue.main.async {
                         view.setNeedsDisplay()
                     }
