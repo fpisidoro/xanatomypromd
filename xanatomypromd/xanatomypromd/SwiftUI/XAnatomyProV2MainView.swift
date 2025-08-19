@@ -350,8 +350,8 @@ struct XAnatomyProV2MainView: View {
                 Standalone3DView(
                     coordinateSystem: coordinateSystem,
                     sharedState: sharedState,
-                    volumeData: dataManager.volumeData,
-                    roiData: dataManager.roiData,
+                    volumeData: dataCoordinator.volumeData,
+                    roiData: dataCoordinator.roiData,
                     viewSize: viewSize,
                     allowInteraction: true
                 )
@@ -361,8 +361,8 @@ struct XAnatomyProV2MainView: View {
                     plane: selectedSingleViewPlane.mprPlane ?? .axial,
                     coordinateSystem: coordinateSystem,
                     sharedState: sharedState,
-                    volumeData: dataManager.volumeData,
-                    roiData: dataManager.roiData,
+                    volumeData: dataCoordinator.volumeData,
+                    roiData: dataCoordinator.roiData,
                     viewSize: viewSize,
                     allowInteraction: true,
                     scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
@@ -376,8 +376,8 @@ struct XAnatomyProV2MainView: View {
                     plane: .axial,
                     coordinateSystem: coordinateSystem,
                     sharedState: sharedState,
-                    volumeData: dataManager.volumeData,
-                    roiData: dataManager.roiData,
+                    volumeData: dataCoordinator.volumeData,
+                    roiData: dataCoordinator.roiData,
                     viewSize: viewSize,
                     allowInteraction: true,
                     scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
@@ -388,8 +388,8 @@ struct XAnatomyProV2MainView: View {
                     plane: .sagittal,
                     coordinateSystem: coordinateSystem,
                     sharedState: sharedState,
-                    volumeData: dataManager.volumeData,
-                    roiData: dataManager.roiData,
+                    volumeData: dataCoordinator.volumeData,
+                    roiData: dataCoordinator.roiData,
                     viewSize: viewSize,
                     allowInteraction: true,
                     scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
@@ -400,8 +400,8 @@ struct XAnatomyProV2MainView: View {
                     plane: .coronal,
                     coordinateSystem: coordinateSystem,
                     sharedState: sharedState,
-                    volumeData: dataManager.volumeData,
-                    roiData: dataManager.roiData,
+                    volumeData: dataCoordinator.volumeData,
+                    roiData: dataCoordinator.roiData,
                     viewSize: viewSize,
                     allowInteraction: true,
                     scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
@@ -419,8 +419,8 @@ struct XAnatomyProV2MainView: View {
                             plane: .axial,
                             coordinateSystem: coordinateSystem,
                             sharedState: sharedState,
-                            volumeData: dataManager.volumeData,
-                            roiData: dataManager.roiData,
+                            volumeData: dataCoordinator.volumeData,
+                            roiData: dataCoordinator.roiData,
                             viewSize: viewSize,
                             allowInteraction: true,
                             scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
@@ -432,8 +432,8 @@ struct XAnatomyProV2MainView: View {
                             plane: .coronal,
                             coordinateSystem: coordinateSystem,
                             sharedState: sharedState,
-                            volumeData: dataManager.volumeData,
-                            roiData: dataManager.roiData,
+                            volumeData: dataCoordinator.volumeData,
+                            roiData: dataCoordinator.roiData,
                             viewSize: viewSize,
                             allowInteraction: true,
                             scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
@@ -494,8 +494,8 @@ struct XAnatomyProV2MainView: View {
     
     private func startLoading() {
         Task {
-            await dataManager.loadAllData()
-            if let volumeData = dataManager.volumeData {
+            await dataCoordinator.loadAllData()
+            if let volumeData = dataCoordinator.volumeData {
                 coordinateSystem.initializeFromVolumeData(volumeData)
             }
             isLoading = false
