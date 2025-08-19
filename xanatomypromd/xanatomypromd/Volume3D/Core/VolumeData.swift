@@ -8,7 +8,17 @@ public typealias ParsedDICOMDataset = DICOMDataset
 // Foundation for Multi-Planar Reconstruction (MPR)
 // Handles spatial reconstruction from DICOM slice series
 
-public class VolumeData {
+public class VolumeData: Equatable {
+    
+    // MARK: - Equatable conformance for SwiftUI onChange
+    public static func == (lhs: VolumeData, rhs: VolumeData) -> Bool {
+        return lhs.dimensions == rhs.dimensions &&
+               lhs.spacing == rhs.spacing &&
+               lhs.origin == rhs.origin &&
+               lhs.voxelData.count == rhs.voxelData.count
+        // Note: We don't compare all voxel data for performance reasons
+        // The dimensions, spacing, and origin should be sufficient for UI purposes
+    }
     
     // MARK: - Volume Properties
     

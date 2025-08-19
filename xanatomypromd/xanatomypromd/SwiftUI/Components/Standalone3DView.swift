@@ -270,7 +270,7 @@ struct Standalone3DView: View, LoadableView {
             
             // Stage 4: Setup 3D ROI (if available)
             loadingState.updateStage(.roiSetup)
-            await setup3DROI()
+            try await setup3DROI()
             await Task.sleep(nanoseconds: 50_000_000)
             
             // Stage 5: Complete
@@ -297,8 +297,9 @@ struct Standalone3DView: View, LoadableView {
         print("🔧 3D View: 3D shaders compiled")
     }
     
-    private func setup3DROI() async {
+    private func setup3DROI() async throws {
         if let roiData = dataCoordinator.roiData {
+            try await Task.sleep(nanoseconds: 50_000_000) // Simulate setup time
             renderer.setupROI(roiData)
             print("🔧 3D View: ROI setup completed")
         } else {

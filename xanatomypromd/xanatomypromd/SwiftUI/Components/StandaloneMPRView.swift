@@ -278,7 +278,7 @@ struct StandaloneMPRView: View, LoadableView {
             
             // Stage 4: Process ROI data (if available)
             loadingState.updateStage(.roiProcessing)
-            await processROIData()
+            try await processROIData()
             await Task.sleep(nanoseconds: 50_000_000)
             
             // Stage 5: Complete
@@ -313,10 +313,10 @@ struct StandaloneMPRView: View, LoadableView {
         print("🔧 \(plane.displayName): Initial slice generated")
     }
     
-    private func processROIData() async {
+    private func processROIData() async throws {
         if dataCoordinator.roiData != nil {
             // Process ROI data specific to this plane
-            await Task.sleep(nanoseconds: 50_000_000) // 50ms for ROI processing
+            try await Task.sleep(nanoseconds: 50_000_000) // 50ms for ROI processing
             print("🔧 \(plane.displayName): ROI data processed")
         } else {
             print("🔧 \(plane.displayName): No ROI data to process")
