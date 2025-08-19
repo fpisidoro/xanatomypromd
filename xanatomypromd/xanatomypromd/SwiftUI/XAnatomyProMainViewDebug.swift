@@ -32,7 +32,7 @@ extension XAnatomyProMainView {
         
         // 2. Check volume data
         print("\n2️⃣ VOLUME DATA:")
-        if let volumeData = dataManager.volumeData {
+        if let volumeData = dataCoordinator.volumeData {
             print("   ✅ Volume loaded")
             print("   Dimensions: \(volumeData.dimensions)")
             print("   Origin: \(volumeData.origin)")
