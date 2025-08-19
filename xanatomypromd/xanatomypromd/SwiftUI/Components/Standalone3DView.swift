@@ -256,7 +256,7 @@ struct Standalone3DView: View, LoadableView {
         do {
             // Stage 1: Volume data ready
             loadingState.updateStage(.volumeData)
-            await Task.sleep(nanoseconds: 50_000_000) // 50ms delay for UI
+            try await Task.sleep(nanoseconds: 50_000_000) // 50ms delay for UI
             
             // Stage 2: Initialize Metal 3D renderer
             loadingState.updateStage(.metalSetup)
