@@ -2,6 +2,46 @@ import SwiftUI
 import MetalKit
 import Metal
 
+// MARK: - Shared Metal Volume Renderer
+// Singleton to avoid GPU resource contention in quad mode
+class SharedMetalVolumeRenderer {
+    static let shared = SharedMetalVolumeRenderer()
+    
+    private var renderer: MetalVolumeRenderer?
+    private let initQueue = DispatchQueue(label: "SharedRenderer", qos: .userInitiated)
+    
+    private init() {}
+    
+    func getRenderer() async -> MetalVolumeRenderer? {
+        return await withCheckedContinuation { continuation in
+            initQueue.async {
+                if self.renderer == nil {
+                    do {
+                        self.renderer = try MetalVolumeRenderer()
+                        print("✅ Shared MetalVolumeRenderer created - eliminating GPU contention")
+                    } catch {
+                        print("❌ Failed to create shared MetalVolumeRenderer: \(error)")
+                    }
+                }
+                continuation.resume(returning: self.renderer)
+            }
+        }
+    }
+    
+    func loadVolumeIfNeeded(_ volumeData: VolumeData) async {
+        guard let renderer = await getRenderer() else { return }
+        
+        if !renderer.isVolumeLoaded() {
+            do {
+                try renderer.loadVolume(volumeData)
+                print("✅ Volume loaded into shared renderer")
+            } catch {
+                print("❌ Failed to load volume into shared renderer: \(error)")
+            }
+        }
+    }
+}
+
 // MARK: - Layer 1: CT Display Layer (MEDICAL-ACCURATE)
 // AUTHORITATIVE layer that renders DICOM slices with EXACT physical spacing
 // MEDICAL PRINCIPLE: Accuracy > Screen Aesthetics - Never compromise DICOM data
@@ -66,7 +106,7 @@ struct CTDisplayLayer: UIViewRepresentable {
     
     class Coordinator: NSObject, MTKViewDelegate {
         
-        private var volumeRenderer: MetalVolumeRenderer?
+        // REMOVED: Individual volumeRenderer - now uses shared instance
         private var displayPipelineState: MTLRenderPipelineState?
         
         // MEDICAL-ACCURATE: Vertex buffer with proper physical spacing
@@ -83,7 +123,7 @@ struct CTDisplayLayer: UIViewRepresentable {
         private var currentVolumeData: VolumeData?
         private var currentScrollVelocity: Float = 0.0
         
-        // Texture caching for performance
+        // Texture caching for performance (still independent per view)
         private var cachedTexture: MTLTexture?
         private var cacheKey: String = ""
         
@@ -94,18 +134,11 @@ struct CTDisplayLayer: UIViewRepresentable {
         
         override init() {
             super.init()
-            setupRenderer()
+            // REMOVED: setupRenderer() - now uses shared instance
             setupDisplayPipeline()
         }
         
-        private func setupRenderer() {
-            do {
-                volumeRenderer = try MetalVolumeRenderer()
-                print("✅ CT Medical Display: Volume renderer initialized")
-            } catch {
-                print("❌ CT Medical Display: Failed to initialize volume renderer: \(error)")
-            }
-        }
+        // REMOVED: setupRenderer() method - now uses SharedMetalVolumeRenderer
         
         private func setupDisplayPipeline() {
             guard let device = MTLCreateSystemDefaultDevice(),
@@ -317,20 +350,14 @@ struct CTDisplayLayer: UIViewRepresentable {
                 }
             }
             
-            // Load volume data into renderer if provided
+            // Load volume data into shared renderer if provided
             if let volumeData = volumeData {
                 if currentVolumeData == nil {
-                    print("🔍 CT Medical Display: Loading volume data...")
-                    do {
-                        if volumeRenderer == nil {
-                            volumeRenderer = try MetalVolumeRenderer()
-                        }
-                        try volumeRenderer?.loadVolume(volumeData)
-                        self.currentVolumeData = volumeData
-                        print("✅ CT Medical Display: Volume data loaded successfully")
-                    } catch {
-                        print("❌ CT Medical Display: Failed to load volume data: \(error)")
+                    print("🔍 CT Medical Display: Loading volume data into shared renderer...")
+                    Task {
+                        await SharedMetalVolumeRenderer.shared.loadVolumeIfNeeded(volumeData)
                     }
+                    self.currentVolumeData = volumeData
                 } else {
                     self.currentVolumeData = volumeData
                 }
@@ -373,54 +400,61 @@ struct CTDisplayLayer: UIViewRepresentable {
             if cacheKey != newCacheKey {
                 cacheKey = newCacheKey
                 
-                guard let volumeRenderer = volumeRenderer,
-                      let volumeData = currentVolumeData else {
+                guard let volumeData = currentVolumeData else {
                     displayLoadingState(drawable: drawable, commandQueue: commandQueue)
                     return
                 }
                 
-                // Calculate normalized slice position using coordinate system
-                let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
-                let normalizedSliceIndex = Float(currentSliceIndex) / Float(maxSlices - 1)
-                
-                let config = MetalVolumeRenderer.MPRConfig(
-                    plane: currentPlane,
-                    sliceIndex: normalizedSliceIndex,
-                    windowCenter: currentWindowLevel.center,
-                    windowWidth: currentWindowLevel.width,
-                    quality: currentQuality  // Use adaptive quality
-                )
-                
-                print("🛠️ Generating MPR slice: \(currentPlane) slice \(currentSliceIndex) quality \(currentQuality)")
-                
-                // OPTIMIZED: Check if this view is actively scrolling
-                let isActiveScrollingView = coordinateSystem.scrollVelocity > 0.1
-                
-                if isActiveScrollingView {
-                    // PRIORITY: Immediate generation for scrolling view
-                    volumeRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
-                        guard let self = self else { return }
-                        self.cachedTexture = mprTexture
-                        
-                        // OPTIMIZED: Only regenerate vertex buffer if texture size actually changed
-                        if let texture = mprTexture {
-                            let newTextureSize = CGSize(width: texture.width, height: texture.height)
-                            if newTextureSize != self.lastTextureSize {
-                                self.vertexBuffer = nil
+                // Use shared renderer to avoid GPU contention
+                Task {
+                    guard let sharedRenderer = await SharedMetalVolumeRenderer.shared.getRenderer() else {
+                        await MainActor.run {
+                            self.displayLoadingState(drawable: drawable, commandQueue: commandQueue)
+                        }
+                        return
+                    }
+                    
+                    // Calculate normalized slice position using coordinate system
+                    let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
+                    let normalizedSliceIndex = Float(currentSliceIndex) / Float(maxSlices - 1)
+                    
+                    let config = MetalVolumeRenderer.MPRConfig(
+                        plane: currentPlane,
+                        sliceIndex: normalizedSliceIndex,
+                        windowCenter: currentWindowLevel.center,
+                        windowWidth: currentWindowLevel.width,
+                        quality: currentQuality  // Use adaptive quality
+                    )
+                    
+                    print("🛠️ Generating MPR slice: \(currentPlane) slice \(currentSliceIndex) quality \(currentQuality)")
+                    
+                    // OPTIMIZED: Check if this view is actively scrolling
+                    let isActiveScrollingView = coordinateSystem.scrollVelocity > 0.1
+                    
+                    if isActiveScrollingView {
+                        // PRIORITY: Immediate generation for scrolling view
+                        sharedRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
+                            guard let self = self else { return }
+                            self.cachedTexture = mprTexture
+                            
+                            // OPTIMIZED: Only regenerate vertex buffer if texture size actually changed
+                            if let texture = mprTexture {
+                                let newTextureSize = CGSize(width: texture.width, height: texture.height)
+                                if newTextureSize != self.lastTextureSize {
+                                    self.vertexBuffer = nil
+                                }
+                            }
+                            
+                            // IMMEDIATE: Update without additional dispatch delay
+                            DispatchQueue.main.async {
+                                view.setNeedsDisplay()
                             }
                         }
+                    } else {
+                        // DEFERRED: Delay generation for non-scrolling views to reduce load
+                        await Task.sleep(nanoseconds: 50_000_000) // 50ms delay
                         
-                        // IMMEDIATE: Update without additional dispatch delay
-                        DispatchQueue.main.async {
-                            view.setNeedsDisplay()
-                        }
-                    }
-                } else {
-                    // DEFERRED: Delay generation for non-scrolling views to reduce load
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                        guard let self = self else { return }
-                        
-                        volumeRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
+                        sharedRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
                             guard let self = self else { return }
                             self.cachedTexture = mprTexture
                             
