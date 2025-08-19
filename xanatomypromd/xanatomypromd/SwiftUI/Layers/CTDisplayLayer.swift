@@ -428,12 +428,11 @@ struct CTDisplayLayer: UIViewRepresentable {
                     
                     print("🛠️ Generating MPR slice: \(currentPlane) slice \(currentSliceIndex) quality \(currentQuality)")
                     
-                    // CRITICAL FIX: Only the plane being actively scrolled should get priority
-                    // Check if THIS specific plane is the one being scrolled
-                    let isActiveScrollingView = (coordinateSystem.scrollVelocity > 0.1) && 
-                                               (currentPlane == coordinateSystem.lastScrolledPlane)
+                    // TEMPORARY: Use simple velocity check for now
+                    // TODO: Implement proper per-view active state tracking
+                    let isActiveScrollingView = coordinateSystem.scrollVelocity > 0.1
                     
-                    print("🚀 Priority check: plane=\(currentPlane), lastScrolled=\(coordinateSystem.lastScrolledPlane ?? .axial), isActive=\(isActiveScrollingView)")
+                    print("🚀 Priority check: plane=\(currentPlane), velocity=\(coordinateSystem.scrollVelocity), priority=\(isActiveScrollingView)")
                     
                     if isActiveScrollingView {
                         // PRIORITY: Immediate generation for scrolling view
