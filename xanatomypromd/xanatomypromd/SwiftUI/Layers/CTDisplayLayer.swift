@@ -249,9 +249,6 @@ struct CTDisplayLayer: UIViewRepresentable {
             sharedState: SharedViewingState?,
             isViewScrolling: Bool
         ) {
-            print("🔍 CT Medical Display: updateRenderingParameters called")
-            print("   Plane: \(plane), VolumeData: \(volumeData != nil ? "present" : "nil")")
-            
             // Store previous state for smart cache management
             let previousPlane = currentPlane
             let previousWindowLevel = currentWindowLevel
@@ -433,12 +430,12 @@ struct CTDisplayLayer: UIViewRepresentable {
                         }
                         
                         // IMMEDIATE: Update without delay for active view
-                        let displayStartTime = Date()
                         DispatchQueue.main.async {
+                            let displayStartTime = Date()
+                            view.setNeedsDisplay()
                             let displayEndTime = Date()
                             let displayMs = displayEndTime.timeIntervalSince(displayStartTime) * 1000
                             print("⏱️ DISPLAY: \(planeName) UI update took \(String(format: "%.1f", displayMs))ms")
-                            view.setNeedsDisplay()
                         }
                     }
                 } else {

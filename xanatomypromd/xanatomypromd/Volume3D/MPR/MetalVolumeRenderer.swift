@@ -334,6 +334,19 @@ public class MetalVolumeRenderer {
             completion(true)
         }
         
+        // Add error handler before commit to catch failures
+        commandBuffer.addErrorHandler { commandBuffer in
+            print("❌ METAL ERROR: Command buffer failed with error: \(commandBuffer.error?.localizedDescription ?? "Unknown")")
+            completion(false)
+        }
+        
+        // Validate command buffer before commit
+        guard commandBuffer.status == .notEnqueued else {
+            print("❌ METAL ERROR: Invalid command buffer status: \(commandBuffer.status)")
+            completion(false)
+            return
+        }
+        
         commandBuffer.commit()
     }
     
