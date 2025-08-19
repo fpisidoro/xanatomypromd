@@ -393,22 +393,50 @@ struct CTDisplayLayer: UIViewRepresentable {
                 
                 print("🛠️ Generating MPR slice: \(currentPlane) slice \(currentSliceIndex) quality \(currentQuality)")
                 
-                volumeRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
-                    guard let self = self else { return }
-                    self.cachedTexture = mprTexture
-                    
-                    // OPTIMIZED: Only regenerate vertex buffer if texture size actually changed
-                    if let texture = mprTexture {
-                        let newTextureSize = CGSize(width: texture.width, height: texture.height)
-                        if newTextureSize != self.lastTextureSize {
-                            self.vertexBuffer = nil
-                            print("🔄 Vertex buffer invalidated: texture size changed")
+                // OPTIMIZED: Check if this view is actively scrolling
+                let isActiveScrollingView = coordinateSystem.scrollVelocity > 0.1
+                
+                if isActiveScrollingView {
+                    // PRIORITY: Immediate generation for scrolling view
+                    volumeRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
+                        guard let self = self else { return }
+                        self.cachedTexture = mprTexture
+                        
+                        // OPTIMIZED: Only regenerate vertex buffer if texture size actually changed
+                        if let texture = mprTexture {
+                            let newTextureSize = CGSize(width: texture.width, height: texture.height)
+                            if newTextureSize != self.lastTextureSize {
+                                self.vertexBuffer = nil
+                            }
+                        }
+                        
+                        // IMMEDIATE: Update without additional dispatch delay
+                        DispatchQueue.main.async {
+                            view.setNeedsDisplay()
                         }
                     }
-                    
-                    // OPTIMIZED: Reduce main thread dispatch overhead
-                    DispatchQueue.main.async {
-                        view.setNeedsDisplay()
+                } else {
+                    // DEFERRED: Delay generation for non-scrolling views to reduce load
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                        guard let self = self else { return }
+                        
+                        volumeRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
+                            guard let self = self else { return }
+                            self.cachedTexture = mprTexture
+                            
+                            // OPTIMIZED: Only regenerate vertex buffer if texture size actually changed
+                            if let texture = mprTexture {
+                                let newTextureSize = CGSize(width: texture.width, height: texture.height)
+                                if newTextureSize != self.lastTextureSize {
+                                    self.vertexBuffer = nil
+                                }
+                            }
+                            
+                            // Update view when ready
+                            DispatchQueue.main.async {
+                                view.setNeedsDisplay()
+                            }
+                        }
                     }
                 }
                 return
