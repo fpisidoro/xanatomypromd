@@ -19,23 +19,7 @@ struct XAnatomyProMainView: View {
     @State private var scale: CGFloat = 1.0
     @State private var dragOffset: CGSize = .zero
     
-    // Adaptive Quality for Performance
-    @State private var scrollVelocity: Float = 0.0
-    @State private var lastSliceChange: Date = Date()
-    @State private var qualityTimer: Timer?
-    @State private var currentQuality: ScrollQuality = .full
-    
-    enum ScrollQuality {
-        case full, half, quarter
-        
-        var description: String {
-            switch self {
-            case .full: return "Full"
-            case .half: return "Half" 
-            case .quarter: return "Quarter"
-            }
-        }
-    }
+    // REMOVED: Adaptive Quality and scrollVelocity (priority system deleted)
     
     var body: some View {
         NavigationView {
@@ -152,8 +136,7 @@ struct XAnatomyProMainView: View {
                             width: geometry.size.width,
                             height: geometry.size.height * 0.7
                         ),
-                        allowInteraction: true,
-                        scrollVelocity: scrollVelocity
+                        allowInteraction: true
                     )
                 }
             }
@@ -297,8 +280,6 @@ struct XAnatomyProMainView: View {
     }
     
     private func handleTwoFingerScroll(_ data: UnifiedGestureHandler.GestureData) {
-        updateScrollVelocity(Float(data.speed))
-        
         let currentSlice = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
         let newSlice = currentSlice - data.direction
         let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
@@ -310,8 +291,6 @@ struct XAnatomyProMainView: View {
     }
     
     private func handleOneFingerScroll(_ data: UnifiedGestureHandler.GestureData) {
-        updateScrollVelocity(Float(data.speed))
-        
         let currentSlice = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
         let newSlice = currentSlice - data.direction
         let maxSlices = coordinateSystem.getMaxSlices(for: currentPlane)
@@ -323,12 +302,7 @@ struct XAnatomyProMainView: View {
     }
     
     private func handleScrollEnd(_ data: UnifiedGestureHandler.GestureData) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            withAnimation(.easeOut(duration: 0.2)) {
-                self.scrollVelocity = 0.0
-                self.currentQuality = .full
-            }
-        }
+        // Scroll gesture completed
     }
     
     private func handleZoomEnd(_ data: UnifiedGestureHandler.GestureData) {
@@ -356,27 +330,7 @@ struct XAnatomyProMainView: View {
         }
     }
     
-    private func updateScrollVelocity(_ velocity: Float) {
-        scrollVelocity = velocity
-        
-        if velocity < 2.0 {
-            currentQuality = .full
-        } else if velocity < 5.0 {
-            currentQuality = .half
-        } else {
-            currentQuality = .quarter
-        }
-        
-        qualityTimer?.invalidate()
-        qualityTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
-            DispatchQueue.main.async {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    self.scrollVelocity = 0.0
-                    self.currentQuality = .full
-                }
-            }
-        }
-    }
+    // REMOVED: updateScrollVelocity (priority system deleted)
 }
 
 // MARK: - Supporting Types

@@ -116,36 +116,61 @@ class DICOMCoordinateSystem: ObservableObject {
         return voxelToWorld(voxelPos)
     }
     
-    /// Get slice index for current position in given plane (FIXED: works for any scan)
+    /// Get slice index for current position in given plane (EDUCATIONAL: 2mm spacing aware)
     func getCurrentSliceIndex(for plane: MPRPlane) -> Int {
         guard let volumeData = volumeData else { 
             print("⚠️ No volume data loaded for slice index calculation")
             return 0 
         }
         
-        let voxelPos = worldToVoxel(currentWorldPosition)
+        let worldPos = currentWorldPosition
         let sliceAxis = plane.sliceAxis
-        let maxSlices = volumeData.dimensions[sliceAxis]
-        let sliceIndex = Int(round(voxelPos[sliceAxis]))
-        let clampedIndex = max(0, min(sliceIndex, maxSlices - 1))
         
-        // DEBUG: Log boundary checking for verification
-        if sliceIndex != clampedIndex {
-            print("🔍 BOUNDARY CLAMP: \(plane) axis=\(sliceAxis) raw=\(sliceIndex) clamped=\(clampedIndex) max=\(maxSlices)")
+        // For axial (original slices), use voxel-based indexing
+        if plane == .axial {
+            let voxelPos = worldToVoxel(worldPos)
+            let maxSlices = volumeData.dimensions[sliceAxis]
+            let sliceIndex = Int(round(voxelPos[sliceAxis]))
+            return max(0, min(sliceIndex, maxSlices - 1))
         }
         
-        return clampedIndex
+        // For sagittal and coronal, use 2mm spacing indexing
+        let targetSpacing: Float = 2.0 // mm
+        let worldCoord = worldPos[sliceAxis]
+        let origin = volumeOrigin[sliceAxis]
+        let relativePosition = worldCoord - origin
+        let educationalSliceIndex = Int(relativePosition / targetSpacing)
+        let maxEducationalSlices = getMaxSlices(for: plane)
+        
+        return max(0, min(educationalSliceIndex, maxEducationalSlices - 1))
     }
     
-    /// Get maximum slices for given plane (FIXED: fully dynamic)
+    /// Get maximum slices for given plane (EDUCATIONAL: 2mm spacing for MPR)
     func getMaxSlices(for plane: MPRPlane) -> Int {
         guard let volumeData = volumeData else { 
             print("⚠️ No volume data loaded for max slices calculation")
             return 1 
         }
         
-        let maxSlices = volumeData.dimensions[plane.sliceAxis]
-        return maxSlices
+        // For axial (original slices), use actual DICOM slice count
+        if plane == .axial {
+            return volumeData.dimensions[plane.sliceAxis]
+        }
+        
+        // For sagittal and coronal, use 2mm educational spacing
+        let targetSpacing: Float = 2.0 // mm - optimal for educational viewing
+        let physicalSize = Float(volumeData.dimensions[plane.sliceAxis]) * volumeData.spacing[plane.sliceAxis]
+        let educationalSliceCount = Int(physicalSize / targetSpacing)
+        
+        let originalCount = volumeData.dimensions[plane.sliceAxis]
+        
+        print("📚 Educational slice optimization - \(plane):")
+        print("   📐 Physical size: \(String(format: "%.1f", physicalSize))mm")
+        print("   📊 Original slices: \(originalCount) (\(String(format: "%.2f", volumeData.spacing[plane.sliceAxis]))mm spacing)")
+        print("   🎓 Educational slices: \(educationalSliceCount) (2.0mm spacing)")
+        print("   ⚡ Performance gain: \(String(format: "%.1f", Float(originalCount) / Float(educationalSliceCount)))x faster")
+        
+        return max(1, educationalSliceCount)
     }
     
     /// Convert world position to screen coordinates for given plane and view size
@@ -357,7 +382,7 @@ class DICOMCoordinateSystem: ObservableObject {
         }
     }
     
-    /// Update position from slice scrolling in specific plane
+    /// Update position from slice scrolling in specific plane (EDUCATIONAL: 2mm spacing aware)
     func updateFromSliceScroll(plane: MPRPlane, sliceIndex: Int) {
         let maxSlice = getMaxSlices(for: plane) - 1
         let clampedIndex = max(0, min(sliceIndex, maxSlice))
@@ -392,12 +417,19 @@ class DICOMCoordinateSystem: ObservableObject {
             self?.scrollVelocity = 0.0
         }
         
-        // Convert slice index to voxel coordinate
-        let voxelCoord = Float(clampedIndex)
-        
-        // Convert to world coordinate
+        // Convert slice index to world coordinate based on plane type
         let sliceAxis = plane.sliceAxis
-        let worldCoord = volumeOrigin[sliceAxis] + (voxelCoord * volumeSpacing[sliceAxis])
+        let worldCoord: Float
+        
+        if plane == .axial {
+            // For axial, use original voxel-based positioning
+            let voxelCoord = Float(clampedIndex)
+            worldCoord = volumeOrigin[sliceAxis] + (voxelCoord * volumeSpacing[sliceAxis])
+        } else {
+            // For sagittal and coronal, use 2mm educational spacing
+            let targetSpacing: Float = 2.0 // mm
+            worldCoord = volumeOrigin[sliceAxis] + (Float(clampedIndex) * targetSpacing)
+        }
         
         // OPTIMIZED: Only update if position actually changed significantly
         var newPosition = currentWorldPosition

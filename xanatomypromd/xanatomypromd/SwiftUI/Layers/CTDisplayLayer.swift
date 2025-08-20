@@ -22,14 +22,10 @@ struct CTDisplayLayer: UIViewRepresentable {
     /// Volume data source
     let volumeData: VolumeData?
     
-    /// Scroll velocity for adaptive quality (NEW)
-    let scrollVelocity: Float
-    
     /// Shared viewing state for quality control
     let sharedState: SharedViewingState?
     
-    /// Per-view scrolling state (true modularity)
-    let isViewScrolling: Bool
+    // REMOVED: scrollVelocity, isViewScrolling (priority system deleted)
     
     // MARK: - UIViewRepresentable Implementation
     
@@ -54,13 +50,11 @@ struct CTDisplayLayer: UIViewRepresentable {
                 plane: plane,
                 windowLevel: windowLevel,
                 volumeData: volumeData,
-                scrollVelocity: scrollVelocity,
-                sharedState: sharedState,
-                isViewScrolling: isViewScrolling
+                sharedState: sharedState
             )
             uiView.setNeedsDisplay()
         }
-        }
+    }
     
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -86,17 +80,13 @@ struct CTDisplayLayer: UIViewRepresentable {
         private var currentPlane: MPRPlane = .axial
         private var currentWindowLevel: CTWindowLevel = CTWindowLevel.softTissue
         private var currentVolumeData: VolumeData?
-        private var currentScrollVelocity: Float = 0.0
-        private var currentIsViewScrolling: Bool = false
         
-        // Texture caching for performance (still independent per view)
+        // Texture caching for performance
         private var cachedTexture: MTLTexture?
         private var cacheKey: String = ""
         
-        // Quality management
-        private var currentQuality: MetalVolumeRenderer.RenderQuality = .full
-        private var qualityTimer: Timer?
-        private var lastSliceChangeTime: Date = Date()
+        // SIMPLIFIED: Always use full quality
+        private let renderQuality: MetalVolumeRenderer.RenderQuality = .full
         
         override init() {
             super.init()
@@ -139,27 +129,24 @@ struct CTDisplayLayer: UIViewRepresentable {
             viewSize: CGSize,
             plane: MPRPlane,
             dicomSpacing: SIMD3<Float>,
-            quality: MetalVolumeRenderer.RenderQuality,  // NEW: Quality parameter
             device: MTLDevice
         ) {
-            // CRITICAL: Calculate PHYSICAL dimensions using DICOM spacing and ORIGINAL dimensions
+            // Calculate PHYSICAL dimensions using DICOM spacing
             let physicalDimensions = calculatePhysicalDimensions(
                 textureSize: textureSize,
                 plane: plane,
-                spacing: dicomSpacing,
-                quality: quality  // Pass quality to use original dimensions
+                spacing: dicomSpacing
             )
             
             // Calculate aspect ratio from PHYSICAL dimensions (not pixels)
             let physicalAspect = physicalDimensions.width / physicalDimensions.height
             let viewAspect = Float(viewSize.width / viewSize.height)
             
-            print("🏥 MEDICAL ACCURACY (FIXED):")
-            print("   📐 Texture pixels: \(Int(textureSize.width))×\(Int(textureSize.height)) (quality: \(quality))")
+            print("🏥 MEDICAL ACCURACY:")
+            print("   📐 Texture pixels: \(Int(textureSize.width))×\(Int(textureSize.height))")
             print("   📏 Physical size: \(String(format: "%.1f", physicalDimensions.width))mm × \(String(format: "%.1f", physicalDimensions.height))mm")
-            print("   📊 Physical aspect: \(String(format: "%.3f", physicalAspect)) (medical - quality independent)")
-            print("   📱 View aspect: \(String(format: "%.3f", viewAspect)) (screen)")
-            print("   🎯 DICOM spacing: \(dicomSpacing)")
+            print("   📊 Physical aspect: \(String(format: "%.3f", physicalAspect))")
+            print("   📱 View aspect: \(String(format: "%.3f", viewAspect))")
             
             // Calculate proper quad size to maintain MEDICAL accuracy
             let quadSize: (width: Float, height: Float)
@@ -167,11 +154,11 @@ struct CTDisplayLayer: UIViewRepresentable {
             if physicalAspect > viewAspect {
                 // Image is physically wider - letterbox top/bottom
                 quadSize = (1.0, viewAspect / physicalAspect)
-                print("   📱 Medical Letterbox: TOP/BOTTOM (preserving width)")
+                print("   📱 Medical Letterbox: TOP/BOTTOM")
             } else {
                 // Image is physically taller - letterbox left/right
                 quadSize = (physicalAspect / viewAspect, 1.0)
-                print("   📱 Medical Letterbox: LEFT/RIGHT (preserving height)")
+                print("   📱 Medical Letterbox: LEFT/RIGHT")
             }
             
             // Create vertices for medically accurate quad
@@ -183,7 +170,7 @@ struct CTDisplayLayer: UIViewRepresentable {
                  quadSize.width,  quadSize.height,             1.0, 0.0   // Top right
             ]
             
-            print("   ✅ Medical quad: \(String(format: "%.3f", quadSize.width))×\(String(format: "%.3f", quadSize.height)) (screen fraction)")
+            print("   ✅ Medical quad: \(String(format: "%.3f", quadSize.width))×\(String(format: "%.3f", quadSize.height))")
             
             vertexBuffer = device.makeBuffer(
                 bytes: quadVertices,
@@ -198,43 +185,33 @@ struct CTDisplayLayer: UIViewRepresentable {
             lastSpacing = dicomSpacing
         }
         
-        // MEDICAL-CRITICAL: Calculate physical dimensions using DICOM spacing and ORIGINAL dimensions
-        // FIXED: Use original full-resolution dimensions regardless of quality scaling
+        // Calculate physical dimensions using DICOM spacing
         private func calculatePhysicalDimensions(
             textureSize: CGSize,
             plane: MPRPlane,
-            spacing: SIMD3<Float>,
-            quality: MetalVolumeRenderer.RenderQuality  // NEW: Quality parameter
+            spacing: SIMD3<Float>
         ) -> (width: Float, height: Float) {
             
-            // CRITICAL FIX: Use ORIGINAL full-resolution dimensions for spacing calculation
-            // Quality scaling should not affect physical dimensions or aspect ratios
-            let originalDimensions = getOriginalPlaneDimensions(plane: plane)
-            
-            let originalPixelWidth = Float(originalDimensions.width)
-            let originalPixelHeight = Float(originalDimensions.height)
-            
-            print("🔧 ASPECT RATIO FIX:")
-            print("   📐 Texture size: \(Int(textureSize.width))×\(Int(textureSize.height)) (quality: \(quality))")
-            print("   📏 Original size: \(originalDimensions.width)×\(originalDimensions.height) (for spacing)")
+            let pixelWidth = Float(textureSize.width)
+            let pixelHeight = Float(textureSize.height)
             
             switch plane {
             case .axial:
                 // XY plane: X × Y dimensions
-                let physicalWidth = originalPixelWidth * spacing.x   // Use ORIGINAL pixels × mm/pixel
-                let physicalHeight = originalPixelHeight * spacing.y
+                let physicalWidth = pixelWidth * spacing.x
+                let physicalHeight = pixelHeight * spacing.y
                 return (physicalWidth, physicalHeight)
                 
             case .sagittal:
                 // YZ plane: Y × Z dimensions  
-                let physicalWidth = originalPixelWidth * spacing.y   // Y dimension (anterior-posterior)
-                let physicalHeight = originalPixelHeight * spacing.z // Z dimension (superior-inferior)
+                let physicalWidth = pixelWidth * spacing.y
+                let physicalHeight = pixelHeight * spacing.z
                 return (physicalWidth, physicalHeight)
                 
             case .coronal:
                 // XZ plane: X × Z dimensions
-                let physicalWidth = originalPixelWidth * spacing.x   // X dimension (left-right)
-                let physicalHeight = originalPixelHeight * spacing.z // Z dimension (superior-inferior)
+                let physicalWidth = pixelWidth * spacing.x
+                let physicalHeight = pixelHeight * spacing.z
                 return (physicalWidth, physicalHeight)
             }
         }
@@ -245,74 +222,31 @@ struct CTDisplayLayer: UIViewRepresentable {
             plane: MPRPlane,
             windowLevel: CTWindowLevel,
             volumeData: VolumeData?,
-            scrollVelocity: Float,
-            sharedState: SharedViewingState?,
-            isViewScrolling: Bool
+            sharedState: SharedViewingState?
         ) {
             // Store previous state for smart cache management
             let previousPlane = currentPlane
             let previousWindowLevel = currentWindowLevel
-            let previousQuality = currentQuality
             
             self.currentCoordinateSystem = coordinateSystem
             self.currentPlane = plane
             self.currentWindowLevel = windowLevel
-            self.currentScrollVelocity = scrollVelocity
-            self.currentIsViewScrolling = isViewScrolling
-            
-            // SIMPLIFIED: Use SharedViewingState quality directly (set by MPRGestureController)
-            let newQuality: MetalVolumeRenderer.RenderQuality
-            if let sharedState = sharedState {
-                let currentRenderQuality = sharedState.getQuality(for: plane)
-                
-                // Convert SharedViewingState quality to MetalVolumeRenderer quality
-                switch currentRenderQuality {
-                case 1:
-                    newQuality = .full
-                case 2:
-                    newQuality = .half
-                case 4:
-                    newQuality = .quarter
-                case 8:
-                    newQuality = .eighth
-                default:
-                    newQuality = .full
-                }
-            } else {
-                // Fallback when no shared state
-                newQuality = .full
-            }
             
             // SMART CACHE: Only clear cache when necessary
             var shouldClearCache = false
             
-            if newQuality != currentQuality {
-                currentQuality = newQuality
-                shouldClearCache = true  // Quality change requires new texture
-            }
-            
             if plane != previousPlane {
-                shouldClearCache = true  // Plane change requires new texture
-                vertexBuffer = nil  // Only regenerate vertex buffer on plane change
+                shouldClearCache = true
+                vertexBuffer = nil
             }
             
             if windowLevel.center != previousWindowLevel.center || windowLevel.width != previousWindowLevel.width {
-                shouldClearCache = true  // Window level change requires new texture
+                shouldClearCache = true
             }
             
-            // SMART CACHE: Only clear when actually needed
             if shouldClearCache {
                 cachedTexture = nil
                 cacheKey = ""
-            }
-            
-            // Reset quality timer
-            qualityTimer?.invalidate()
-            if scrollVelocity > 0.1 {
-                // Set timer to restore quality after scrolling stops
-                qualityTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in
-                    self?.restoreFullQuality()
-                }
             }
             
             // Load volume data into individual renderer if provided
@@ -355,8 +289,8 @@ struct CTDisplayLayer: UIViewRepresentable {
             
             let currentSliceIndex = coordinateSystem.getCurrentSliceIndex(for: currentPlane)
             
-            // Create cache key including quality level
-            let newCacheKey = "\(currentPlane.rawValue)-\(currentSliceIndex)-\(currentWindowLevel.name)-\(currentQuality)"
+            // Create cache key (simplified - no quality levels)
+            let newCacheKey = "\(currentPlane.rawValue)-\(currentSliceIndex)-\(currentWindowLevel.name)"
             
             // Generate new MPR slice if cache key changed
             if cacheKey != newCacheKey {
@@ -382,75 +316,33 @@ struct CTDisplayLayer: UIViewRepresentable {
                     sliceIndex: normalizedSliceIndex,
                     windowCenter: currentWindowLevel.center,
                     windowWidth: currentWindowLevel.width,
-                    quality: currentQuality  // Use adaptive quality
+                    quality: renderQuality  // Always full quality
                 )
                 
-                print("🛠️ Generating MPR slice: \(currentPlane) slice \(currentSliceIndex) quality \(currentQuality)")
+                print("🚀 SIMPLIFIED: Generating \(currentPlane) slice \(currentSliceIndex) (always full quality)")
                 
-                // SIMPLIFIED: Use per-view scrolling state only (remove velocity race condition)
-                let isActiveScrollingView = currentIsViewScrolling
-                
-                print("🚀 MODULAR: plane=\(currentPlane), thisViewScrolling=\(currentIsViewScrolling), priority=\(isActiveScrollingView)")
-                
-                // Capture plane name for logging (avoid closure capture issues)
-                let planeName = currentPlane.rawValue
-                
-                if isActiveScrollingView {
-                    // PRIORITY: Immediate generation for the actively scrolled view
-                    let startTime = Date()
-                    print("⏱️ TIMING START: \(planeName) texture generation")
+                // SIMPLIFIED: Always immediate generation - no delays, no priority
+                let startTime = Date()
+                let planeName = currentPlane.rawValue  // Capture for logging
+                individualRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
+                    let endTime = Date()
+                    let durationMs = endTime.timeIntervalSince(startTime) * 1000
+                    print("⏱️ IMMEDIATE: \(planeName) took \(String(format: "%.1f", durationMs))ms")
                     
-                    individualRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
-                        let endTime = Date()
-                        let durationMs = endTime.timeIntervalSince(startTime) * 1000
-                        print("⏱️ TIMING END: \(planeName) took \(String(format: "%.1f", durationMs))ms")
-                        
-                        guard let self = self else { return }
-                        self.cachedTexture = mprTexture
-                        
-                        // OPTIMIZED: Only regenerate vertex buffer if texture size actually changed
-                        if let texture = mprTexture {
-                            let newTextureSize = CGSize(width: texture.width, height: texture.height)
-                            if newTextureSize != self.lastTextureSize {
-                                self.vertexBuffer = nil
-                            }
-                        }
-                        
-                        // IMMEDIATE: Update without delay for active view
-                        DispatchQueue.main.async {
-                            let displayStartTime = Date()
-                            view.setNeedsDisplay()
-                            let displayEndTime = Date()
-                            let displayMs = displayEndTime.timeIntervalSince(displayStartTime) * 1000
-                            print("⏱️ DISPLAY: \(planeName) UI update took \(String(format: "%.1f", displayMs))ms")
+                    guard let self = self else { return }
+                    self.cachedTexture = mprTexture
+                    
+                    // Update vertex buffer if texture size changed
+                    if let texture = mprTexture {
+                        let newTextureSize = CGSize(width: texture.width, height: texture.height)
+                        if newTextureSize != self.lastTextureSize {
+                            self.vertexBuffer = nil
                         }
                     }
-                } else {
-                    // DEFERRED: Slight delay for non-active views to prioritize the scrolling view
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        let startTime = Date()
-                        print("⏱️ TIMING START (deferred): \(planeName) texture generation")
-                        
-                        individualRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
-                            let endTime = Date()
-                            let durationMs = endTime.timeIntervalSince(startTime) * 1000
-                            print("⏱️ TIMING END (deferred): \(planeName) took \(String(format: "%.1f", durationMs))ms")
-                            guard let self = self else { return }
-                            self.cachedTexture = mprTexture
-                            
-                            // OPTIMIZED: Only regenerate vertex buffer if texture size actually changed
-                            if let texture = mprTexture {
-                                let newTextureSize = CGSize(width: texture.width, height: texture.height)
-                                if newTextureSize != self.lastTextureSize {
-                                    self.vertexBuffer = nil
-                                }
-                            }
-                            
-                            // Update view when ready
-                            DispatchQueue.main.async {
-                                view.setNeedsDisplay()
-                            }
-                        }
+                    
+                    // Update view immediately
+                    DispatchQueue.main.async {
+                        view.setNeedsDisplay()
                     }
                 }
                 return
@@ -462,7 +354,7 @@ struct CTDisplayLayer: UIViewRepresentable {
                 return
             }
             
-            // MEDICAL-CRITICAL: Regenerate vertex buffer if needed
+            // Regenerate vertex buffer if needed
             let textureSize = CGSize(width: mprTexture.width, height: mprTexture.height)
             let needsRegeneration = (
                 vertexBuffer == nil ||
@@ -483,7 +375,6 @@ struct CTDisplayLayer: UIViewRepresentable {
                     viewSize: currentViewSize,
                     plane: currentPlane,
                     dicomSpacing: volumeData.spacing,
-                    quality: currentQuality,  // FIXED: Pass current quality
                     device: device
                 )
             }
@@ -491,7 +382,7 @@ struct CTDisplayLayer: UIViewRepresentable {
             displayTexture(mprTexture, drawable: drawable, commandQueue: commandQueue)
         }
         
-        // MARK: - Rendering Methods (MEDICAL-ACCURATE)
+        // MARK: - Rendering Methods
         
         private func displayTexture(_ texture: MTLTexture, drawable: CAMetalDrawable, commandQueue: MTLCommandQueue) {
             guard let commandBuffer = commandQueue.makeCommandBuffer() else {
@@ -562,51 +453,6 @@ struct CTDisplayLayer: UIViewRepresentable {
             commandBuffer.commit()
         }
         
-        // MARK: - Adaptive Quality Methods
-        // NOTE: Quality is now managed by MPRGestureController via SharedViewingState
-        
-        private func restoreFullQuality() {
-            guard currentQuality != .full else { return }
-            
-            print("🎯 Restoring full quality after scroll stop")
-            currentQuality = .full
-            cachedTexture = nil
-            cacheKey = ""
-            
-            // Update SharedViewingState to reflect restored quality
-            if let coordinateSystem = currentCoordinateSystem {
-                // Note: We don't have direct access to sharedState here, but the next
-                // updateRenderingParameters call with velocity=0 will set it to quality 1
-                
-                DispatchQueue.main.async { [weak self] in
-                    // Force a refresh by clearing cache
-                    self?.cachedTexture = nil
-                    self?.cacheKey = ""
-                }
-            }
-        }
-        
-        // NEW: Get original full-resolution dimensions for each plane
-        private func getOriginalPlaneDimensions(plane: MPRPlane) -> (width: Int, height: Int) {
-            guard let volumeData = currentVolumeData else {
-                return (512, 512)  // Fallback
-            }
-            
-            let dims = volumeData.dimensions
-            
-            switch plane {
-            case .axial:
-                // XY plane - original matrix size
-                return (dims.x, dims.y)
-                
-            case .sagittal:
-                // YZ plane - Y (anterior-posterior) x Z (superior-inferior)
-                return (dims.y, dims.z)
-                
-            case .coronal:
-                // XZ plane - X (left-right) x Z (superior-inferior)
-                return (dims.x, dims.z)
-            }
-        }
+
     }
 }

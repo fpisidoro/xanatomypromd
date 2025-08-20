@@ -14,7 +14,8 @@ struct StandaloneMPRView: View, LoadableView {
     
     let viewSize: CGSize
     let allowInteraction: Bool
-    let scrollVelocity: Float
+    
+    // REMOVED: scrollVelocity (priority system deleted)
     
     // MARK: - Per-View Loading State
     @StateObject internal var loadingState = MPRViewLoadingState()
@@ -30,8 +31,7 @@ struct StandaloneMPRView: View, LoadableView {
         sharedState: SharedViewingState,
         dataCoordinator: ViewDataCoordinator,
         viewSize: CGSize = CGSize(width: 512, height: 512),
-        allowInteraction: Bool = true,
-        scrollVelocity: Float = 0.0
+        allowInteraction: Bool = true
     ) {
         self.plane = plane
         self.coordinateSystem = coordinateSystem
@@ -39,7 +39,6 @@ struct StandaloneMPRView: View, LoadableView {
         self.dataCoordinator = dataCoordinator
         self.viewSize = viewSize
         self.allowInteraction = allowInteraction
-        self.scrollVelocity = scrollVelocity
         
         // Initialize viewState with correct plane
         self._viewState = StateObject(wrappedValue: MPRViewState(plane: plane))
@@ -53,8 +52,7 @@ struct StandaloneMPRView: View, LoadableView {
         volumeData: VolumeData? = nil,
         roiData: MinimalRTStructParser.SimpleRTStructData? = nil,
         viewSize: CGSize = CGSize(width: 512, height: 512),
-        allowInteraction: Bool = true,
-        scrollVelocity: Float = 0.0
+        allowInteraction: Bool = true
     ) {
         // Create a temporary data coordinator for backward compatibility
         let tempCoordinator = ViewDataCoordinator()
@@ -67,7 +65,6 @@ struct StandaloneMPRView: View, LoadableView {
         self.dataCoordinator = tempCoordinator
         self.viewSize = viewSize
         self.allowInteraction = allowInteraction
-        self.scrollVelocity = scrollVelocity
         
         self._viewState = StateObject(wrappedValue: MPRViewState(plane: plane))
     }
@@ -121,9 +118,8 @@ struct StandaloneMPRView: View, LoadableView {
                 roiData: dataCoordinator.roiData,
                 viewSize: viewSize,
                 allowInteraction: false,  // Gesture handling is separate
-                scrollVelocity: scrollVelocity,
-                sharedState: sharedState,
-                isViewScrolling: viewState.isScrolling  // Per-view scrolling state
+                sharedState: sharedState
+                // REMOVED: scrollVelocity, isViewScrolling
             )
             .scaleEffect(viewState.zoom)
             .offset(viewState.pan)

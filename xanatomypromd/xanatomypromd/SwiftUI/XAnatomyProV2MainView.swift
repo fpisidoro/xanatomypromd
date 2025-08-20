@@ -363,8 +363,8 @@ struct XAnatomyProV2MainView: View {
                     volumeData: dataCoordinator.volumeData,
                     roiData: dataCoordinator.roiData,
                     viewSize: viewSize,
-                    allowInteraction: true,
-                    scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
+                    allowInteraction: true
+                    // REMOVED: scrollVelocity (priority system deleted)
                 )
                 .id("single-\(selectedSingleViewPlane.displayName.lowercased())")  // 🔧 FIX: Unique identity per plane
             }
@@ -378,8 +378,8 @@ struct XAnatomyProV2MainView: View {
                     volumeData: dataCoordinator.volumeData,
                     roiData: dataCoordinator.roiData,
                     viewSize: viewSize,
-                    allowInteraction: true,
-                    scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
+                    allowInteraction: true
+                    // REMOVED: scrollVelocity (priority system deleted)
                 )
                 .id("axial-view")  // 🔧 FIX: Force separate @StateObject for axial
                 
@@ -390,8 +390,8 @@ struct XAnatomyProV2MainView: View {
                     volumeData: dataCoordinator.volumeData,
                     roiData: dataCoordinator.roiData,
                     viewSize: viewSize,
-                    allowInteraction: true,
-                    scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
+                    allowInteraction: true
+                    // REMOVED: scrollVelocity (priority system deleted)
                 )
                 .id("sagittal-view")  // 🔧 FIX: Force separate @StateObject for sagittal
                 
@@ -402,8 +402,8 @@ struct XAnatomyProV2MainView: View {
                     volumeData: dataCoordinator.volumeData,
                     roiData: dataCoordinator.roiData,
                     viewSize: viewSize,
-                    allowInteraction: true,
-                    scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
+                    allowInteraction: true
+                    // REMOVED: scrollVelocity (priority system deleted)
                 )
                 .id("coronal-view")  // 🔧 FIX: Force separate @StateObject for coronal
             }
@@ -421,8 +421,8 @@ struct XAnatomyProV2MainView: View {
                             volumeData: dataCoordinator.volumeData,
                             roiData: dataCoordinator.roiData,
                             viewSize: viewSize,
-                            allowInteraction: true,
-                            scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
+                            allowInteraction: true
+                            // REMOVED: scrollVelocity (priority system deleted)
                         )
                         .id("quad-axial-view")
                         
@@ -434,8 +434,8 @@ struct XAnatomyProV2MainView: View {
                             volumeData: dataCoordinator.volumeData,
                             roiData: dataCoordinator.roiData,
                             viewSize: viewSize,
-                            allowInteraction: true,
-                            scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
+                            allowInteraction: true
+                            // REMOVED: scrollVelocity (priority system deleted)
                         )
                         .id("quad-coronal-view")
                     }
@@ -449,8 +449,8 @@ struct XAnatomyProV2MainView: View {
                             volumeData: dataCoordinator.volumeData,
                             roiData: dataCoordinator.roiData,
                             viewSize: viewSize,
-                            allowInteraction: true,
-                            scrollVelocity: scrollVelocity  // NEW: Pass scroll velocity
+                            allowInteraction: true
+                            // REMOVED: scrollVelocity (priority system deleted)
                         )
                         .id("quad-sagittal-view")
                         
