@@ -212,7 +212,7 @@ struct Standalone3DView: View, LoadableView {
     
     // MARK: - View Lifecycle
     private func setupView() {
-        print("🔧 3D View: Setting up...")
+
         
         // Start loading immediately
         startLoading()
@@ -237,12 +237,12 @@ struct Standalone3DView: View, LoadableView {
             }
         }
         
-        print("🎯 3D View appeared - synced to crosshair: \(coordinateSystem.currentWorldPosition)")
+
     }
     
     private func cleanupView() {
         dataCoordinator.unregisterViewCallback(viewId: viewId)
-        print("🧹 3D View: Cleaned up")
+
     }
     
     // MARK: - 3D Data Processing Pipeline
@@ -276,7 +276,7 @@ struct Standalone3DView: View, LoadableView {
             // Stage 5: Complete
             completeLoading()
             
-            print("✅ 3D View: Loading completed successfully")
+
             
         } catch {
             print("❌ 3D View: Loading failed - \(error)")
@@ -287,23 +287,23 @@ struct Standalone3DView: View, LoadableView {
     private func initialize3DRenderer(volumeData: VolumeData) async throws {
         // Setup 3D volume in renderer
         renderer.setupVolume(volumeData)
-        print("🔧 3D View: Metal renderer initialized")
+
     }
     
     private func compile3DShaders() async throws {
         // Simulate shader compilation time
         // In real implementation, this would involve shader compilation
         try await Task.sleep(nanoseconds: 200_000_000) // 200ms for shader compilation
-        print("🔧 3D View: 3D shaders compiled")
+
     }
     
     private func setup3DROI() async throws {
         if let roiData = dataCoordinator.roiData {
             try await Task.sleep(nanoseconds: 50_000_000) // Simulate setup time
             renderer.setupROI(roiData)
-            print("🔧 3D View: ROI setup completed")
+
         } else {
-            print("🔧 3D View: No ROI data for 3D setup")
+
         }
     }
     
@@ -404,7 +404,7 @@ class Metal3DVolumeRenderer: ObservableObject {
     func setupVolume(_ volumeData: VolumeData) {
         guard let device = device else { return }
         
-        print("🎯 Setting up volume: \(volumeData.dimensions)")
+
         
         let textureDescriptor = MTLTextureDescriptor()
         textureDescriptor.textureType = .type3D
@@ -425,7 +425,7 @@ class Metal3DVolumeRenderer: ObservableObject {
             bytesPerImage: volumeData.dimensions.x * volumeData.dimensions.y * 2
         )
         
-        print("✅ Volume texture created: \(volumeTexture?.width ?? 0)x\(volumeTexture?.height ?? 0)x\(volumeTexture?.depth ?? 0)")
+
     }
     
     func setupROI(_ roiData: MinimalRTStructParser.SimpleRTStructData) {
@@ -436,7 +436,7 @@ class Metal3DVolumeRenderer: ObservableObject {
         // In production, we'd create a more complex buffer structure for multiple ROIs
         guard let firstROI = roiData.roiStructures.first,
               !firstROI.contours.isEmpty else {
-            print("⚠️ No ROI contours to setup")
+
             return
         }
         
@@ -469,12 +469,7 @@ class Metal3DVolumeRenderer: ObservableObject {
         roiBuffer = device.makeBuffer(bytes: roiBufferData, length: bufferSize, options: [])
         roiCount = firstROI.contours.count
         
-        print("✅ ROI setup complete:")
-        print("   - ROI: \(firstROI.roiName)")
-        print("   - Color: \(firstROI.displayColor)")
-        print("   - Contours: \(firstROI.contours.count)")
-        print("   - Total points: \(firstROI.contours.reduce(0) { $0 + $1.points.count })")
-        print("   - Buffer size: \(bufferSize) bytes")
+
     }
     
     func render(to texture: MTLTexture, 
@@ -487,11 +482,7 @@ class Metal3DVolumeRenderer: ObservableObject {
                 pan: CGSize,
                 showROI: Bool = false) {
         
-        // Only log first render to avoid spam
-        if !hasLoggedFirstRender {
-            print("🎨 3D Render started - Rotation: \(rotationZ), Zoom: \(zoom), Window: \(windowLevel.name)")
-            hasLoggedFirstRender = true
-        }
+
         
         guard let commandQueue = commandQueue,
               let pipelineState = pipelineState,

@@ -68,14 +68,14 @@ class DICOMCoordinateSystem: ObservableObject {
         // Initialize at origin - will be updated when volume loads
         self.currentWorldPosition = SIMD3<Float>(0, 0, 0)
         
-        print("🏥 Universal DICOM Coordinate System initialized (no scan loaded)")
+
     }
     
     /// ✅ FIX: Clean up timer on deallocation
     deinit {
         velocityTimer?.invalidate()
         velocityTimer = nil
-        print("🧹 DICOMCoordinateSystem: Timer properly cleaned up")
+
     }
     
     /// Initialize coordinate system from ANY loaded volume data
@@ -90,13 +90,7 @@ class DICOMCoordinateSystem: ObservableObject {
         let centerPosition = volumeOrigin + physicalVolumeSize / 2.0
         self.currentWorldPosition = centerPosition
         
-        print("🔄 Coordinate system updated with scan data:")
-        print("   📊 Dimensions: \(volumeDimensions) voxels")
-        print("   📏 Spacing: \(volumeSpacing) mm/voxel")
-        print("   📍 Origin: \(volumeOrigin) mm")
-        print("   📐 Physical size: \(physicalVolumeSize) mm")
-        print("   🎯 Center position: \(currentWorldPosition) mm")
-        print("   🗺️ Bounds: \(volumeBounds.min) to \(volumeBounds.max)")
+
     }
     
     // MARK: - AUTHORITATIVE Coordinate Transformations (Works with Any Scan)
@@ -134,7 +128,7 @@ class DICOMCoordinateSystem: ObservableObject {
     /// Get slice index for current position in given plane (EDUCATIONAL: 2mm spacing aware)
     func getCurrentSliceIndex(for plane: MPRPlane) -> Int {
         guard let volumeData = volumeData else { 
-            print("⚠️ No volume data loaded for slice index calculation")
+
             return 0 
         }
         
@@ -163,7 +157,7 @@ class DICOMCoordinateSystem: ObservableObject {
     /// Get maximum slices for given plane (EDUCATIONAL: 2mm spacing for MPR)
     func getMaxSlices(for plane: MPRPlane) -> Int {
         guard let volumeData = volumeData else { 
-            print("⚠️ No volume data loaded for max slices calculation")
+
             return 1 
         }
         
@@ -423,10 +417,7 @@ class DICOMCoordinateSystem: ObservableObject {
         
         currentWorldPosition = clampedPosition
         
-        // ✅ FIX: Only log significant position changes (> 10mm)
-        if clampedDelta > 10.0 {
-            print("🎯 Significant position update: \(clampedPosition) mm (moved \(clampedDelta)mm)")
-        }
+
     }
     
     /// Update position from slice scrolling in specific plane (EDUCATIONAL: 2mm spacing aware)

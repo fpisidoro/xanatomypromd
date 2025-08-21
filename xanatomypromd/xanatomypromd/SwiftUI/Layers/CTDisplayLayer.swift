@@ -111,7 +111,7 @@ struct CTDisplayLayer: UIViewRepresentable {
         private func setupRenderer() {
             do {
                 volumeRenderer = try MetalVolumeRenderer()
-                print("✅ Individual MetalVolumeRenderer created for view")
+
             } catch {
                 print("❌ Failed to create MetalVolumeRenderer: \(error)")
             }
@@ -131,7 +131,7 @@ struct CTDisplayLayer: UIViewRepresentable {
             
             do {
                 displayPipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
-                print("✅ CT Medical Display: Display pipeline created")
+
             } catch {
                 print("❌ CT Medical Display: Failed to create display pipeline: \(error)")
             }
@@ -156,11 +156,7 @@ struct CTDisplayLayer: UIViewRepresentable {
             let physicalAspect = physicalDimensions.width / physicalDimensions.height
             let viewAspect = Float(viewSize.width / viewSize.height)
             
-            print("🏥 MEDICAL ACCURACY:")
-            print("   📐 Texture pixels: \(Int(textureSize.width))×\(Int(textureSize.height))")
-            print("   📏 Physical size: \(String(format: "%.1f", physicalDimensions.width))mm × \(String(format: "%.1f", physicalDimensions.height))mm")
-            print("   📊 Physical aspect: \(String(format: "%.3f", physicalAspect))")
-            print("   📱 View aspect: \(String(format: "%.3f", viewAspect))")
+
             
             // Calculate proper quad size to maintain MEDICAL accuracy
             let quadSize: (width: Float, height: Float)
@@ -168,11 +164,11 @@ struct CTDisplayLayer: UIViewRepresentable {
             if physicalAspect > viewAspect {
                 // Image is physically wider - letterbox top/bottom
                 quadSize = (1.0, viewAspect / physicalAspect)
-                print("   📱 Medical Letterbox: TOP/BOTTOM")
+
             } else {
                 // Image is physically taller - letterbox left/right
                 quadSize = (physicalAspect / viewAspect, 1.0)
-                print("   📱 Medical Letterbox: LEFT/RIGHT")
+
             }
             
             // Create vertices for medically accurate quad
@@ -184,7 +180,7 @@ struct CTDisplayLayer: UIViewRepresentable {
                  quadSize.width,  quadSize.height,             1.0, 0.0   // Top right
             ]
             
-            print("   ✅ Medical quad: \(String(format: "%.3f", quadSize.width))×\(String(format: "%.3f", quadSize.height))")
+
             
             vertexBuffer = device.makeBuffer(
                 bytes: quadVertices,
@@ -357,7 +353,7 @@ struct CTDisplayLayer: UIViewRepresentable {
                     quality: renderQuality  // Always full quality
                 )
                 
-                print("🚀 SIMPLIFIED: Generating \(currentPlane) slice \(currentSliceIndex) (always full quality)")
+
                 
                 // SIMPLIFIED: Always immediate generation - no delays, no priority
                 let startTime = Date()
@@ -365,7 +361,7 @@ struct CTDisplayLayer: UIViewRepresentable {
                 individualRenderer.generateMPRSlice(config: config) { [weak self] mprTexture in
                     let endTime = Date()
                     let durationMs = endTime.timeIntervalSince(startTime) * 1000
-                    print("⏱️ IMMEDIATE: \(planeName) took \(String(format: "%.1f", durationMs))ms")
+
                     
                     guard let self = self else { return }
                     self.cachedTexture = mprTexture
