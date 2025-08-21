@@ -296,7 +296,7 @@ class ViewDataCoordinator: ObservableObject {
     private func setupVolumeRenderer() {
         do {
             volumeRenderer = try MetalVolumeRenderer()
-            print("✅ ViewDataCoordinator: MetalVolumeRenderer initialized")
+            // Renderer initialized successfully
         } catch {
             print("❌ ViewDataCoordinator: Failed to initialize MetalVolumeRenderer: \(error)")
         }
@@ -346,7 +346,7 @@ class ViewDataCoordinator: ObservableObject {
                 let loadedVolumeData = try await renderer.loadVolumeFromDICOMFiles(dicomFiles)
                 volumeData = loadedVolumeData
                 volumeLoadingProgress = 1.0
-                print("✅ Volume data loaded for all views")
+                // Volume data loaded for all views
             }
             
         } catch {
@@ -366,7 +366,7 @@ class ViewDataCoordinator: ObservableObject {
                 
                 if let result = MinimalRTStructParser.parseSimpleRTStruct(from: dataset) {
                     roiData = result
-                    print("✅ ROI data loaded: \(result.roiStructures.count) structures")
+                    // ROI data loaded successfully
                 }
             } catch {
                 print("❌ Failed to load ROI data: \(error)")

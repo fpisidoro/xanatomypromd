@@ -44,7 +44,7 @@ class SharedViewingState: ObservableObject {
     /// Set quality for a specific plane only
     func setQuality(for plane: MPRPlane, quality: Int) {
         renderQuality[plane] = quality
-        print("🎯 Quality set for \(plane): \(quality) (other planes unaffected)")
+        // Quality set for plane
     }
     
     /// Get quality for a specific plane
@@ -56,7 +56,7 @@ class SharedViewingState: ObservableObject {
     func restoreFullQuality(for plane: MPRPlane) {
         if renderQuality[plane] != 1 {
             renderQuality[plane] = 1
-            print("🔄 Full quality restored for \(plane)")
+            // Full quality restored for plane
         }
     }
     
@@ -65,7 +65,7 @@ class SharedViewingState: ObservableObject {
         for plane in [MPRPlane.axial, .sagittal, .coronal] {
             renderQuality[plane] = 1
         }
-        print("🔄 Full quality restored for all planes")
+        // Full quality restored for all planes
     }
     
     // MARK: - Existing Methods (Updated)
