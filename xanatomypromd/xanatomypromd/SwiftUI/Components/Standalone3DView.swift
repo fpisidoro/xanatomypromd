@@ -649,13 +649,13 @@ struct Metal3DRenderView: UIViewRepresentable {
         mtkView.backgroundColor = UIColor.black
         mtkView.delegate = context.coordinator
         mtkView.enableSetNeedsDisplay = true  // Manual render control
-        mtkView.isPaused = false  // Allow rendering
-        mtkView.preferredFramesPerSecond = 30  // Limit to 30 FPS
+        mtkView.isPaused = true  // ✅ FIX: Start paused, only render on demand
+        mtkView.preferredFramesPerSecond = 30  // Only when rendering
         return mtkView
     }
     
     func updateUIView(_ uiView: MTKView, context: Context) {
-        context.coordinator.updateParams(
+        let hasChanges = context.coordinator.updateParams(
             rotationZ: rotationZ,
             crosshairPosition: crosshairPosition,
             volumeOrigin: coordinateSystem.volumeOrigin,
@@ -665,7 +665,16 @@ struct Metal3DRenderView: UIViewRepresentable {
             pan: pan,
             showROI: showROI
         )
-        uiView.setNeedsDisplay()  // Trigger single render
+        
+        // ✅ FIX: Only render a single frame when parameters change
+        if hasChanges {
+            // Unpause briefly for single frame render
+            uiView.isPaused = false
+            uiView.draw()  // Force immediate single frame render
+            uiView.isPaused = true  // Immediately re-pause - NO DELAY!
+            
+            // NO asyncAfter - we pause immediately!
+        }
     }
     
     func makeCoordinator() -> Coordinator {
@@ -683,26 +692,53 @@ struct Metal3DRenderView: UIViewRepresentable {
         private var pan: CGSize = .zero
         private var showROI: Bool = false
         private var lastRenderTime: CFTimeInterval = 0
+        private var hasRenderedCurrentState: Bool = false  // ✅ NEW: Track if we've rendered current state
         
         init(renderer: Metal3DVolumeRenderer) {
             self.renderer = renderer
         }
         
-        func updateParams(rotationZ: Float, crosshairPosition: SIMD3<Float>, volumeOrigin: SIMD3<Float>, volumeSpacing: SIMD3<Float>, windowLevel: CTWindowLevel, zoom: CGFloat, pan: CGSize, showROI: Bool) {
-            self.rotationZ = rotationZ
-            self.crosshairPosition = crosshairPosition
-            self.volumeOrigin = volumeOrigin
-            self.volumeSpacing = volumeSpacing
-            self.windowLevel = windowLevel
-            self.zoom = zoom
-            self.pan = pan
-            self.showROI = showROI
+        func updateParams(rotationZ: Float, crosshairPosition: SIMD3<Float>, volumeOrigin: SIMD3<Float>, volumeSpacing: SIMD3<Float>, windowLevel: CTWindowLevel, zoom: CGFloat, pan: CGSize, showROI: Bool) -> Bool {
+            // ✅ FIX: More precise change detection with tolerance
+            let rotationChanged = abs(self.rotationZ - rotationZ) > 0.001
+            let crosshairChanged = length(self.crosshairPosition - crosshairPosition) > 0.1
+            let originChanged = length(self.volumeOrigin - volumeOrigin) > 0.1
+            let spacingChanged = length(self.volumeSpacing - volumeSpacing) > 0.001
+            let windowChanged = abs(self.windowLevel.center - windowLevel.center) > 1.0 || 
+                               abs(self.windowLevel.width - windowLevel.width) > 1.0
+            let zoomChanged = abs(self.zoom - zoom) > 0.01
+            let panChanged = abs(self.pan.width - pan.width) > 0.5 || 
+                            abs(self.pan.height - pan.height) > 0.5
+            let roiChanged = self.showROI != showROI
+            
+            let hasChanges = rotationChanged || crosshairChanged || originChanged || 
+                           spacingChanged || windowChanged || zoomChanged || 
+                           panChanged || roiChanged
+            
+            if hasChanges {
+                self.rotationZ = rotationZ
+                self.crosshairPosition = crosshairPosition
+                self.volumeOrigin = volumeOrigin
+                self.volumeSpacing = volumeSpacing
+                self.windowLevel = windowLevel
+                self.zoom = zoom
+                self.pan = pan
+                self.showROI = showROI
+                self.hasRenderedCurrentState = false  // ✅ NEW: Mark as needing render
+            }
+            
+            return hasChanges
         }
         
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
         
         func draw(in view: MTKView) {
             guard let drawable = view.currentDrawable else { return }
+            
+            // ✅ FIX: Skip if we've already rendered current state
+            if hasRenderedCurrentState {
+                return
+            }
             
             // Throttle rendering to avoid spam
             let now = CACurrentMediaTime()
@@ -724,6 +760,14 @@ struct Metal3DRenderView: UIViewRepresentable {
             )
             
             drawable.present()
+            
+            // ✅ NEW: Mark as rendered
+            hasRenderedCurrentState = true
+            
+            // ✅ FIX: Auto-pause after render completes
+            DispatchQueue.main.async {
+                view.isPaused = true
+            }
         }
     }
 }

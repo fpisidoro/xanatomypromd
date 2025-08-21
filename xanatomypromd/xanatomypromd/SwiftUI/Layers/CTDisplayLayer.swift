@@ -37,8 +37,10 @@ struct CTDisplayLayer: UIViewRepresentable {
         mtkView.framebufferOnly = false
         mtkView.backgroundColor = UIColor.black
         
-        // MEDICAL PRINCIPLE: Let MTKView fill SwiftUI frame
-        // We control accuracy in Metal rendering, not view sizing
+        // ✅ FIX: Start paused and enable manual control
+        mtkView.isPaused = true
+        mtkView.enableSetNeedsDisplay = true
+        mtkView.preferredFramesPerSecond = 30  // Only when actively rendering
         
         return mtkView
     }
@@ -52,7 +54,15 @@ struct CTDisplayLayer: UIViewRepresentable {
                 volumeData: volumeData,
                 sharedState: sharedState
             )
+            
+            // ✅ FIX: Unpause briefly for render, then re-pause
+            uiView.isPaused = false
             uiView.setNeedsDisplay()
+            
+            // Re-pause after a very short delay to ensure render completes
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { // One frame at 60fps
+                uiView.isPaused = true
+            }
         }
     }
     
@@ -87,6 +97,10 @@ struct CTDisplayLayer: UIViewRepresentable {
         
         // SIMPLIFIED: Always use full quality
         private let renderQuality: MetalVolumeRenderer.RenderQuality = .full
+        
+        // ✅ NEW: Track if we need to render
+        private var needsRender: Bool = false
+        private var lastRenderedCacheKey: String = ""
         
         override init() {
             super.init()
@@ -247,6 +261,7 @@ struct CTDisplayLayer: UIViewRepresentable {
             if shouldClearCache {
                 cachedTexture = nil
                 cacheKey = ""
+                needsRender = true  // ✅ NEW: Mark as needing render
             }
             
             // Load volume data into individual renderer if provided
@@ -255,6 +270,7 @@ struct CTDisplayLayer: UIViewRepresentable {
                     do {
                         try volumeRenderer?.loadVolume(volumeData)
                         self.currentVolumeData = volumeData
+                    needsRender = true  // ✅ NEW: Mark as needing render
                     } catch {
                         print("❌ Failed to load volume: \(error)")
                     }
@@ -284,6 +300,10 @@ struct CTDisplayLayer: UIViewRepresentable {
             // Get current slice from coordinate system
             guard let coordinateSystem = currentCoordinateSystem else {
                 clearView(drawable: drawable, commandQueue: commandQueue)
+                // ✅ FIX: Auto-pause after clearing
+                DispatchQueue.main.async {
+                    view.isPaused = true
+                }
                 return
             }
             
@@ -292,18 +312,36 @@ struct CTDisplayLayer: UIViewRepresentable {
             // Create cache key (simplified - no quality levels)
             let newCacheKey = "\(currentPlane.rawValue)-\(currentSliceIndex)-\(currentWindowLevel.name)"
             
+            // ✅ FIX: Skip render if we've already rendered this exact state
+            if newCacheKey == lastRenderedCacheKey && cachedTexture != nil && !needsRender {
+                // Already rendered this state, pause immediately
+                DispatchQueue.main.async {
+                    view.isPaused = true
+                }
+                return
+            }
+            
             // Generate new MPR slice if cache key changed
-            if cacheKey != newCacheKey {
+            if cacheKey != newCacheKey || needsRender {
                 cacheKey = newCacheKey
+                needsRender = false  // ✅ Reset render flag
                 
                 guard let volumeData = currentVolumeData else {
                     displayLoadingState(drawable: drawable, commandQueue: commandQueue)
+                    // ✅ FIX: Auto-pause after loading state
+                    DispatchQueue.main.async {
+                        view.isPaused = true
+                    }
                     return
                 }
                 
                 // Use individual MetalVolumeRenderer instead of shared renderer
                 guard let individualRenderer = volumeRenderer else {
                     displayLoadingState(drawable: drawable, commandQueue: commandQueue)
+                    // ✅ FIX: Auto-pause after loading state
+                    DispatchQueue.main.async {
+                        view.isPaused = true
+                    }
                     return
                 }
                 
@@ -351,6 +389,10 @@ struct CTDisplayLayer: UIViewRepresentable {
             // Display cached texture if available
             guard let mprTexture = cachedTexture else {
                 displayLoadingState(drawable: drawable, commandQueue: commandQueue)
+                // ✅ FIX: Auto-pause after loading state
+                DispatchQueue.main.async {
+                    view.isPaused = true
+                }
                 return
             }
             
@@ -380,6 +422,14 @@ struct CTDisplayLayer: UIViewRepresentable {
             }
             
             displayTexture(mprTexture, drawable: drawable, commandQueue: commandQueue)
+            
+            // ✅ NEW: Mark this state as rendered
+            lastRenderedCacheKey = newCacheKey
+            
+            // ✅ FIX: Auto-pause after successful render
+            DispatchQueue.main.async {
+                view.isPaused = true
+            }
         }
         
         // MARK: - Rendering Methods

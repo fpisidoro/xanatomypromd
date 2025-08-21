@@ -14,6 +14,10 @@ class DICOMCoordinateSystem: ObservableObject {
     /// Volume data source - contains ALL scan-specific parameters
     private var volumeData: VolumeData?
     
+    /// Cache max slices per volume data instance to avoid recalculation in render loops
+    private var cachedMaxSlices: [MPRPlane: Int] = [:]
+    private var cachedVolumeDataID: ObjectIdentifier?  // Track which volume data the cache is for
+    
     /// Current 3D world position in DICOM patient coordinates (mm)
     @Published var currentWorldPosition: SIMD3<Float>
     
@@ -23,7 +27,7 @@ class DICOMCoordinateSystem: ObservableObject {
     /// Last slice update time for velocity calculation
     private var lastSliceUpdateTime: Date = Date()
     private var lastSliceIndex: [MPRPlane: Int] = [:]
-    private var velocityTimer: Timer?
+    private weak var velocityTimer: Timer?  // ✅ FIX: Use weak reference
     
     // MARK: - Computed Properties (Always Current)
     
@@ -67,9 +71,20 @@ class DICOMCoordinateSystem: ObservableObject {
         print("🏥 Universal DICOM Coordinate System initialized (no scan loaded)")
     }
     
+    /// ✅ FIX: Clean up timer on deallocation
+    deinit {
+        velocityTimer?.invalidate()
+        velocityTimer = nil
+        print("🧹 DICOMCoordinateSystem: Timer properly cleaned up")
+    }
+    
     /// Initialize coordinate system from ANY loaded volume data
     func initializeFromVolumeData(_ volumeData: VolumeData) {
         self.volumeData = volumeData
+        
+        // Clear cache when new volume loads (switching between male/female patients)
+        cachedMaxSlices.removeAll()
+        cachedVolumeDataID = ObjectIdentifier(volumeData)
         
         // Calculate center position using real volume data (works for any scan)
         let centerPosition = volumeOrigin + physicalVolumeSize / 2.0
@@ -152,6 +167,28 @@ class DICOMCoordinateSystem: ObservableObject {
             return 1 
         }
         
+        let currentVolumeID = ObjectIdentifier(volumeData)
+        
+        // Clear cache if we're looking at a different volume (male vs female patient)
+        if cachedVolumeDataID != currentVolumeID {
+            cachedMaxSlices.removeAll()
+            cachedVolumeDataID = currentVolumeID
+        }
+        
+        // Return cached value if available for this volume
+        if let cached = cachedMaxSlices[plane] {
+            return cached
+        }
+        
+        // Calculate once per plane per volume and cache
+        let maxSlices = calculateMaxSlicesForPlane(plane, volumeData: volumeData)
+        cachedMaxSlices[plane] = maxSlices
+        
+        return maxSlices
+    }
+    
+    /// Calculate max slices for plane (called once per plane per volume)
+    private func calculateMaxSlicesForPlane(_ plane: MPRPlane, volumeData: VolumeData) -> Int {
         // For axial (original slices), use actual DICOM slice count
         if plane == .axial {
             return volumeData.dimensions[plane.sliceAxis]
@@ -164,6 +201,7 @@ class DICOMCoordinateSystem: ObservableObject {
         
         let originalCount = volumeData.dimensions[plane.sliceAxis]
         
+        // Log once per plane per volume (not on every render frame!)
         print("📚 Educational slice optimization - \(plane):")
         print("   📐 Physical size: \(String(format: "%.1f", physicalSize))mm")
         print("   📊 Original slices: \(originalCount) (\(String(format: "%.2f", volumeData.spacing[plane.sliceAxis]))mm spacing)")
@@ -363,6 +401,12 @@ class DICOMCoordinateSystem: ObservableObject {
     
     /// Update world position - broadcasts to all layers
     func updateWorldPosition(_ newPosition: SIMD3<Float>) {
+        // ✅ FIX: Add threshold to prevent micro-updates
+        let delta = length(newPosition - currentWorldPosition)
+        if delta < 0.01 { 
+            return  // Ignore tiny movements less than 0.01mm
+        }
+        
         // Clamp to volume bounds
         let bounds = volumeBounds
         let clampedPosition = SIMD3<Float>(
@@ -371,14 +415,17 @@ class DICOMCoordinateSystem: ObservableObject {
             max(bounds.min.z, min(newPosition.z, bounds.max.z))
         )
         
-        // Store previous position for delta calculation
-        let previousPosition = currentWorldPosition
+        // ✅ FIX: Only update if clamped position is different enough
+        let clampedDelta = length(clampedPosition - currentWorldPosition)
+        if clampedDelta < 0.01 {
+            return
+        }
+        
         currentWorldPosition = clampedPosition
         
-        // Reduced logging for performance - only log significant changes
-        let positionDelta = length(clampedPosition - previousPosition)
-        if positionDelta > 5.0 {  // Only log moves > 5mm
-            print("🎯 Position updated: \(clampedPosition) mm")
+        // ✅ FIX: Only log significant position changes (> 10mm)
+        if clampedDelta > 10.0 {
+            print("🎯 Significant position update: \(clampedPosition) mm (moved \(clampedDelta)mm)")
         }
     }
     
@@ -396,13 +443,9 @@ class DICOMCoordinateSystem: ObservableObject {
                 let sliceDelta = abs(clampedIndex - lastIndex)
                 let velocity = Float(sliceDelta) / Float(timeDelta)
                 
-                // Update velocity if significant change
-                if abs(velocity - scrollVelocity) > 0.1 || velocity < 0.1 {
+                // ✅ FIX: Only update velocity if there's a significant change
+                if abs(velocity - scrollVelocity) > 0.5 {
                     scrollVelocity = velocity
-                    // Reduced logging: only log significant velocity changes
-                    if velocity > 1.0 {
-                        print("🎯 Scroll velocity: \(String(format: "%.1f", velocity)) slices/sec")
-                    }
                 }
             }
         }
@@ -411,11 +454,20 @@ class DICOMCoordinateSystem: ObservableObject {
         lastSliceUpdateTime = now
         lastSliceIndex[plane] = clampedIndex
         
-        // Reset velocity after scroll stops
+        // ✅ FIX: Proper timer management - always invalidate before creating new one
         velocityTimer?.invalidate()
-        velocityTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in
-            self?.scrollVelocity = 0.0
+        velocityTimer = nil  // Clear reference immediately
+        
+        // Create new timer with weak self capture
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                self.scrollVelocity = 0.0
+                self.velocityTimer?.invalidate()
+                self.velocityTimer = nil
+            }
         }
+        velocityTimer = timer
         
         // Convert slice index to world coordinate based on plane type
         let sliceAxis = plane.sliceAxis
@@ -431,13 +483,12 @@ class DICOMCoordinateSystem: ObservableObject {
             worldCoord = volumeOrigin[sliceAxis] + (Float(clampedIndex) * targetSpacing)
         }
         
-        // OPTIMIZED: Only update if position actually changed significantly
+        // ✅ FIX: Only update if position actually changed significantly (> 0.5mm)
         var newPosition = currentWorldPosition
         let previousCoord = newPosition[sliceAxis]
         newPosition[sliceAxis] = worldCoord
         
-        // Only trigger @Published update if change is significant (> 0.1mm)
-        if abs(worldCoord - previousCoord) > 0.1 {
+        if abs(worldCoord - previousCoord) > 0.5 {
             updateWorldPosition(newPosition)
         }
     }
