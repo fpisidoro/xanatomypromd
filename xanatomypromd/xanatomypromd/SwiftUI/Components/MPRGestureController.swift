@@ -200,11 +200,17 @@ struct MPRGestureController: UIViewRepresentable {
                     lastOneFingerTranslation = translation.y
                     viewState.setInteractionState(isScrolling: true)
                     
+                    // Notify SharedViewingState that MPR scrolling started (for 3D priority)
+                    sharedState.mprScrollingDidStart()
+                    
                     print("🖱️ 1-finger @ \(String(format: "%.1f", viewState.zoom))x → SCROLL mode (vertical only)")
                     
                 case .changed:
                     let deltaY = translation.y - lastOneFingerTranslation
                     oneFingerScrollAccumulator += abs(deltaY)
+                    
+                    // Notify SharedViewingState that MPR scrolling is ongoing
+                    sharedState.mprScrollingDidUpdate()
                     
                     // Trigger slice change when accumulated enough distance
                     if oneFingerScrollAccumulator >= config.baseScrollThreshold {
@@ -223,6 +229,9 @@ struct MPRGestureController: UIViewRepresentable {
                     lastOneFingerTranslation = 0
                     viewState.setInteractionState(isScrolling: false)
                     restoreScrollQuality()
+                    
+                    // Notify SharedViewingState that MPR scrolling ended
+                    sharedState.mprScrollingDidEnd()
                     
                 default:
                     break
@@ -267,11 +276,17 @@ struct MPRGestureController: UIViewRepresentable {
                     scrollAccumulator = 0
                     lastScrollTranslation = translation.y
                     viewState.setInteractionState(isScrolling: true)
+                    
+                    // Notify SharedViewingState that MPR scrolling started (for 3D priority)
+                    sharedState.mprScrollingDidStart()
                     print("✌️ 2-finger → SCROLL mode (vertical only)")
                     
                 case .changed:
                     let deltaY = translation.y - lastScrollTranslation
                     scrollAccumulator += abs(deltaY)
+                    
+                    // Notify SharedViewingState that MPR scrolling is ongoing
+                    sharedState.mprScrollingDidUpdate()
                     
                     // ADAPTIVE: Calculate threshold based on current view size
                     let adaptiveThreshold = config.calculateScrollThreshold(for: viewState.viewSize)
@@ -295,6 +310,9 @@ struct MPRGestureController: UIViewRepresentable {
                     lastScrollTranslation = 0
                     viewState.setInteractionState(isScrolling: false)
                     restoreScrollQuality()
+                    
+                    // Notify SharedViewingState that MPR scrolling ended
+                    sharedState.mprScrollingDidEnd()
                     
                 default:
                     break

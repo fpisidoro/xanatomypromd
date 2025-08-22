@@ -39,6 +39,12 @@ class SharedViewingState: ObservableObject {
     /// Last active MPR plane before switching to 3D
     @Published var lastActivePlane: MPRPlane = .axial
     
+    // MARK: - Performance Priority State
+    
+    /// Track if any MPR view is actively scrolling (to pause 3D auto-rotation)
+    @Published var isActivelyScrollingMPR: Bool = false
+    private var scrollingTimer: Timer?
+    
     // MARK: - Quality Management Methods
     
     /// Set quality for a specific plane only
@@ -113,5 +119,44 @@ class SharedViewingState: ObservableObject {
         rotation3D = 0.0
         zoom3D = 1.0
         pan3D = .zero
+    }
+    
+    // MARK: - MPR Scrolling Priority Management
+    
+    /// Called when MPR scrolling starts
+    func mprScrollingDidStart() {
+        // Cancel any existing timer
+        scrollingTimer?.invalidate()
+        
+        // Mark as actively scrolling
+        if !isActivelyScrollingMPR {
+            isActivelyScrollingMPR = true
+            print("⏸ 3D: Pausing auto-rotation for MPR scrolling priority")
+        }
+    }
+    
+    /// Called when MPR scrolling updates
+    func mprScrollingDidUpdate() {
+        // Cancel existing timer and restart it
+        scrollingTimer?.invalidate()
+        
+        // Set as actively scrolling
+        isActivelyScrollingMPR = true
+        
+        // Start timer to detect when scrolling stops (after 0.5 seconds of no updates)
+        scrollingTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+            self?.isActivelyScrollingMPR = false
+            print("▶️ 3D: Resuming auto-rotation after MPR scrolling")
+        }
+    }
+    
+    /// Called when MPR scrolling explicitly ends
+    func mprScrollingDidEnd() {
+        // Small delay before resuming to ensure smooth transition
+        scrollingTimer?.invalidate()
+        scrollingTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
+            self?.isActivelyScrollingMPR = false
+            print("▶️ 3D: MPR scrolling ended, resuming auto-rotation")
+        }
     }
 }

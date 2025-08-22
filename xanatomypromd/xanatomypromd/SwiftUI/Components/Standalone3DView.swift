@@ -192,14 +192,20 @@ struct Standalone3DView: View, LoadableView {
                 
                 VStack(alignment: .trailing, spacing: 2) {
                     HStack(spacing: 4) {
-                        if isAutoRotating {
+                        if sharedState.isActivelyScrollingMPR {
+                            // MPR has priority - show paused indicator
+                            Image(systemName: "pause.circle.fill")
+                                .font(.system(size: 8))
+                                .foregroundColor(.orange.opacity(0.8))
+                        } else if isAutoRotating {
+                            // Auto-rotating normally
                             Image(systemName: "arrow.triangle.2.circlepath")
                                 .font(.system(size: 8))
                                 .foregroundColor(.green.opacity(0.8))
                         }
                         Text("Rotation: \(String(format: "%.0f°", (sharedState.rotation3D * 180 / .pi).truncatingRemainder(dividingBy: 360)))")
                             .font(.caption2)
-                            .foregroundColor(isAutoRotating ? .green.opacity(0.8) : .cyan.opacity(0.8))
+                            .foregroundColor(sharedState.isActivelyScrollingMPR ? .orange.opacity(0.8) : (isAutoRotating ? .green.opacity(0.8) : .cyan.opacity(0.8)))
                     }
                     
                     if abs(sharedState.zoom3D - 1.0) > 0.1 {
@@ -274,6 +280,11 @@ struct Standalone3DView: View, LoadableView {
         
         // Create new timer for smooth rotation
         autoRotationTimer = Timer.scheduledTimer(withTimeInterval: 1.0/30.0, repeats: true) { _ in
+            // Pause auto-rotation if MPR is actively scrolling (performance priority)
+            if sharedState.isActivelyScrollingMPR {
+                return  // Skip rotation update to free up CPU for MPR
+            }
+            
             if isAutoRotating && !isDragging {
                 // Smooth continuous rotation
                 let newRotation = sharedState.rotation3D + autoRotationSpeed
