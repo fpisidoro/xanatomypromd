@@ -118,7 +118,8 @@ struct StandaloneMPRView: View, LoadableView {
                 roiData: dataCoordinator.roiData,
                 viewSize: viewSize,
                 allowInteraction: false,  // Gesture handling is separate
-                sharedState: sharedState
+                sharedState: sharedState,
+                volumeRenderer: dataCoordinator.getVolumeRenderer()  // ✅ NEW: Pass shared renderer
                 // REMOVED: scrollVelocity, isViewScrolling
             )
             .scaleEffect(viewState.zoom)

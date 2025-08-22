@@ -34,6 +34,9 @@ struct LayeredMPRView: View {
     /// Shared viewing state for quality control
     let sharedState: SharedViewingState?
     
+    /// ✅ NEW: Shared volume renderer from data coordinator
+    let volumeRenderer: MetalVolumeRenderer?
+    
     // REMOVED: scrollVelocity, isViewScrolling (priority system deleted)
     
     // MARK: - Initialization
@@ -48,7 +51,8 @@ struct LayeredMPRView: View {
         roiData: MinimalRTStructParser.SimpleRTStructData? = nil,
         viewSize: CGSize = CGSize(width: 512, height: 512),
         allowInteraction: Bool = true,
-        sharedState: SharedViewingState? = nil
+        sharedState: SharedViewingState? = nil,
+        volumeRenderer: MetalVolumeRenderer? = nil
     ) {
         self.coordinateSystem = coordinateSystem
         self.plane = plane
@@ -60,6 +64,7 @@ struct LayeredMPRView: View {
         self.viewSize = viewSize
         self.allowInteraction = allowInteraction
         self.sharedState = sharedState
+        self.volumeRenderer = volumeRenderer
     }
     
     // MARK: - Body
@@ -72,7 +77,8 @@ struct LayeredMPRView: View {
                 plane: plane,
                 windowLevel: windowLevel,
                 volumeData: volumeData,
-                sharedState: sharedState
+                sharedState: sharedState,
+                volumeRenderer: volumeRenderer
                 // REMOVED: scrollVelocity, isViewScrolling
             )
             
