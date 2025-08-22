@@ -4,8 +4,8 @@ import MetalKit
 import simd
 import Combine
 
-// MARK: - Standalone 3D View with Per-View Loading
-// 3D view manages its own loading state independently from MPR views
+// MARK: - Standalone 3D View with Optimized Rotation Performance
+// Optimized for minimal CPU usage during auto-rotation
 
 struct Standalone3DView: View, LoadableView {
     
@@ -27,12 +27,29 @@ struct Standalone3DView: View, LoadableView {
     @State private var isDragging: Bool = false
     @State private var lastCrosshairPosition: SIMD3<Float> = SIMD3<Float>(0, 0, 0)
     
-    // Auto-rotation state
+    // OPTIMIZED: Auto-rotation state with smart timer management
     @State private var autoRotationTimer: Timer?
     @State private var isAutoRotating: Bool = true
-    private let autoRotationSpeed: Float = 0.003  // radians per frame (~0.17° per frame, ~5° per second at 30fps)
+    @State private var shouldBeRotating: Bool = true  // Intent to rotate
+    @State private var lastRotationUpdate: Float = 0  // Track last rotation value
+    
+    // OPTIMIZED: Reduced frequency and increased speed
+    private let autoRotationSpeed: Float = 0.006  // Doubled speed (was 0.003)
+    private let rotationUpdateInterval: TimeInterval = 1.0/15.0  // 15fps instead of 30fps
+    private let rotationDeltaThreshold: Float = 0.001  // Skip tiny changes
     
     private let viewId = UUID().uuidString
+    
+    // MARK: - Computed Properties for Optimization
+    private var isInQuadView: Bool {
+        // Detect if we're in quad view based on view size or shared state
+        return viewSize.width < 300 || viewSize.height < 300
+    }
+    
+    private var renderScale: CGFloat {
+        // OPTIMIZED: Reduce render quality in quad view
+        return isInQuadView ? 0.75 : 1.0
+    }
     
     // MARK: - Initialization (Updated)
     init(
@@ -91,7 +108,7 @@ struct Standalone3DView: View, LoadableView {
         .background(.black)
         .onAppear {
             setupView()
-            startAutoRotation()
+            evaluateRotationState()
         }
         .onDisappear {
             cleanupView()
@@ -101,6 +118,19 @@ struct Standalone3DView: View, LoadableView {
             if newVolumeData != nil && loadingState.volumeDataReady == false {
                 Task {
                     await process3DData()
+                }
+            }
+        }
+        // OPTIMIZED: Smart timer management - restart/stop based on MPR scrolling
+        .onChange(of: sharedState.isActivelyScrollingMPR) { _, isScrolling in
+            if isScrolling {
+                stopAutoRotation()  // Completely stop timer
+            } else if shouldBeRotating && !isDragging {
+                // Restart after a small delay to ensure MPR is done
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    if !sharedState.isActivelyScrollingMPR && shouldBeRotating && !isDragging {
+                        startAutoRotation()
+                    }
                 }
             }
         }
@@ -119,7 +149,9 @@ struct Standalone3DView: View, LoadableView {
                     windowLevel: sharedState.windowLevel,
                     zoom: sharedState.zoom3D,
                     pan: sharedState.pan3D,
-                    showROI: sharedState.roiSettings.isVisible
+                    showROI: sharedState.roiSettings.isVisible,
+                    renderScale: renderScale,  // OPTIMIZED: Pass render scale
+                    rotationDeltaThreshold: rotationDeltaThreshold  // OPTIMIZED: Pass threshold
                 )
                 .clipped()
                 .onReceive(coordinateSystem.$currentWorldPosition) { newPosition in
@@ -135,7 +167,7 @@ struct Standalone3DView: View, LoadableView {
         .gesture(allowInteraction ? createGestureRecognizer() : nil)
     }
     
-    // MARK: - View Overlays (Updated)
+    // MARK: - View Overlays (Updated with Performance Indicator)
     private var viewLabelOverlay: some View {
         VStack {
             HStack {
@@ -150,6 +182,13 @@ struct Standalone3DView: View, LoadableView {
                         Circle()
                             .fill(Color.green)
                             .frame(width: 6, height: 6)
+                    }
+                    
+                    // OPTIMIZED: Performance mode indicator
+                    if isInQuadView {
+                        Text("Q")  // Quad mode indicator
+                            .font(.system(size: 8))
+                            .foregroundColor(.yellow)
                     }
                 }
                 .padding(4)
@@ -186,22 +225,27 @@ struct Standalone3DView: View, LoadableView {
             
             Spacer()
             
-            // 3D transformation status
+            // 3D transformation status with timer state
             HStack {
                 Spacer()
                 
                 VStack(alignment: .trailing, spacing: 2) {
                     HStack(spacing: 4) {
                         if sharedState.isActivelyScrollingMPR {
-                            // MPR has priority - show paused indicator
+                            // MPR has priority - timer stopped
                             Image(systemName: "pause.circle.fill")
                                 .font(.system(size: 8))
                                 .foregroundColor(.orange.opacity(0.8))
-                        } else if isAutoRotating {
-                            // Auto-rotating normally
+                        } else if autoRotationTimer != nil && isAutoRotating {
+                            // Timer active and rotating
                             Image(systemName: "arrow.triangle.2.circlepath")
                                 .font(.system(size: 8))
                                 .foregroundColor(.green.opacity(0.8))
+                        } else if !isAutoRotating {
+                            // Timer stopped, manual control
+                            Image(systemName: "hand.raised.fill")
+                                .font(.system(size: 8))
+                                .foregroundColor(.cyan.opacity(0.8))
                         }
                         Text("Rotation: \(String(format: "%.0f°", (sharedState.rotation3D * 180 / .pi).truncatingRemainder(dividingBy: 360)))")
                             .font(.caption2)
@@ -212,6 +256,13 @@ struct Standalone3DView: View, LoadableView {
                         Text("Zoom: \(String(format: "%.1fx", sharedState.zoom3D))")
                             .font(.caption2)
                             .foregroundColor(.yellow.opacity(0.8))
+                    }
+                    
+                    // OPTIMIZED: Show render quality in quad mode
+                    if isInQuadView {
+                        Text("Quality: 75%")
+                            .font(.system(size: 8))
+                            .foregroundColor(.gray.opacity(0.6))
                     }
                 }
                 .padding(4)
@@ -239,8 +290,6 @@ struct Standalone3DView: View, LoadableView {
     
     // MARK: - View Lifecycle
     private func setupView() {
-
-        
         // Start loading immediately
         startLoading()
         
@@ -256,6 +305,7 @@ struct Standalone3DView: View, LoadableView {
         // Initialize persistent state
         lastCrosshairPosition = coordinateSystem.currentWorldPosition
         dragStartRotation = sharedState.rotation3D
+        lastRotationUpdate = sharedState.rotation3D
         
         // If data is already available, start processing
         if dataCoordinator.volumeData != nil {
@@ -263,8 +313,6 @@ struct Standalone3DView: View, LoadableView {
                 await process3DData()
             }
         }
-        
-
     }
     
     private func cleanupView() {
@@ -272,31 +320,55 @@ struct Standalone3DView: View, LoadableView {
         stopAutoRotation()
     }
     
-    // MARK: - Auto-Rotation Methods
+    // MARK: - OPTIMIZED Auto-Rotation Methods
+    
+    private func evaluateRotationState() {
+        // Determine if we should start rotating
+        if shouldBeRotating && !isDragging && !sharedState.isActivelyScrollingMPR {
+            startAutoRotation()
+        }
+    }
     
     private func startAutoRotation() {
+        // OPTIMIZED: Only create timer if actually needed
+        guard shouldBeRotating && !isDragging && !sharedState.isActivelyScrollingMPR else {
+            return
+        }
+        
         // Clean up any existing timer
         stopAutoRotation()
         
-        // Create new timer for smooth rotation
-        autoRotationTimer = Timer.scheduledTimer(withTimeInterval: 1.0/30.0, repeats: true) { _ in
-            // Pause auto-rotation if MPR is actively scrolling (performance priority)
-            if sharedState.isActivelyScrollingMPR {
-                return  // Skip rotation update to free up CPU for MPR
+        isAutoRotating = true
+        
+        // OPTIMIZED: Create timer with reduced frequency (15fps instead of 30fps)
+        autoRotationTimer = Timer.scheduledTimer(withTimeInterval: rotationUpdateInterval, repeats: true) { [weak self] _ in
+            guard let self = self else {
+                self?.stopAutoRotation()
+                return
             }
             
-            if isAutoRotating && !isDragging {
-                // Smooth continuous rotation
-                let newRotation = sharedState.rotation3D + autoRotationSpeed
-                
-                // Keep rotation in reasonable range to avoid float overflow
-                let normalizedRotation = newRotation.truncatingRemainder(dividingBy: Float.pi * 2)
-                sharedState.update3DRotation(normalizedRotation)
+            // OPTIMIZED: Stop timer immediately if conditions change
+            if sharedState.isActivelyScrollingMPR || !isAutoRotating || isDragging {
+                self.stopAutoRotation()
+                return
+            }
+            
+            // OPTIMIZED: Batch state update with transaction
+            let rotationDelta = autoRotationSpeed
+            let newRotation = sharedState.rotation3D + rotationDelta
+            
+            // OPTIMIZED: Skip update if change is too small
+            if abs(newRotation - lastRotationUpdate) > rotationDeltaThreshold {
+                withTransaction(Transaction(animation: nil)) {
+                    sharedState.update3DRotation(newRotation.truncatingRemainder(dividingBy: Float.pi * 2))
+                }
+                lastRotationUpdate = newRotation
             }
         }
     }
     
     private func stopAutoRotation() {
+        // OPTIMIZED: Completely stop and deallocate timer
         autoRotationTimer?.invalidate()
         autoRotationTimer = nil
     }
@@ -332,8 +404,6 @@ struct Standalone3DView: View, LoadableView {
             // Stage 5: Complete
             completeLoading()
             
-
-            
         } catch {
             print("❌ 3D View: Loading failed - \(error)")
             loadingState.setError("Failed to load 3D: \(error.localizedDescription)")
@@ -341,34 +411,30 @@ struct Standalone3DView: View, LoadableView {
     }
     
     private func initialize3DRenderer(volumeData: VolumeData) async throws {
-        // Setup 3D volume in renderer
-        renderer.setupVolume(volumeData)
-
+        // Setup 3D volume in renderer with render scale consideration
+        renderer.setupVolume(volumeData, renderScale: renderScale)
     }
     
     private func compile3DShaders() async throws {
         // Simulate shader compilation time
-        // In real implementation, this would involve shader compilation
         try await Task.sleep(nanoseconds: 200_000_000) // 200ms for shader compilation
-
     }
     
     private func setup3DROI() async throws {
         if let roiData = dataCoordinator.roiData {
             try await Task.sleep(nanoseconds: 50_000_000) // Simulate setup time
             renderer.setupROI(roiData)
-
-        } else {
-
         }
     }
     
-    // MARK: - Gesture Handling (Unchanged)
+    // MARK: - Gesture Handling (Updated with better rotation control)
     private func createGestureRecognizer() -> some Gesture {
         let dragGesture = DragGesture()
             .onChanged { value in
                 // Stop auto-rotation when user interacts
                 isAutoRotating = false
+                shouldBeRotating = false  // User has taken control
+                stopAutoRotation()  // Stop timer immediately
                 
                 if !isDragging {
                     isDragging = true
@@ -380,7 +446,12 @@ struct Standalone3DView: View, LoadableView {
                 let rotationSensitivity: Float = -0.01  // Negative for intuitive control
                 let deltaX = Float(value.location.x - dragStartLocation.x)
                 let newRotation = dragStartRotation + deltaX * rotationSensitivity
-                sharedState.update3DRotation(newRotation)
+                
+                // OPTIMIZED: Only update if change is significant
+                if abs(newRotation - lastRotationUpdate) > rotationDeltaThreshold {
+                    sharedState.update3DRotation(newRotation)
+                    lastRotationUpdate = newRotation
+                }
             }
             .onEnded { _ in
                 isDragging = false
@@ -388,7 +459,9 @@ struct Standalone3DView: View, LoadableView {
                 // Resume auto-rotation after 3 seconds of no interaction
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                     if !self.isDragging {  // Double-check user isn't dragging again
+                        self.shouldBeRotating = true
                         self.isAutoRotating = true
+                        self.evaluateRotationState()  // Re-evaluate and start if appropriate
                     }
                 }
             }
@@ -397,6 +470,8 @@ struct Standalone3DView: View, LoadableView {
             .onChanged { value in
                 // Stop auto-rotation when zooming
                 isAutoRotating = false
+                shouldBeRotating = false
+                stopAutoRotation()
                 
                 let newZoom = max(0.5, min(3.0, value))
                 sharedState.update3DZoom(newZoom)
@@ -405,7 +480,9 @@ struct Standalone3DView: View, LoadableView {
                 // Resume auto-rotation after interaction
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                     if !self.isDragging {
+                        self.shouldBeRotating = true
                         self.isAutoRotating = true
+                        self.evaluateRotationState()
                     }
                 }
             }
@@ -414,7 +491,7 @@ struct Standalone3DView: View, LoadableView {
     }
 }
 
-// MARK: - Existing Metal3DVolumeRenderer and related components remain unchanged
+// MARK: - OPTIMIZED Metal3DVolumeRenderer
 @MainActor
 class Metal3DVolumeRenderer: ObservableObject {
     private var device: MTLDevice?
@@ -429,6 +506,9 @@ class Metal3DVolumeRenderer: ObservableObject {
     private var roiBuffer: MTLBuffer?
     private var roiCount: Int = 0
     private var roiData: MinimalRTStructParser.SimpleRTStructData?
+    
+    // OPTIMIZED: Render scale tracking
+    private var currentRenderScale: CGFloat = 1.0
     
     init() {
         setupMetal()
@@ -478,10 +558,11 @@ class Metal3DVolumeRenderer: ObservableObject {
         return copyPipelineState
     }
     
-    func setupVolume(_ volumeData: VolumeData) {
+    // OPTIMIZED: Accept render scale parameter
+    func setupVolume(_ volumeData: VolumeData, renderScale: CGFloat = 1.0) {
         guard let device = device else { return }
         
-
+        currentRenderScale = renderScale
         
         let textureDescriptor = MTLTextureDescriptor()
         textureDescriptor.textureType = .type3D
@@ -501,39 +582,28 @@ class Metal3DVolumeRenderer: ObservableObject {
             bytesPerRow: volumeData.dimensions.x * 2,
             bytesPerImage: volumeData.dimensions.x * volumeData.dimensions.y * 2
         )
-        
-
     }
     
     func setupROI(_ roiData: MinimalRTStructParser.SimpleRTStructData) {
         guard let device = device else { return }
         self.roiData = roiData
         
-        // For now, we'll handle the first ROI and its first contour
-        // In production, we'd create a more complex buffer structure for multiple ROIs
         guard let firstROI = roiData.roiStructures.first,
               !firstROI.contours.isEmpty else {
-
             return
         }
         
-        // Create a buffer with contour points for the shader
-        // We'll pack all contour points into a buffer with metadata
         var roiBufferData: [Float] = []
         
-        // Add ROI metadata: color and contour count
         roiBufferData.append(firstROI.displayColor.x)
         roiBufferData.append(firstROI.displayColor.y)
         roiBufferData.append(firstROI.displayColor.z)
         roiBufferData.append(Float(firstROI.contours.count))
         
-        // Add each contour's data
         for contour in firstROI.contours {
-            // Add contour metadata: slice position and point count
             roiBufferData.append(contour.slicePosition)
             roiBufferData.append(Float(contour.points.count))
             
-            // Add contour points (in world coordinates)
             for point in contour.points {
                 roiBufferData.append(point.x)
                 roiBufferData.append(point.y)
@@ -541,14 +611,12 @@ class Metal3DVolumeRenderer: ObservableObject {
             }
         }
         
-        // Create Metal buffer
         let bufferSize = roiBufferData.count * MemoryLayout<Float>.size
         roiBuffer = device.makeBuffer(bytes: roiBufferData, length: bufferSize, options: [])
         roiCount = firstROI.contours.count
-        
-
     }
     
+    // OPTIMIZED: Add render scale to render method
     func render(to texture: MTLTexture, 
                 rotationZ: Float,
                 crosshairPosition: SIMD3<Float>,
@@ -557,9 +625,8 @@ class Metal3DVolumeRenderer: ObservableObject {
                 windowLevel: CTWindowLevel,
                 zoom: CGFloat,
                 pan: CGSize,
-                showROI: Bool = false) {
-        
-
+                showROI: Bool = false,
+                renderScale: CGFloat = 1.0) {
         
         guard let commandQueue = commandQueue,
               let pipelineState = pipelineState,
@@ -569,11 +636,15 @@ class Metal3DVolumeRenderer: ObservableObject {
             return 
         }
         
+        // OPTIMIZED: Use scaled texture size for performance
+        let scaledWidth = Int(CGFloat(texture.width) * renderScale)
+        let scaledHeight = Int(CGFloat(texture.height) * renderScale)
+        
         // Create intermediate texture for compute shader output
         let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .bgra8Unorm,  // Match final texture format
-            width: texture.width,
-            height: texture.height,
+            pixelFormat: .bgra8Unorm,
+            width: scaledWidth,  // OPTIMIZED: Use scaled dimensions
+            height: scaledHeight,
             mipmapped: false
         )
         textureDescriptor.usage = [.shaderWrite, .shaderRead]
@@ -588,7 +659,7 @@ class Metal3DVolumeRenderer: ObservableObject {
         
         encoder.setComputePipelineState(pipelineState)
         encoder.setTexture(volumeTexture, index: 0)
-        encoder.setTexture(intermediateTexture, index: 1)  // Use intermediate texture
+        encoder.setTexture(intermediateTexture, index: 1)
         
         var params = Volume3DRenderParams(
             rotationZ: rotationZ,
@@ -600,22 +671,21 @@ class Metal3DVolumeRenderer: ObservableObject {
             zoom: Float(zoom),
             panX: Float(pan.width),
             panY: Float(pan.height),
-            displaySize: CGSize(width: texture.width, height: texture.height),
+            displaySize: CGSize(width: scaledWidth, height: scaledHeight),  // OPTIMIZED: Scaled size
             showROI: showROI ? 1.0 : 0.0,
             roiCount: Float(roiCount)
         )
         
         encoder.setBytes(&params, length: MemoryLayout<Volume3DRenderParams>.size, index: 0)
         
-        // Set ROI buffer if available
         if let roiBuffer = roiBuffer, showROI {
             encoder.setBuffer(roiBuffer, offset: 0, index: 1)
         }
         
         let threadsPerGroup = MTLSize(width: 8, height: 8, depth: 1)
         let groupsCount = MTLSize(
-            width: (texture.width + threadsPerGroup.width - 1) / threadsPerGroup.width,
-            height: (texture.height + threadsPerGroup.height - 1) / threadsPerGroup.height,
+            width: (scaledWidth + threadsPerGroup.width - 1) / threadsPerGroup.width,
+            height: (scaledHeight + threadsPerGroup.height - 1) / threadsPerGroup.height,
             depth: 1
         )
         
@@ -630,17 +700,15 @@ class Metal3DVolumeRenderer: ObservableObject {
         renderPassDescriptor.colorAttachments[0].storeAction = .store
         
         if let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
-            // Use simple copy render pass
             if let copyPipelineState = getCopyPipelineState() {
                 renderEncoder.setRenderPipelineState(copyPipelineState)
                 renderEncoder.setFragmentTexture(intermediateTexture, index: 0)
                 
-                // Draw fullscreen quad
                 let vertices: [Float] = [
-                    -1, -1, 0, 1,  // Bottom-left
-                     1, -1, 1, 1,  // Bottom-right
-                    -1,  1, 0, 0,  // Top-left
-                     1,  1, 1, 0   // Top-right
+                    -1, -1, 0, 1,
+                     1, -1, 1, 1,
+                    -1,  1, 0, 0,
+                     1,  1, 1, 0
                 ]
                 
                 renderEncoder.setVertexBytes(vertices, length: vertices.count * 4, index: 0)
@@ -654,7 +722,7 @@ class Metal3DVolumeRenderer: ObservableObject {
     }
 }
 
-// Simple struct without complex alignment issues
+// Volume3DRenderParams struct remains unchanged
 struct Volume3DRenderParams {
     let rotationZ: Float
     let windowCenter: Float
@@ -662,7 +730,7 @@ struct Volume3DRenderParams {
     let zoom: Float
     let panX: Float
     let panY: Float
-    let crosshairX: Float  // Actual crosshair position from MPR
+    let crosshairX: Float
     let crosshairY: Float
     let crosshairZ: Float
     let spacingX: Float
@@ -670,9 +738,9 @@ struct Volume3DRenderParams {
     let spacingZ: Float
     let displayWidth: Float
     let displayHeight: Float
-    let showROI: Float  // 1.0 if ROI should be shown, 0.0 otherwise
-    let roiCount: Float  // Number of ROI contours
-    let originX: Float  // Volume origin in world coordinates
+    let showROI: Float
+    let roiCount: Float
+    let originX: Float
     let originY: Float
     let originZ: Float
     
@@ -683,7 +751,6 @@ struct Volume3DRenderParams {
         self.zoom = zoom
         self.panX = panX
         self.panY = panY
-        // Convert world position to voxel coordinates for shader
         self.crosshairX = (crosshairPosition.x - volumeOrigin.x) / volumeSpacing.x
         self.crosshairY = (crosshairPosition.y - volumeOrigin.y) / volumeSpacing.y
         self.crosshairZ = (crosshairPosition.z - volumeOrigin.z) / volumeSpacing.z
@@ -700,6 +767,7 @@ struct Volume3DRenderParams {
     }
 }
 
+// OPTIMIZED: Updated Metal3DRenderView with improved render control
 struct Metal3DRenderView: UIViewRepresentable {
     let renderer: Metal3DVolumeRenderer
     let volumeData: VolumeData
@@ -710,15 +778,17 @@ struct Metal3DRenderView: UIViewRepresentable {
     let zoom: CGFloat
     let pan: CGSize
     let showROI: Bool
+    let renderScale: CGFloat  // OPTIMIZED: Accept render scale
+    let rotationDeltaThreshold: Float  // OPTIMIZED: Accept threshold
     
     func makeUIView(context: Context) -> MTKView {
         let mtkView = MTKView()
         mtkView.device = MTLCreateSystemDefaultDevice()
         mtkView.backgroundColor = UIColor.black
         mtkView.delegate = context.coordinator
-        mtkView.enableSetNeedsDisplay = true  // Manual render control
-        mtkView.isPaused = true  // ✅ FIX: Start paused, only render on demand
-        mtkView.preferredFramesPerSecond = 30  // Only when rendering
+        mtkView.enableSetNeedsDisplay = true
+        mtkView.isPaused = true  // Start paused, only render on demand
+        mtkView.preferredFramesPerSecond = 30
         return mtkView
     }
     
@@ -731,17 +801,16 @@ struct Metal3DRenderView: UIViewRepresentable {
             windowLevel: windowLevel,
             zoom: zoom,
             pan: pan,
-            showROI: showROI
+            showROI: showROI,
+            renderScale: renderScale,
+            rotationDeltaThreshold: rotationDeltaThreshold
         )
         
-        // ✅ FIX: Only render a single frame when parameters change
+        // Only render a single frame when parameters change significantly
         if hasChanges {
-            // Unpause briefly for single frame render
             uiView.isPaused = false
-            uiView.draw()  // Force immediate single frame render
-            uiView.isPaused = true  // Immediately re-pause - NO DELAY!
-            
-            // NO asyncAfter - we pause immediately!
+            uiView.draw()
+            uiView.isPaused = true
         }
     }
     
@@ -759,16 +828,18 @@ struct Metal3DRenderView: UIViewRepresentable {
         private var zoom: CGFloat = 1.0
         private var pan: CGSize = .zero
         private var showROI: Bool = false
+        private var renderScale: CGFloat = 1.0
+        private var rotationDeltaThreshold: Float = 0.001
         private var lastRenderTime: CFTimeInterval = 0
-        private var hasRenderedCurrentState: Bool = false  // ✅ NEW: Track if we've rendered current state
+        private var hasRenderedCurrentState: Bool = false
         
         init(renderer: Metal3DVolumeRenderer) {
             self.renderer = renderer
         }
         
-        func updateParams(rotationZ: Float, crosshairPosition: SIMD3<Float>, volumeOrigin: SIMD3<Float>, volumeSpacing: SIMD3<Float>, windowLevel: CTWindowLevel, zoom: CGFloat, pan: CGSize, showROI: Bool) -> Bool {
-            // ✅ FIX: More precise change detection with tolerance
-            let rotationChanged = abs(self.rotationZ - rotationZ) > 0.001
+        func updateParams(rotationZ: Float, crosshairPosition: SIMD3<Float>, volumeOrigin: SIMD3<Float>, volumeSpacing: SIMD3<Float>, windowLevel: CTWindowLevel, zoom: CGFloat, pan: CGSize, showROI: Bool, renderScale: CGFloat, rotationDeltaThreshold: Float) -> Bool {
+            // OPTIMIZED: More intelligent change detection
+            let rotationChanged = abs(self.rotationZ - rotationZ) > rotationDeltaThreshold
             let crosshairChanged = length(self.crosshairPosition - crosshairPosition) > 0.1
             let originChanged = length(self.volumeOrigin - volumeOrigin) > 0.1
             let spacingChanged = length(self.volumeSpacing - volumeSpacing) > 0.001
@@ -778,10 +849,11 @@ struct Metal3DRenderView: UIViewRepresentable {
             let panChanged = abs(self.pan.width - pan.width) > 0.5 || 
                             abs(self.pan.height - pan.height) > 0.5
             let roiChanged = self.showROI != showROI
+            let scaleChanged = abs(self.renderScale - renderScale) > 0.01
             
             let hasChanges = rotationChanged || crosshairChanged || originChanged || 
                            spacingChanged || windowChanged || zoomChanged || 
-                           panChanged || roiChanged
+                           panChanged || roiChanged || scaleChanged
             
             if hasChanges {
                 self.rotationZ = rotationZ
@@ -792,7 +864,9 @@ struct Metal3DRenderView: UIViewRepresentable {
                 self.zoom = zoom
                 self.pan = pan
                 self.showROI = showROI
-                self.hasRenderedCurrentState = false  // ✅ NEW: Mark as needing render
+                self.renderScale = renderScale
+                self.rotationDeltaThreshold = rotationDeltaThreshold
+                self.hasRenderedCurrentState = false
             }
             
             return hasChanges
@@ -803,14 +877,14 @@ struct Metal3DRenderView: UIViewRepresentable {
         func draw(in view: MTKView) {
             guard let drawable = view.currentDrawable else { return }
             
-            // ✅ FIX: Skip if we've already rendered current state
+            // Skip if already rendered current state
             if hasRenderedCurrentState {
                 return
             }
             
-            // Throttle rendering to avoid spam
+            // OPTIMIZED: Throttle rendering more aggressively
             let now = CACurrentMediaTime()
-            if now - lastRenderTime < 0.033 { // Max 30 FPS
+            if now - lastRenderTime < 0.066 { // Max 15 FPS for 3D view
                 return
             }
             lastRenderTime = now
@@ -824,15 +898,14 @@ struct Metal3DRenderView: UIViewRepresentable {
                 windowLevel: windowLevel,
                 zoom: zoom,
                 pan: pan,
-                showROI: showROI
+                showROI: showROI,
+                renderScale: renderScale  // OPTIMIZED: Pass render scale
             )
             
             drawable.present()
-            
-            // ✅ NEW: Mark as rendered
             hasRenderedCurrentState = true
             
-            // ✅ FIX: Auto-pause after render completes
+            // Auto-pause after render
             DispatchQueue.main.async {
                 view.isPaused = true
             }
