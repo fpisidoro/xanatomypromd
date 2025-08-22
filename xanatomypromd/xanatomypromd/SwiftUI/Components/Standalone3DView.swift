@@ -27,6 +27,11 @@ struct Standalone3DView: View, LoadableView {
     @State private var isDragging: Bool = false
     @State private var lastCrosshairPosition: SIMD3<Float> = SIMD3<Float>(0, 0, 0)
     
+    // Auto-rotation state
+    @State private var autoRotationTimer: Timer?
+    @State private var isAutoRotating: Bool = true
+    private let autoRotationSpeed: Float = 0.003  // radians per frame (~0.17° per frame, ~5° per second at 30fps)
+    
     private let viewId = UUID().uuidString
     
     // MARK: - Initialization (Updated)
@@ -86,9 +91,11 @@ struct Standalone3DView: View, LoadableView {
         .background(.black)
         .onAppear {
             setupView()
+            startAutoRotation()
         }
         .onDisappear {
             cleanupView()
+            stopAutoRotation()
         }
         .onChange(of: dataCoordinator.volumeData) { _, newVolumeData in
             if newVolumeData != nil && loadingState.volumeDataReady == false {
@@ -154,12 +161,21 @@ struct Standalone3DView: View, LoadableView {
                 // 3D controls indicator
                 if allowInteraction {
                     VStack(alignment: .trailing, spacing: 1) {
-                        Text("Drag: Rotate")
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.6))
-                        Text("Pinch: Zoom")
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.6))
+                        HStack(spacing: 2) {
+                            Image(systemName: "hand.draw")
+                                .font(.system(size: 8))
+                            Text("Drag to control")
+                        }
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.6))
+                        
+                        HStack(spacing: 2) {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 8))
+                            Text("Pinch to zoom")
+                        }
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.6))
                     }
                     .padding(4)
                     .background(Color.black.opacity(0.5))
@@ -175,10 +191,15 @@ struct Standalone3DView: View, LoadableView {
                 Spacer()
                 
                 VStack(alignment: .trailing, spacing: 2) {
-                    if abs(sharedState.rotation3D) > 0.1 {
-                        Text("Rotation: \(String(format: "%.0f°", sharedState.rotation3D * 180 / .pi))")
+                    HStack(spacing: 4) {
+                        if isAutoRotating {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 8))
+                                .foregroundColor(.green.opacity(0.8))
+                        }
+                        Text("Rotation: \(String(format: "%.0f°", (sharedState.rotation3D * 180 / .pi).truncatingRemainder(dividingBy: 360)))")
                             .font(.caption2)
-                            .foregroundColor(.cyan.opacity(0.8))
+                            .foregroundColor(isAutoRotating ? .green.opacity(0.8) : .cyan.opacity(0.8))
                     }
                     
                     if abs(sharedState.zoom3D - 1.0) > 0.1 {
@@ -242,7 +263,31 @@ struct Standalone3DView: View, LoadableView {
     
     private func cleanupView() {
         dataCoordinator.unregisterViewCallback(viewId: viewId)
-
+        stopAutoRotation()
+    }
+    
+    // MARK: - Auto-Rotation Methods
+    
+    private func startAutoRotation() {
+        // Clean up any existing timer
+        stopAutoRotation()
+        
+        // Create new timer for smooth rotation
+        autoRotationTimer = Timer.scheduledTimer(withTimeInterval: 1.0/30.0, repeats: true) { _ in
+            if isAutoRotating && !isDragging {
+                // Smooth continuous rotation
+                let newRotation = sharedState.rotation3D + autoRotationSpeed
+                
+                // Keep rotation in reasonable range to avoid float overflow
+                let normalizedRotation = newRotation.truncatingRemainder(dividingBy: Float.pi * 2)
+                sharedState.update3DRotation(normalizedRotation)
+            }
+        }
+    }
+    
+    private func stopAutoRotation() {
+        autoRotationTimer?.invalidate()
+        autoRotationTimer = nil
     }
     
     // MARK: - 3D Data Processing Pipeline
@@ -311,6 +356,9 @@ struct Standalone3DView: View, LoadableView {
     private func createGestureRecognizer() -> some Gesture {
         let dragGesture = DragGesture()
             .onChanged { value in
+                // Stop auto-rotation when user interacts
+                isAutoRotating = false
+                
                 if !isDragging {
                     isDragging = true
                     dragStartLocation = value.startLocation
@@ -325,12 +373,30 @@ struct Standalone3DView: View, LoadableView {
             }
             .onEnded { _ in
                 isDragging = false
+                
+                // Resume auto-rotation after 3 seconds of no interaction
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    if !self.isDragging {  // Double-check user isn't dragging again
+                        self.isAutoRotating = true
+                    }
+                }
             }
         
         let magnificationGesture = MagnificationGesture()
             .onChanged { value in
+                // Stop auto-rotation when zooming
+                isAutoRotating = false
+                
                 let newZoom = max(0.5, min(3.0, value))
                 sharedState.update3DZoom(newZoom)
+            }
+            .onEnded { _ in
+                // Resume auto-rotation after interaction
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    if !self.isDragging {
+                        self.isAutoRotating = true
+                    }
+                }
             }
         
         return dragGesture.simultaneously(with: magnificationGesture)
