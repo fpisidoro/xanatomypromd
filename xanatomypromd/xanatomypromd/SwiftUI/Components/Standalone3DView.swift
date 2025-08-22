@@ -341,15 +341,10 @@ struct Standalone3DView: View, LoadableView {
         isAutoRotating = true
         
         // OPTIMIZED: Create timer with reduced frequency (15fps instead of 30fps)
-        autoRotationTimer = Timer.scheduledTimer(withTimeInterval: rotationUpdateInterval, repeats: true) { [weak self] _ in
-            guard let self = self else {
-                self?.stopAutoRotation()
-                return
-            }
-            
+        autoRotationTimer = Timer.scheduledTimer(withTimeInterval: rotationUpdateInterval, repeats: true) { [self] _ in
             // OPTIMIZED: Stop timer immediately if conditions change
             if sharedState.isActivelyScrollingMPR || !isAutoRotating || isDragging {
-                self.stopAutoRotation()
+                stopAutoRotation()
                 return
             }
             
