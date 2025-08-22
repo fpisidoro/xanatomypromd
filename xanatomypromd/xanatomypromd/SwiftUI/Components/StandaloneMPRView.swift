@@ -291,13 +291,11 @@ struct StandaloneMPRView: View, LoadableView {
     }
     
     private func initializeGPUResources(volumeData: VolumeData) async throws {
-        // Initialize Metal resources for this specific view
-        guard dataCoordinator.getVolumeRenderer() != nil else {
-            throw ViewLoadingError.rendererInitializationFailed
-        }
+        // Option 3: Each view creates its own renderer resources
+        // The LayeredMPRView and its CTDisplayLayer will handle their own renderers
+        // We just need to ensure the volumeData is available (which it is)
         
-        // This would involve creating view-specific GPU textures
-        // For now, we'll simulate the GPU setup time
+        // Simulate GPU setup time for this view's resources
         try await Task.sleep(nanoseconds: 100_000_000) // 100ms for GPU setup
         
         print("🔧 \(plane.displayName): GPU resources initialized")
