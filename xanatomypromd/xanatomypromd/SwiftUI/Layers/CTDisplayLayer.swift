@@ -257,19 +257,10 @@ struct CTDisplayLayer: UIViewRepresentable {
                 needsRender = true  // ✅ NEW: Mark as needing render
             }
             
-            // Load volume data into individual renderer if provided
+            // ✅ FIX: Don't reload volume - shared renderer already has it loaded
+            // Just track that we have volume data available
             if let volumeData = volumeData {
-                if currentVolumeData == nil {
-                    do {
-                        try volumeRenderer?.loadVolume(volumeData)
-                        self.currentVolumeData = volumeData
-                    needsRender = true  // ✅ NEW: Mark as needing render
-                    } catch {
-                        print("❌ Failed to load volume: \(error)")
-                    }
-                } else {
-                    self.currentVolumeData = volumeData
-                }
+                self.currentVolumeData = volumeData
             }
         }
         
