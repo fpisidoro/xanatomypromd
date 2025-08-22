@@ -25,9 +25,6 @@ struct CTDisplayLayer: UIViewRepresentable {
     /// Shared viewing state for quality control
     let sharedState: SharedViewingState?
     
-    /// ✅ NEW: Shared volume renderer from ViewDataCoordinator
-    let volumeRenderer: MetalVolumeRenderer?
-    
     // REMOVED: scrollVelocity, isViewScrolling (priority system deleted)
     
     // MARK: - UIViewRepresentable Implementation
@@ -55,8 +52,7 @@ struct CTDisplayLayer: UIViewRepresentable {
                 plane: plane,
                 windowLevel: windowLevel,
                 volumeData: volumeData,
-                sharedState: sharedState,
-                volumeRenderer: volumeRenderer
+                sharedState: sharedState
             )
             
             // ✅ FIX: Unpause briefly for render, then re-pause
@@ -78,7 +74,7 @@ struct CTDisplayLayer: UIViewRepresentable {
     
     class Coordinator: NSObject, MTKViewDelegate {
         
-        // ✅ CHANGED: Now uses shared renderer instead of creating its own
+        // Individual MetalVolumeRenderer per view (restored)
         private var volumeRenderer: MetalVolumeRenderer?
         private var displayPipelineState: MTLRenderPipelineState?
         
@@ -108,8 +104,16 @@ struct CTDisplayLayer: UIViewRepresentable {
         
         override init() {
             super.init()
-            // ✅ REMOVED: setupRenderer() - no longer creates its own
+            setupRenderer()
             setupDisplayPipeline()
+        }
+        
+        private func setupRenderer() {
+            do {
+                volumeRenderer = try MetalVolumeRenderer()
+            } catch {
+                print("❌ Failed to create MetalVolumeRenderer: \(error)")
+            }
         }
         
         private func setupDisplayPipeline() {
@@ -227,8 +231,7 @@ struct CTDisplayLayer: UIViewRepresentable {
             plane: MPRPlane,
             windowLevel: CTWindowLevel,
             volumeData: VolumeData?,
-            sharedState: SharedViewingState?,
-            volumeRenderer: MetalVolumeRenderer?
+            sharedState: SharedViewingState?
         ) {
             // Store previous state for smart cache management
             let previousPlane = currentPlane
@@ -237,7 +240,6 @@ struct CTDisplayLayer: UIViewRepresentable {
             self.currentCoordinateSystem = coordinateSystem
             self.currentPlane = plane
             self.currentWindowLevel = windowLevel
-            self.volumeRenderer = volumeRenderer  // ✅ NEW: Use shared renderer
             
             // SMART CACHE: Only clear cache when necessary
             var shouldClearCache = false
@@ -257,10 +259,18 @@ struct CTDisplayLayer: UIViewRepresentable {
                 needsRender = true  // ✅ NEW: Mark as needing render
             }
             
-            // ✅ FIX: Don't reload volume - shared renderer already has it loaded
-            // Just track that we have volume data available
+            // Option 3: Use shared VolumeData with individual renderer
             if let volumeData = volumeData {
-                self.currentVolumeData = volumeData
+                if currentVolumeData == nil || currentVolumeData !== volumeData {
+                    do {
+                        try volumeRenderer?.loadVolume(volumeData)
+                        self.currentVolumeData = volumeData
+                        needsRender = true
+                        print("✅ CTDisplayLayer[\(plane.rawValue)]: Using shared VolumeData")
+                    } catch {
+                        print("❌ Failed to load volume: \(error)")
+                    }
+                }
             }
         }
         

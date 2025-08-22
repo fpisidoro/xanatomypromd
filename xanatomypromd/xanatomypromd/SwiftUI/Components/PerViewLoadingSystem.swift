@@ -287,20 +287,8 @@ class ViewDataCoordinator: ObservableObject {
     // Per-view data readiness tracking
     private var viewCallbacks: [String: (Bool) -> Void] = [:]
     
-    private var volumeRenderer: MetalVolumeRenderer?
-    
-    init() {
-        setupVolumeRenderer()
-    }
-    
-    private func setupVolumeRenderer() {
-        do {
-            volumeRenderer = try MetalVolumeRenderer()
-            // Renderer initialized successfully
-        } catch {
-            print("❌ ViewDataCoordinator: Failed to initialize MetalVolumeRenderer: \(error)")
-        }
-    }
+    // REMOVED: Shared renderer - each view creates its own
+    // Option 3: Share VolumeData only, not renderers
     
     func loadAllData() async {
         await loadVolumeData()
@@ -342,12 +330,20 @@ class ViewDataCoordinator: ObservableObject {
             
             volumeLoadingProgress = 0.25
             
-            if let renderer = volumeRenderer {
-                let loadedVolumeData = try await renderer.loadVolumeFromDICOMFiles(dicomFiles)
-                volumeData = loadedVolumeData
-                volumeLoadingProgress = 1.0
-                // Volume data loaded for all views
+            // Option 3: Load VolumeData directly without shared renderer
+            var datasets: [(DICOMDataset, Int)] = []
+            
+            for (index, fileURL) in dicomFiles.enumerated() {
+                let data = try Data(contentsOf: fileURL)
+                let dataset = try DICOMParser.parse(data)
+                datasets.append((dataset, index))
             }
+            
+            // Create volume from datasets
+            let loadedVolumeData = try VolumeData(from: datasets)
+            volumeData = loadedVolumeData
+            volumeLoadingProgress = 1.0
+            print("✅ ViewDataCoordinator: Shared VolumeData loaded (\(loadedVolumeData.dimensions))")
             
         } catch {
             print("❌ Failed to load volume data: \(error)")
@@ -400,9 +396,7 @@ class ViewDataCoordinator: ObservableObject {
         }
     }
     
-    func getVolumeRenderer() -> MetalVolumeRenderer? {
-        return volumeRenderer
-    }
+    // REMOVED: getVolumeRenderer() - each view manages its own renderer
     
     // MARK: - File Discovery (copied from XAnatomyDataManager)
     
